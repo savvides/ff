@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional
 from ff.contracts import Lineup, LineupSlot, Roster
 
 # Which positions may fill each starting slot. Anything not here (BN/IR/TAXI or
-# unknown) is not a starting slot.
+# unknown) is not a starting slot. The standard slots below are laminar, so the
+# greedy assignment is optimal. WRRB_FLEX + REC_FLEX overlap non-laminarly; a
+# league running BOTH at once gets a good-but-not-guaranteed-optimal lineup.
 SLOT_ELIGIBILITY: Dict[str, set] = {
     "QB": {"QB"},
     "RB": {"RB"},
