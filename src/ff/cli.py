@@ -203,6 +203,7 @@ def roster(
     console.print(t)
     if val.unvalued:
         console.print(f"[dim]{len(val.unvalued)} unvalued (K/DEF/deep bench) not shown.[/]")
+    console.print("[dim]value counts rostered players only, not your draft picks.[/]")
 
 
 def _pick_roster(rosters: List[Roster], team: Optional[str],
@@ -243,6 +244,8 @@ def power() -> None:
                   f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
                   f"{r.points_for:.0f}")
     console.print(t)
+    console.print("[dim]value = rostered players only; draft picks are not counted, "
+                  "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
 
 
 # --- values / rankings ---------------------------------------------------
