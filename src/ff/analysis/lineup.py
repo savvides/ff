@@ -35,24 +35,22 @@ SLOT_ELIGIBILITY: Dict[str, set] = {
 }
 
 
-def project_points(stats: Dict[str, Any], scoring: Dict[str, Any],
-                   position: Optional[str]) -> float:
+def project_points(stats: Dict[str, Any], scoring: Dict[str, Any]) -> float:
     """Fantasy points for one projected stat line under the league's scoring.
 
-    Every stat key present in both the projection and the scoring settings is
-    multiplied through; TEP (`bonus_rec_te`) is added on top for tight ends
-    because it is not a stat key, just a per-reception bonus.
+    Purely data-driven: multiply every stat key the league scores by its weight.
+    This already covers position bonuses, because Sleeper's projection exposes
+    them as their own stat keys - `bonus_rec_te` (TE premium), `bonus_rec_wr`,
+    `bonus_pass_yd_300`, etc. - each equal to the count it applies to. Do NOT add
+    TEP separately: the projection's `bonus_rec_te` stat already carries it, so a
+    manual bonus would double-count. Verified against Sleeper's own
+    `pts_half_ppr` (WR/TE/K match to the cent).
     """
     pts = 0.0
     for key, value in stats.items():
         weight = scoring.get(key)
         if weight is not None and isinstance(value, (int, float)):
             pts += value * weight
-    if position == "TE":
-        tep = scoring.get("bonus_rec_te")
-        rec = stats.get("rec")
-        if tep and isinstance(rec, (int, float)):
-            pts += tep * rec
     return round(pts, 2)
 
 
@@ -70,7 +68,7 @@ def projected_points(roster: Roster, projections: Dict[str, Dict[str, Any]],
         out[pid] = {
             "name": name,
             "position": pos,
-            "points": project_points(projections.get(pid, {}), scoring, pos),
+            "points": project_points(projections.get(pid, {}), scoring),
         }
     return out
 

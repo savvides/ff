@@ -13,19 +13,20 @@ SCORING = {
 
 def test_project_points_half_ppr():
     # WR: 6 rec * 0.5 + 90 yd * 0.1 + 1 td * 6 = 3 + 9 + 6 = 18
-    assert project_points({"rec": 6, "rec_yd": 90, "rec_td": 1}, SCORING, "WR") == 18.0
+    assert project_points({"rec": 6, "rec_yd": 90, "rec_td": 1}, SCORING) == 18.0
 
 
-def test_tep_adds_bonus_for_te_only():
-    line = {"rec": 6, "rec_yd": 90, "rec_td": 1}
-    wr = project_points(line, SCORING, "WR")
-    te = project_points(line, SCORING, "TE")
-    assert te == wr + 3.0  # 0.5 TEP * 6 receptions
+def test_tep_comes_from_bonus_stat_key_and_is_not_doubled():
+    # Sleeper provides bonus_rec_te as its own stat (= TE reception count); the
+    # generic loop applies it exactly once. A manual TEP would double-count.
+    base = {"rec": 6, "rec_yd": 90, "rec_td": 1}
+    assert project_points(base, SCORING) == 18.0                         # no bonus key, no TEP
+    assert project_points({**base, "bonus_rec_te": 6}, SCORING) == 21.0  # +0.5*6, once
 
 
 def test_qb_passing_score():
     # 300 yd * 0.04 + 3 td * 4 - 1 int * 2 = 12 + 12 - 2 = 22
-    assert project_points({"pass_yd": 300, "pass_td": 3, "pass_int": 1}, SCORING, "QB") == 22.0
+    assert project_points({"pass_yd": 300, "pass_td": 3, "pass_int": 1}, SCORING) == 22.0
 
 
 def _meta(**pos):
@@ -43,7 +44,7 @@ def test_optimal_lineup_fills_superflex_with_second_qb():
         "rb2": {"rush_yd": 50},                  # 5
         "wr1": {"rec": 8, "rec_yd": 120, "rec_td": 1},  # 22
         "wr2": {"rec": 4, "rec_yd": 40},         # 6
-        "te1": {"rec": 5, "rec_yd": 60},         # 2.5+6 + TEP 2.5 = 11
+        "te1": {"rec": 5, "rec_yd": 60, "bonus_rec_te": 5},  # 2.5+6 + TEP 0.5*5 = 11
     }
     meta = _meta(qb1="QB", qb2="QB", rb1="RB", rb2="RB", wr1="WR", wr2="WR", te1="TE")
     positions = ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"]
@@ -63,3 +64,13 @@ def test_projected_points_map():
                             SCORING, {"wr1": {"position": "WR", "full_name": "WR One"}})
     assert info["wr1"]["points"] == 18.0
     assert info["wr1"]["name"] == "WR One"
+
+
+def test_te_premium_via_projected_points_is_not_doubled():
+    # End-to-end through projected_points: a TE with a bonus_rec_te stat gets the
+    # premium exactly once (regression guard for the old manual-TEP double-count).
+    roster = Roster(roster_id=1, player_ids=["te1"], starters=["te1"])
+    stats = {"te1": {"rec": 6, "rec_yd": 90, "rec_td": 1, "bonus_rec_te": 6}}
+    meta = {"te1": {"position": "TE", "full_name": "TE One"}}
+    info = projected_points(roster, stats, SCORING, meta)
+    assert info["te1"]["points"] == 21.0  # 18 base + 0.5*6, not 24
