@@ -55,6 +55,16 @@ def test_use_cache_false_always_live_and_never_writes():
 
 
 @responses.activate
+def test_corrupt_cache_refetches_instead_of_raising():
+    responses.add(responses.GET, URL, json={"v": 1}, status=200)
+    responses.add(responses.GET, URL, json={"v": 2}, status=200)
+    assert get_json(URL, ttl=100) == {"v": 1}
+    http._cache_file(URL, None).write_text("{ not valid json")  # corrupt it
+    assert get_json(URL, ttl=100) == {"v": 2}  # silently refetched, no raise
+    assert len(responses.calls) == 2
+
+
+@responses.activate
 def test_distinct_params_distinct_cache_files():
     responses.add(responses.GET, URL, json={"v": "a"}, status=200)
     responses.add(responses.GET, URL, json={"v": "b"}, status=200)

@@ -2,15 +2,18 @@
 
 Two pure pieces:
   * project_points(): score a projected stat line with the league's
-    scoring_settings, including TEP (a TE-only per-reception bonus that is not a
-    stat key, so it is applied explicitly).
+    scoring_settings. Position bonuses (TEP via `bonus_rec_te`, `bonus_rec_wr`,
+    ...) arrive as their own stat keys, so scoring is fully data-driven.
   * optimal_lineup(): assign rostered players to starting slots to maximize
     projected points.
 
-Why the greedy assignment is correct: standard slot eligibility
-(QB/RB/WR/TE/FLEX/SUPER_FLEX) is laminar - any two eligibility sets are either
-disjoint or nested. Filling the most restrictive slots first, each taking the
-best eligible player left, is optimal for a laminar family (exchange argument).
+Why the greedy assignment is correct: the supported slots
+(QB/RB/WR/TE/K/DEF/FLEX/SUPER_FLEX) form a laminar family - any two eligibility
+sets are disjoint or nested - so filling the most restrictive slot first, each
+taking the best eligible player left, is provably optimal (exchange argument).
+Non-laminar overlapping flexes (WRRB_FLEX + REC_FLEX together) are deliberately
+NOT supported, because greedy can be suboptimal for them; such slots are
+reported in `Lineup.unsupported_slots` rather than silently mis-filled.
 """
 
 from __future__ import annotations
@@ -19,10 +22,11 @@ from typing import Any, Dict, List, Optional
 
 from ff.contracts import Lineup, LineupSlot, Roster
 
-# Which positions may fill each starting slot. Anything not here (BN/IR/TAXI or
-# unknown) is not a starting slot. The standard slots below are laminar, so the
-# greedy assignment is optimal. WRRB_FLEX + REC_FLEX overlap non-laminarly; a
-# league running BOTH at once gets a good-but-not-guaranteed-optimal lineup.
+# Which positions may fill each starting slot. This set is intentionally laminar
+# (every pair of eligibility sets is disjoint or nested) so the greedy assignment
+# is optimal. Overlapping flexes like WRRB_FLEX {RB,WR} and REC_FLEX {WR,TE} are
+# deliberately omitted: together they are non-laminar and greedy can be wrong, so
+# they are surfaced as unsupported instead of silently mis-filled.
 SLOT_ELIGIBILITY: Dict[str, set] = {
     "QB": {"QB"},
     "RB": {"RB"},
@@ -31,10 +35,11 @@ SLOT_ELIGIBILITY: Dict[str, set] = {
     "K": {"K"},
     "DEF": {"DEF"},
     "FLEX": {"RB", "WR", "TE"},
-    "WRRB_FLEX": {"RB", "WR"},
-    "REC_FLEX": {"WR", "TE"},
     "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
 }
+
+# Roster spots that are not starting slots at all.
+BENCH_SLOTS = {"BN", "IR", "TAXI"}
 
 
 def project_points(stats: Dict[str, Any], scoring: Dict[str, Any]) -> float:
@@ -81,6 +86,9 @@ def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
                    season: str = "", week: int = 0) -> Lineup:
     info = projected_points(roster, projections, scoring, players_meta)
     starting = [s for s in roster_positions if s in SLOT_ELIGIBILITY]
+    # Starting-slot-shaped tokens we don't optimize (e.g. WRRB_FLEX, IDP slots).
+    unsupported = [s for s in roster_positions
+                   if s not in SLOT_ELIGIBILITY and s not in BENCH_SLOTS]
 
     # Fill the most restrictive slots first (fewest eligible positions).
     order = sorted(range(len(starting)), key=lambda i: len(SLOT_ELIGIBILITY[starting[i]]))
@@ -116,4 +124,5 @@ def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
         for pid, d in sorted(info.items(), key=lambda kv: kv[1]["points"], reverse=True)
         if pid not in used
     ]
-    return Lineup(slots=slots, bench=bench, season=str(season), week=week)
+    return Lineup(slots=slots, bench=bench, season=str(season), week=week,
+                  unsupported_slots=unsupported)

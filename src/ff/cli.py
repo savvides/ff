@@ -437,6 +437,10 @@ def lineup(
     for s in lu.slots:
         t.add_row(s.slot, s.name, s.position or "-", f"{s.points:g}")
     console.print(t)
+    if lu.unsupported_slots:
+        console.print(f"[bold yellow]note:[/] this league uses slots the optimizer "
+                      f"can't place optimally ({', '.join(sorted(set(lu.unsupported_slots)))}); "
+                      f"they're left out of the lineup above.")
 
     # Start/sit advice vs the lineup currently set on Sleeper.
     optimal_ids = {s.player_id for s in lu.slots if s.player_id}

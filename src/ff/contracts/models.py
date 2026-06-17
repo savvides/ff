@@ -161,6 +161,9 @@ class Lineup(BaseModel):
     bench: List[LineupSlot] = Field(default_factory=list)
     season: str = ""
     week: int = 0
+    # Starting slots the optimizer does not support (non-laminar flexes, IDP, ...).
+    # Surfaced so the lineup is never silently wrong for those leagues.
+    unsupported_slots: List[str] = Field(default_factory=list)
 
     @property
     def total(self) -> float:

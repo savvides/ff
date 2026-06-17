@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -67,6 +68,14 @@ def _fresh(path: Path, ttl: Optional[float]) -> bool:
     return (time.time() - path.stat().st_mtime) < ttl
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a temp file + os.replace so a crash mid-write never leaves a
+    truncated/corrupt cache entry behind."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def get_json(
     url: str,
     params: Optional[Dict[str, Any]] = None,
@@ -85,12 +94,17 @@ def get_json(
     # (cache forever) and False for ttl=0 (force live). Guarding on `and ttl`
     # here would wrongly skip the cache when ttl is None.
     if use_cache and _fresh(cache_path, ttl):
-        return json.loads(cache_path.read_text())
+        try:
+            return json.loads(cache_path.read_text())
+        except (ValueError, OSError):
+            # A corrupt/unreadable cache entry must not surface as an error
+            # (it would be misreported as a bad config). Ignore it and refetch.
+            pass
 
     resp = _session().get(url, params=params, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
 
     if use_cache:
-        cache_path.write_text(json.dumps(data))
+        _atomic_write(cache_path, json.dumps(data))
     return data

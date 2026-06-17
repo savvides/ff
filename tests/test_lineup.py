@@ -58,6 +58,25 @@ def test_optimal_lineup_fills_superflex_with_second_qb():
     assert {b.player_id for b in lu.bench} == {"rb2"}  # lowest projection sits
 
 
+def test_non_laminar_flex_slots_are_flagged_not_misfilled():
+    # WRRB_FLEX + REC_FLEX overlap non-laminarly; greedy could be wrong, so they
+    # are reported as unsupported instead of silently mis-filled.
+    roster = Roster(roster_id=1, player_ids=["rb1", "wr1", "te1"], starters=[])
+    proj = {"rb1": {"rush_yd": 90}, "wr1": {"rec": 10, "rec_yd": 100}, "te1": {"rec": 3}}
+    meta = _meta(rb1="RB", wr1="WR", te1="TE")
+    lu = optimal_lineup(roster, proj, SCORING, ["WRRB_FLEX", "REC_FLEX", "BN"], meta)
+    assert lu.slots == []
+    assert set(lu.unsupported_slots) == {"WRRB_FLEX", "REC_FLEX"}
+
+
+def test_standard_slots_have_no_unsupported():
+    roster = Roster(roster_id=1, player_ids=["wr1"], starters=["wr1"])
+    meta = _meta(wr1="WR")
+    lu = optimal_lineup(roster, {"wr1": {"rec": 5}}, SCORING,
+                        ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"], meta)
+    assert lu.unsupported_slots == []
+
+
 def test_projected_points_map():
     roster = Roster(roster_id=1, player_ids=["wr1"], starters=["wr1"])
     info = projected_points(roster, {"wr1": {"rec": 6, "rec_yd": 90, "rec_td": 1}},

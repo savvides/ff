@@ -11,3 +11,6 @@ dist/
 
 # Recorded real-league snapshots (personal data)
 samples/
+
+# Codex consult session id (machine-local)
+.context/
