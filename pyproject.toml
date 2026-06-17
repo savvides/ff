@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ff"
+version = "0.1.0"
+description = "Manage a Sleeper dynasty fantasy football league with free data - a FantasyPros replacement."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+    "pydantic>=2,<3",
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "responses>=0.25",
+]
+
+[project.scripts]
+ff = "ff.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Gate suite excludes `live` by default; run `pytest -m live` to hit real APIs.
+addopts = "-q -m 'not live'"
+# Gate tests are deterministic and offline. Anything hitting the network is
+# marked `live` and excluded by default; run with `-m live` to opt in.
+markers = [
+    "live: hits real Sleeper/FantasyCalc APIs (excluded from the gate suite)",
+]

@@ -1,0 +1,9 @@
+{
+  "league_id": "LG1",
+  "name": "Test Dynasty",
+  "season": "2026",
+  "total_rosters": 12,
+  "roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX", "BN", "BN", "BN", "BN"],
+  "scoring_settings": {"rec": 1.0, "bonus_rec_te": 0.5},
+  "settings": {"type": 2}
+}

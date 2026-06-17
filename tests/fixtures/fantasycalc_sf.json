@@ -1,0 +1,12 @@
+[
+  {"player": {"id": 1, "name": "Ja'Marr Chase", "sleeperId": "7564", "position": "WR", "maybeTeam": "CIN", "maybeAge": 26.0}, "value": 9500, "overallRank": 1, "positionRank": 1, "trend30Day": 120, "redraftValue": 9800},
+  {"player": {"id": 2, "name": "Jahmyr Gibbs", "sleeperId": "9221", "position": "RB", "maybeTeam": "DET", "maybeAge": 24.0}, "value": 8000, "overallRank": 2, "positionRank": 1, "trend30Day": 300, "redraftValue": 8200},
+  {"player": {"id": 3, "name": "Josh Allen", "sleeperId": "4984", "position": "QB", "maybeTeam": "BUF", "maybeAge": 30.0}, "value": 7000, "overallRank": 5, "positionRank": 1, "trend30Day": -50, "redraftValue": 7600},
+  {"player": {"id": 4, "name": "Bijan Robinson", "sleeperId": "8138", "position": "RB", "maybeTeam": "ATL", "maybeAge": 24.0}, "value": 9000, "overallRank": 3, "positionRank": 2, "trend30Day": 80, "redraftValue": 9100},
+  {"player": {"id": 5, "name": "Rome Odunze", "sleeperId": "5555", "position": "WR", "maybeTeam": "CHI", "maybeAge": 24.0}, "value": 4500, "overallRank": 20, "positionRank": 8, "trend30Day": 200, "redraftValue": 3800},
+  {"player": {"id": 6, "name": "Brock Bowers", "sleeperId": "6666", "position": "TE", "maybeTeam": "LV", "maybeAge": 23.0}, "value": 6000, "overallRank": 10, "positionRank": 1, "trend30Day": 150, "redraftValue": 5500},
+  {"player": {"id": 100, "name": "2026 Pick 1.05", "sleeperId": null, "position": "PICK"}, "value": 3500, "overallRank": 25, "positionRank": 5, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 101, "name": "2026 1st", "sleeperId": null, "position": "PICK"}, "value": 4000, "overallRank": 18, "positionRank": 3, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 102, "name": "2027 1st", "sleeperId": null, "position": "PICK"}, "value": 3000, "overallRank": 30, "positionRank": 6, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 103, "name": "2026 2nd", "sleeperId": null, "position": "PICK"}, "value": 1500, "overallRank": 60, "positionRank": 12, "trend30Day": 0, "redraftValue": 0}
+]

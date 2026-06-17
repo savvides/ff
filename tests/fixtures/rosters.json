@@ -1,0 +1,5 @@
+[
+  {"roster_id": 1, "owner_id": "userA", "players": ["7564", "9221", "9999"], "starters": ["7564", "9221"], "settings": {"wins": 8, "losses": 5, "ties": 0, "fpts": 1500, "fpts_decimal": 45}},
+  {"roster_id": 2, "owner_id": "userB", "players": ["4984", "8138", "6666"], "starters": ["4984", "8138", "6666"], "settings": {"wins": 6, "losses": 7, "ties": 0, "fpts": 1400, "fpts_decimal": 10}},
+  {"roster_id": 3, "owner_id": "userC", "players": ["8888"], "starters": ["8888"], "settings": {"wins": 3, "losses": 10, "ties": 0, "fpts": 1200, "fpts_decimal": 0}}
+]

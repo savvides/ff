@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Gate: run the deterministic, offline test suite before every commit.
+# Enable with: git config core.hooksPath .githooks   (or `make hooks`).
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="python3"
+echo "[pre-commit] running gate tests (offline)…"
+"$PY" -m pytest -q -m "not live"
