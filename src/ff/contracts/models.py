@@ -142,3 +142,26 @@ class WaiverTarget(BaseModel):
     asset: Asset
     add_count: int = 0  # how many Sleeper users added in the trending window
     is_rostered: bool = False  # taken somewhere in *this* league?
+
+
+class LineupSlot(BaseModel):
+    """One starting slot (or a bench entry) with its projected player."""
+
+    slot: str  # QB / RB / WR / TE / FLEX / SUPER_FLEX / BN ...
+    player_id: Optional[str] = None
+    name: str = "(empty)"
+    position: Optional[str] = None
+    points: float = 0.0
+
+
+class Lineup(BaseModel):
+    """An optimal starting lineup for one week plus the leftover bench."""
+
+    slots: List[LineupSlot] = Field(default_factory=list)
+    bench: List[LineupSlot] = Field(default_factory=list)
+    season: str = ""
+    week: int = 0
+
+    @property
+    def total(self) -> float:
+        return round(sum(s.points for s in self.slots), 2)

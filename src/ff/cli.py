@@ -26,7 +26,9 @@ from rich.table import Table
 from ff import __version__
 from ff.analysis import (
     analyze_trade,
+    optimal_lineup,
     position_deltas,
+    projected_points,
     top_movers,
     value_all_rosters,
     value_roster,
@@ -34,6 +36,7 @@ from ff.analysis import (
 )
 from ff.contracts import Format, Roster
 from ff.core.config import Config, config_exists, load_config, save_config
+from ff.projections import ProjectionsClient
 from ff.sleeper import SleeperClient, build_rosters, detect_format
 from ff.values import ValueBook, ValuesClient, normalize_name
 
@@ -385,6 +388,77 @@ def movers(
         t.add_row(a.name, a.position or "-", f"{a.age:.0f}" if a.age else "-",
                   f"{a.value:,}", f"{a.redraft_value:,}", f"{pct:+.0f}%")
     console.print(t)
+
+
+@app.command()
+@_guard
+def lineup(
+    team: Optional[str] = typer.Argument(None, help="Team name; defaults to yours."),
+    week: Optional[int] = typer.Option(None, help="NFL week; defaults to the current/upcoming one."),
+    season: Optional[str] = typer.Option(None, help="Season; defaults to your league's."),
+) -> None:
+    """Optimal start/sit for a week, scored by your league's exact rules (incl TEP)."""
+    cfg, sc = _load()
+    if team is None and not cfg.user_id:
+        _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
+
+    league = sc.league(cfg.league_id)
+    scoring = league.get("scoring_settings") or {}
+    roster_positions = league.get("roster_positions") or []
+    rosters = _league_rosters(cfg, sc)
+    target = _pick_roster(rosters, team, cfg.user_id)
+    if target is None:
+        _fail("could not find that team. Try `ff power` to list teams.")
+
+    state = sc.state()
+    season = season or cfg.season
+    week = week or state.get("display_week") or state.get("week") or 1
+    if week < 1:
+        week = 1
+
+    proj = ProjectionsClient().week(season, week)
+    if not proj:
+        _fail(f"no projections published for {season} week {week} yet. "
+              f"Try a different --week, or wait until they post.")
+    players_meta = sc.players()
+
+    lu = optimal_lineup(target, proj, scoring, roster_positions, players_meta,
+                        season=season, week=week)
+    info = projected_points(target, proj, scoring, players_meta)
+
+    console.print(Panel.fit(
+        f"[bold]{target.team_name}[/]   {season} week {week}   "
+        f"projected [bold cyan]{lu.total:g}[/]   [dim]({cfg.format.label()})[/]",
+        title="optimal lineup"))
+
+    t = Table()
+    for c in ("slot", "player", "pos", "proj"):
+        t.add_column(c, justify="right" if c == "proj" else "left")
+    for s in lu.slots:
+        t.add_row(s.slot, s.name, s.position or "-", f"{s.points:g}")
+    console.print(t)
+
+    # Start/sit advice vs the lineup currently set on Sleeper.
+    optimal_ids = {s.player_id for s in lu.slots if s.player_id}
+    current = [p for p in target.starters if p in info]
+    if current:
+        current_total = round(sum(info[p]["points"] for p in current), 2)
+        sit = [p for p in current if p not in optimal_ids]
+        start = [s for s in lu.slots if s.player_id and s.player_id not in set(target.starters)]
+        if start or sit:
+            gain = round(lu.total - current_total, 2)
+            console.print(f"[bold green]+{gain:g} projected[/] vs your current lineup "
+                          f"([dim]{current_total:g} -> {lu.total:g}[/]):")
+            for s in start:
+                console.print(f"  [green]START[/] {s.name} ({s.points:g}) in {s.slot}")
+            for p in sit:
+                console.print(f"  [red]SIT[/]   {info[p]['name']} ({info[p]['points']:g})")
+        else:
+            console.print("[dim]your current lineup is already optimal.[/]")
+
+    if lu.bench:
+        top_bench = ", ".join(f"{b.name} ({b.points:g})" for b in lu.bench[:5])
+        console.print(f"[dim]bench: {top_bench}[/]")
 
 
 @app.command()

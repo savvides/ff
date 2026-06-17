@@ -32,8 +32,9 @@ Directory-per-concern modules under `src/ff/`, all sharing one contract. Data fl
 - `core/` is cross-cutting infra with no football logic: `http.py` (disk-cached, retrying JSON GET) and `config.py` (`.ff/` state plus the saved `Config`).
 - `sleeper/client.py` wraps the API and, more importantly, holds `detect_format()` and `build_rosters()`, pure helpers that translate Sleeper's settings into the contract.
 - `values/client.py` fetches FantasyCalc and builds a `ValueBook` with three lookups: by sleeper id (exact, for rosters), by name (fuzzy, for typed trade input), and by pick label.
-- `analysis/` (`roster.py`, `trade.py`, `waivers.py`, `movers.py`) is pure: same input, same output, no I/O. `movers.py` ranks buy-low/sell-high from the dynasty-vs-redraft value gap (with a `min_value` floor so near-zero redraft values do not produce meaningless percentages).
-- `cli.py` wires the commands: `setup`, `roster`, `power`, `values`, `trade`, `movers`, `waivers`. The `@_guard` decorator turns the two expected real-world failures (unreachable API, corrupt config) into clean one-line errors while preserving each command's Typer signature.
+- `projections/client.py` fetches Sleeper's weekly projections (the `api.sleeper.com` host, not `api.sleeper.app`) and returns `{player_id: stat_line}`. It keeps the raw stats, not Sleeper's precomputed points, so the lineup optimizer can score them with the league's own settings.
+- `analysis/` (`roster.py`, `trade.py`, `waivers.py`, `movers.py`, `lineup.py`) is pure: same input, same output, no I/O. `movers.py` ranks buy-low/sell-high from the dynasty-vs-redraft value gap (with a `min_value` floor). `lineup.py` scores projected stat lines with the league's `scoring_settings` (TEP applied for TEs) and assigns players to starting slots; the greedy "most-restrictive slot first" assignment is optimal because standard slot eligibility (QB/RB/WR/TE/FLEX/SUPER_FLEX) is laminar.
+- `cli.py` wires the commands: `setup`, `roster`, `power`, `values`, `lineup`, `trade`, `movers`, `waivers`. The `@_guard` decorator turns the two expected real-world failures (unreachable API, corrupt config) into clean one-line errors while preserving each command's Typer signature.
 
 ### Why modules, not HTTP services
 
@@ -66,8 +67,7 @@ The MVP is fully deterministic: roster math and trade math are same-input-same-o
 
 ## Out of scope (and why)
 
-- Weekly start/sit and lineup optimizer: need forward weekly projections, which are not cleanly free, and dynasty trade value is the wrong input for a weekly decision. Add only with a real projection source.
 - Pick value in `roster`/`power`: those total rostered players only. Picks are valued where the user names them (`trade`). Adding them to roster/power needs whole-team pick ownership, which means reconciling each team's default pick endowment with `traded_picks` (fetched by `SleeperClient.traded_picks` but not yet consumed). Until then, do not claim roster/power include picks.
-- TEP (tight-end premium): detected into `Format.tep` and shown in the label, but FantasyCalc's public endpoint has no TEP parameter (verified: passing one is a no-op), so values are not TEP-adjusted. Do not add a dead param; if a TEP-aware free source appears, wire it in `values/`.
+- TEP (tight-end premium): `lineup` honors it, because it scores raw projected stats with the league's `scoring_settings`. FantasyCalc *dynasty values* still do not: FantasyCalc's public endpoint has no TEP parameter (verified: passing one is a no-op), so `values`/`roster`/`trade` are not TEP-adjusted. Do not add a dead param; `Format.tep` is detected and shown in the label so the gap is visible.
 - Trade finder and tiers/VORP: `trade` evaluates a specified deal, it does not propose one; rankings are raw value with no tier breaks or value-over-replacement. Both are reasonable next features.
 - First latent feature (e.g. a natural-language "should I make this trade" explanation) is where `services/llm/` (shelling out to local Claude Code) and an eval suite get added. Until then everything is deterministic and gate-tested only.

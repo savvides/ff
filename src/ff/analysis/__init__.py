@@ -5,6 +5,7 @@ suite is deterministic gate tests (see CLAUDE.md): roster math and trade math ar
 deterministic-space work, not latent-space work.
 """
 
+from ff.analysis.lineup import optimal_lineup, project_points, projected_points
 from ff.analysis.movers import top_movers
 from ff.analysis.roster import value_all_rosters, value_roster
 from ff.analysis.trade import analyze_trade, position_deltas
@@ -17,4 +18,7 @@ __all__ = [
     "position_deltas",
     "waiver_targets",
     "top_movers",
+    "optimal_lineup",
+    "project_points",
+    "projected_points",
 ]

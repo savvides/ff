@@ -42,8 +42,14 @@ def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta
         def fetch(self, fmt):
             return book
 
+    class FakeProjections:
+        def week(self, season, week, positions=None):
+            return {"7564": {"rec": 8, "rec_yd": 100, "rec_td": 1},
+                    "9221": {"rush_yd": 90, "rush_td": 1}}
+
     monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: FakeSleeper())
     monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: FakeValues())
+    monkeypatch.setattr("ff.cli.ProjectionsClient", lambda *a, **k: FakeProjections())
     monkeypatch.setenv("COLUMNS", "200")  # keep rich from wrapping cells
 
 
@@ -132,6 +138,14 @@ def test_network_error_is_a_clean_message(fake_clients, league, monkeypatch):
     result = runner.invoke(app, ["values"])
     assert result.exit_code == 1
     assert "could not reach" in result.output
+
+
+def test_lineup_command(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["lineup"])
+    assert result.exit_code == 0, result.output
+    assert "optimal lineup" in result.output
+    assert "Chase" in result.output  # WR slot filled by the projected starter
 
 
 def test_corrupt_config_is_a_clean_message(fake_clients):

@@ -38,3 +38,11 @@ def test_sleeper_live_trending_and_state():
     assert state.get("season")
     trending = sc.trending(kind="add", limit=5)
     assert trending and "player_id" in trending[0]
+
+
+def test_sleeper_projections_live_have_stat_lines():
+    from ff.projections import ProjectionsClient
+    proj = ProjectionsClient().week("2025", 1)
+    assert len(proj) > 100
+    allen = proj.get("4984")  # Josh Allen's sleeper id
+    assert allen and (allen.get("pass_yd") or allen.get("pts_half_ppr"))

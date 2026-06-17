@@ -8,6 +8,8 @@ change - update both sides.
 from ff.contracts.models import (
     Asset,
     Format,
+    Lineup,
+    LineupSlot,
     Roster,
     RosterValuation,
     TradeEvaluation,
@@ -23,4 +25,6 @@ __all__ = [
     "TradeSide",
     "TradeEvaluation",
     "WaiverTarget",
+    "LineupSlot",
+    "Lineup",
 ]

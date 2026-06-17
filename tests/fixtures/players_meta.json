@@ -1,4 +1,9 @@
 {
+  "7564": {"full_name": "Ja'Marr Chase", "position": "WR", "team": "CIN"},
+  "9221": {"full_name": "Jahmyr Gibbs", "position": "RB", "team": "DET"},
+  "4984": {"full_name": "Josh Allen", "position": "QB", "team": "BUF"},
+  "8138": {"full_name": "Bijan Robinson", "position": "RB", "team": "ATL"},
+  "6666": {"full_name": "Brock Bowers", "position": "TE", "team": "LV"},
   "9999": {"full_name": "Test Kicker", "position": "K", "team": "DET"},
   "8888": {"full_name": "Backup Tightend", "position": "TE", "team": "ATL"},
   "7777": {"full_name": "Deep Stash", "position": "WR", "team": "CHI"},
