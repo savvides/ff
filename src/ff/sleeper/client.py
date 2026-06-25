@@ -61,6 +61,21 @@ class SleeperClient:
     def traded_picks(self, league_id: str) -> List[Dict[str, Any]]:
         return self._get(f"league/{league_id}/traded_picks", ttl=LEAGUE_TTL) or []
 
+    # --- draft -----------------------------------------------------------
+    # A live draft board changes pick to pick, so these never serve from cache
+    # (ttl=0); the payloads are small and infrequent, well within Sleeper limits.
+    def drafts(self, league_id: str) -> List[Dict[str, Any]]:
+        return self._get(f"league/{league_id}/drafts", ttl=0) or []
+
+    def draft(self, draft_id: str) -> Dict[str, Any]:
+        return self._get(f"draft/{draft_id}", ttl=0)
+
+    def draft_picks(self, draft_id: str) -> List[Dict[str, Any]]:
+        return self._get(f"draft/{draft_id}/picks", ttl=0) or []
+
+    def draft_traded_picks(self, draft_id: str) -> List[Dict[str, Any]]:
+        return self._get(f"draft/{draft_id}/traded_picks", ttl=0) or []
+
     # --- players / trending ---------------------------------------------
     def players(self, sport: str = "nfl") -> Dict[str, Any]:
         return self._get(f"players/{sport}", ttl=PLAYERS_TTL)

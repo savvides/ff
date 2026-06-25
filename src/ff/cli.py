@@ -6,6 +6,7 @@
     ff values [-p WR]       dynasty rankings for your format (FantasyPros killer)
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
     ff waivers              trending free agents worth grabbing, by value
+    ff draft [-p QB] [-r]   live draft board: your picks + best available by value
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from rich.table import Table
 from ff import __version__
 from ff.analysis import (
     analyze_trade,
+    available,
+    my_picks,
     optimal_lineup,
     position_deltas,
     projected_points,
@@ -463,6 +466,157 @@ def lineup(
     if lu.bench:
         top_bench = ", ".join(f"{b.name} ({b.points:g})" for b in lu.bench[:5])
         console.print(f"[dim]bench: {top_bench}[/]")
+
+
+# --- draft ---------------------------------------------------------------
+
+def _active_draft(sc: SleeperClient, league_id: str) -> Optional[Dict[str, Any]]:
+    """The league's live draft if one is running, else the most recent.
+
+    Prefers an in-progress (or paused) draft, then a not-yet-started one, then
+    falls back to the newest by season/start time."""
+    drafts = sc.drafts(league_id)
+    if not drafts:
+        return None
+    for status in ("drafting", "paused", "pre_draft"):
+        for d in drafts:
+            if d.get("status") == status:
+                return d
+    return sorted(drafts, key=lambda d: (d.get("season", ""), d.get("start_time") or 0),
+                  reverse=True)[0]
+
+
+@app.command()
+@_guard
+def draft(
+    position: Optional[str] = typer.Option(None, "--position", "-p",
+                                           help="QB/RB/WR/TE; filter the available list."),
+    limit: int = typer.Option(30, help="How many available players to list."),
+    rookies: bool = typer.Option(False, "--rookies", "-r", help="Available rookies only."),
+    draft_id: Optional[str] = typer.Option(None, "--draft-id",
+                                           help="Override the auto-detected draft."),
+) -> None:
+    """Live draft board: your picks, your roster by position, best available by value."""
+    cfg, sc = _load()
+    if not cfg.user_id:
+        _fail("your team is unknown. Re-run `ff setup <username>` so it records you.")
+
+    if not draft_id:
+        summary = _active_draft(sc, cfg.league_id)
+        if not summary:
+            _fail("no draft found for this league.")
+        draft_id = summary["draft_id"]
+    # Always pull the single-draft endpoint: the /drafts list omits
+    # slot_to_roster_id, which pick ownership needs.
+    d = sc.draft(draft_id)
+    if not d:
+        _fail("no draft found for this league.")
+
+    settings = d.get("settings") or {}
+    teams = int(settings.get("teams") or cfg.format.num_teams)
+    rounds = int(settings.get("rounds") or 0)
+    dtype = (d.get("type") or "linear").lower()
+    snake = dtype == "snake"
+    reversal = int(settings.get("reversal_round") or 0)
+    slot_to_roster = {int(k): v for k, v in (d.get("slot_to_roster_id") or {}).items()}
+    if dtype not in ("linear", "snake") or rounds < 1:
+        _fail(f"draft type '{dtype}' with {rounds} rounds is not supported "
+              f"(only snake/linear, slot-based drafts).")
+
+    rosters = _league_rosters(cfg, sc)
+    mine = _pick_roster(rosters, None, cfg.user_id)
+    if mine is None:
+        _fail("could not find your roster in this league.")
+
+    picks = sc.draft_picks(draft_id)
+    traded = sc.draft_traded_picks(draft_id)
+    made = len(picks)
+    on_clock = made + 1
+
+    status = d.get("status")
+    rnd_now = (on_clock - 1) // teams + 1 if teams else 0
+    head_status = {"drafting": "[green]drafting[/]", "complete": "[dim]complete[/]"}.get(
+        status, status or "?")
+    progress = (f"complete ({made} picks)" if status == "complete"
+                else f"round {rnd_now}/{rounds}, pick [bold]#{on_clock}[/] on the clock")
+    console.print(Panel.fit(
+        f"[bold]{cfg.name.strip()}[/]   {head_status}   {dtype}   {progress}\n"
+        f"[dim]{cfg.format.label()}[/]", title="draft"))
+
+    # your picks (made + upcoming, with gaps)
+    owned = my_picks(mine.roster_id, slot_to_roster, traded, picks,
+                     teams=teams, rounds=rounds, snake=snake, reversal_round=reversal)
+    pt = Table(title="your picks")
+    for c in ("pick", "rnd", "status", "when"):
+        pt.add_column(c, justify="right" if c in ("pick", "rnd") else "left")
+    prev = made
+    for p in owned:
+        if p.used:
+            st = f"[dim]used -> {p.player_name} ({p.position or '-'})[/]"
+            when = ""
+        else:
+            st = "[green]available[/]"
+            gap = p.pick_no - prev - 1
+            when = ("[bold green]ON THE CLOCK[/]" if p.pick_no == on_clock
+                    else f"{gap} pick{'s' if gap != 1 else ''} away")
+            prev = p.pick_no
+        pt.add_row(f"#{p.pick_no}", str(p.round), st, when)
+    console.print(pt)
+
+    # taken = rostered league-wide + already drafted here
+    players_meta = sc.players()
+    taken: set = set()
+    for r in rosters:
+        taken.update(str(pid) for pid in r.player_ids)
+    drafted_by_me = []
+    for pk in picks:
+        pid = pk.get("player_id")
+        if pid:
+            taken.add(str(pid))
+            if pk.get("roster_id") == mine.roster_id:
+                drafted_by_me.append(str(pid))
+
+    # your roster by position (a needs glance) - includes what you drafted today.
+    # Value it through value_roster so positions/values match `roster`/`power`.
+    book = _book(cfg)
+    have = set(mine.player_ids)
+    merged = mine.model_copy(update={
+        "player_ids": list(mine.player_ids) + [p for p in drafted_by_me if p not in have]})
+    val = value_roster(merged, book, players_meta)
+    pos_vals: Dict[str, List[int]] = {}
+    for a in val.assets:
+        pos_vals.setdefault(a.position or "?", []).append(a.value)
+    nt = Table(title="your roster (needs glance)")
+    for c in ("pos", "count", "top value"):
+        nt.add_column(c, justify="right" if c != "pos" else "left")
+    for pos in ("QB", "RB", "WR", "TE"):
+        vals = sorted(pos_vals.get(pos, []), reverse=True)
+        nt.add_row(pos, str(len(vals)), f"{vals[0]:,}" if vals else "-")
+    console.print(nt)
+
+    # best available
+    pool = available(book, taken, position=position)
+    if rookies:
+        pool = [a for a in pool
+                if (players_meta.get(str(a.id)) or {}).get("years_exp") == 0]
+    pool = pool[:limit]
+
+    title = "best available" + (f" - {position.upper()}" if position else "") + \
+            (" (rookies)" if rookies else "")
+    at = Table(title=title)
+    right = ("value", "30d", "age", "#", "posrk")
+    for c in ("#", "player", "r", "pos", "posrk", "team", "age", "value", "30d"):
+        at.add_column(c, justify="right" if c in right else "left")
+    for i, a in enumerate(pool, 1):
+        meta = players_meta.get(str(a.id)) or {}
+        rk = "[cyan]R[/]" if meta.get("years_exp") == 0 else ""
+        posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
+        at.add_row(str(i), a.name, rk, a.position or "-", posrk, a.team or "-",
+                   f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
+                   _signed(a.trend_30day) if a.trend_30day else "-")
+    console.print(at)
+    console.print("[dim]available = valued players not yet drafted and not on any "
+                  "roster. Ranking is dynasty value; the pick call is yours.[/]")
 
 
 @app.command()

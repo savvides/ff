@@ -166,8 +166,13 @@ class ValueBook:
         close = difflib.get_close_matches(norm, self._name_keys, n=n, cutoff=0.6)
         return [self.by_name[c] for c in close]
 
-    def top(self, position: Optional[str] = None, limit: int = 50) -> List[Asset]:
+    def top(self, position: Optional[str] = None, limit: Optional[int] = 50,
+            exclude: Optional[set] = None) -> List[Asset]:
+        """Players ranked by dynasty value. `exclude` drops ids already taken
+        (rostered/drafted); `limit=None` returns the whole ranked pool."""
         pool = [a for a in self.assets if not a.is_pick]
+        if exclude:
+            pool = [a for a in pool if a.id not in exclude]
         if position:
             pool = [a for a in pool if a.position == position.upper()]
         return sorted(pool, key=lambda a: a.value, reverse=True)[:limit]

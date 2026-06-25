@@ -65,6 +65,18 @@ class Asset(BaseModel):
         return self.kind == "pick"
 
 
+class DraftPickInfo(BaseModel):
+    """One draft pick a roster owns - upcoming, or already used on a player."""
+
+    pick_no: int  # overall pick number (1-indexed)
+    round: int
+    slot: int  # draft slot (1..teams) the pick belongs to
+    used: bool = False
+    player_id: Optional[str] = None  # set once used
+    player_name: Optional[str] = None
+    position: Optional[str] = None
+
+
 class Roster(BaseModel):
     """A team in the league, as Sleeper reports it (before valuation)."""
 

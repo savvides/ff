@@ -38,6 +38,26 @@ def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta
         def trending(self, sport="nfl", kind="add", lookback_hours=24, limit=25):
             return trending
 
+        def drafts(self, lid):
+            # The list endpoint summary deliberately omits slot_to_roster_id,
+            # mirroring the real API; the command must fetch full detail.
+            return [{"draft_id": "DR1", "status": "drafting", "type": "linear",
+                     "season": "2026", "settings": {"teams": 3, "rounds": 2}}]
+
+        def draft(self, did):
+            return {"draft_id": "DR1", "status": "drafting", "type": "linear",
+                    "settings": {"teams": 3, "rounds": 2, "reversal_round": 0},
+                    "slot_to_roster_id": {"1": 1, "2": 2, "3": 3}}
+
+        def draft_picks(self, did):
+            return [{"pick_no": 1, "round": 1, "draft_slot": 1, "roster_id": 1,
+                     "player_id": "7564",
+                     "metadata": {"first_name": "Ja'Marr", "last_name": "Chase",
+                                  "position": "WR"}}]
+
+        def draft_traded_picks(self, did):
+            return []
+
     class FakeValues:
         def fetch(self, fmt):
             return book
@@ -146,6 +166,18 @@ def test_lineup_command(fake_clients, league):
     assert result.exit_code == 0, result.output
     assert "optimal lineup" in result.output
     assert "Chase" in result.output  # WR slot filled by the projected starter
+
+
+def test_draft_command_resolves_pick_ownership(fake_clients, league):
+    """Regression: pick ownership needs slot_to_roster_id, which only the single
+    /draft endpoint returns - not the /drafts list. So 'your picks' must populate."""
+    _write_config(league)
+    result = runner.invoke(app, ["draft", "--limit", "5"])
+    assert result.exit_code == 0, result.output
+    assert "your picks" in result.output
+    assert "#1" in result.output  # used R1 pick (Chase)
+    assert "#4" in result.output  # upcoming R2 pick (slot 1, 3 teams -> pick 4)
+    assert "best available" in result.output
 
 
 def test_corrupt_config_is_a_clean_message(fake_clients):

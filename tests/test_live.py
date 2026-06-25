@@ -40,6 +40,33 @@ def test_sleeper_live_trending_and_state():
     assert trending and "player_id" in trending[0]
 
 
+def test_sleeper_draft_endpoints_live_have_expected_shape():
+    # Shape canary for the four draft endpoints `ff draft` depends on. Anchored on
+    # a real league id (drafts persist after completion), like the projections test
+    # anchors on 2025 wk1. Asserts shape, not values.
+    sc = SleeperClient()
+    league_id = "1366910390553804800"
+    drafts = sc.drafts(league_id)
+    assert isinstance(drafts, list) and drafts and "draft_id" in drafts[0]
+
+    did = drafts[0]["draft_id"]
+    detail = sc.draft(did)
+    # slot_to_roster_id is returned by the single-draft endpoint - the reason the
+    # command must fetch detail rather than rely on the drafts list. Guard it.
+    assert detail.get("slot_to_roster_id")
+    assert (detail.get("settings") or {}).get("rounds")
+
+    picks = sc.draft_picks(did)
+    assert isinstance(picks, list)
+    if picks:
+        assert {"pick_no", "metadata", "roster_id"} <= set(picks[0])
+
+    traded = sc.draft_traded_picks(did)
+    assert isinstance(traded, list)
+    if traded:
+        assert {"round", "roster_id", "owner_id"} <= set(traded[0])
+
+
 def test_sleeper_projections_live_have_stat_lines():
     from ff.projections import ProjectionsClient
     proj = ProjectionsClient().week("2025", 1)
