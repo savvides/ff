@@ -8,10 +8,25 @@ Asset; this just ranks by the gap.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from ff.contracts import Asset
 from ff.values import ValueBook
+
+
+def value_redraft_gap(a: Asset, min_value: int = 1000) -> Optional[float]:
+    """(dynasty - redraft) / redraft * 100, or None when not comparable.
+
+    None for a pick, a player with no redraft value, or either value below
+    `min_value` - so callers (movers, fit) degrade to a neutral signal instead of
+    a meaningless +100000% gap on a deep stash with redraft ~1. Positive means
+    dynasty > redraft (young/ascending); negative means aging win-now value.
+    """
+    if a.is_pick or not a.redraft_value:
+        return None
+    if a.value < min_value or a.redraft_value < min_value:
+        return None
+    return (a.value - a.redraft_value) / a.redraft_value * 100.0
 
 
 def top_movers(book: ValueBook, buy: bool = False, limit: int = 20,
@@ -28,11 +43,9 @@ def top_movers(book: ValueBook, buy: bool = False, limit: int = 20,
     """
     scored: List[Tuple[Asset, float]] = []
     for a in book.assets:
-        if a.is_pick or not a.redraft_value:
+        gap = value_redraft_gap(a, min_value)
+        if gap is None:
             continue
-        if a.value < min_value or a.redraft_value < min_value:
-            continue
-        pct = (a.value - a.redraft_value) / a.redraft_value * 100.0
-        scored.append((a, pct))
+        scored.append((a, gap))
     scored.sort(key=lambda x: x[1], reverse=buy)
     return scored[:limit]

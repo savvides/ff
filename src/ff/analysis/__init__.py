@@ -6,8 +6,15 @@ deterministic-space work, not latent-space work.
 """
 
 from ff.analysis.draft import available, my_picks, pick_number
-from ff.analysis.lineup import optimal_lineup, project_points, projected_points
-from ff.analysis.movers import top_movers
+from ff.analysis.fit import detect_status, positional_standing, rank_fits
+from ff.analysis.lineup import (
+    optimal_lineup,
+    project_points,
+    projected_points,
+    starting_slot_counts,
+    starting_slots,
+)
+from ff.analysis.movers import top_movers, value_redraft_gap
 from ff.analysis.roster import value_all_rosters, value_roster
 from ff.analysis.trade import analyze_trade, position_deltas
 from ff.analysis.waivers import waiver_targets
@@ -19,10 +26,16 @@ __all__ = [
     "position_deltas",
     "waiver_targets",
     "top_movers",
+    "value_redraft_gap",
     "optimal_lineup",
     "project_points",
     "projected_points",
+    "starting_slots",
+    "starting_slot_counts",
     "pick_number",
     "my_picks",
     "available",
+    "rank_fits",
+    "detect_status",
+    "positional_standing",
 ]

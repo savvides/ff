@@ -177,7 +177,23 @@ def test_draft_command_resolves_pick_ownership(fake_clients, league):
     assert "your picks" in result.output
     assert "#1" in result.output  # used R1 pick (Chase)
     assert "#4" in result.output  # upcoming R2 pick (slot 1, 3 teams -> pick 4)
-    assert "best available" in result.output
+    assert "best available" in result.output  # substring kept for back-compat
+    # team-aware additions: status header first, standing table, fit board, rec
+    assert "status" in result.output
+    assert "where you stand" in result.output
+    assert "FOR YOU" in result.output
+    assert "recommend" in result.output
+
+
+def test_draft_mode_override_sets_status(fake_clients, league):
+    """--mode forces the lens deterministically, independent of auto-detection."""
+    _write_config(league)
+    reb = runner.invoke(app, ["draft", "--mode", "rebuild", "--limit", "5"])
+    assert reb.exit_code == 0, reb.output
+    assert "REBUILD" in reb.output
+    con = runner.invoke(app, ["draft", "--mode", "contend", "--limit", "5"])
+    assert con.exit_code == 0, con.output
+    assert "CONTEND" in con.output
 
 
 def test_corrupt_config_is_a_clean_message(fake_clients):

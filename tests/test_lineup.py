@@ -58,6 +58,23 @@ def test_optimal_lineup_fills_superflex_with_second_qb():
     assert {b.player_id for b in lu.bench} == {"rb2"}  # lowest projection sits
 
 
+def test_assign_primitive_is_score_agnostic_and_laminar():
+    # The extracted greedy primitive `_assign` is what both lineup (points) and
+    # fit (dynasty value) reuse. Drive it with arbitrary scores to prove it fills
+    # the most-restrictive slot first and is correct on the laminar slot family.
+    from ff.analysis.lineup import _assign
+
+    positions = {"qb1": "QB", "qb2": "QB", "wr1": "WR", "rb1": "RB"}
+    scores = {"qb1": 30.0, "qb2": 20.0, "wr1": 25.0, "rb1": 10.0}
+    starting = ["QB", "WR", "FLEX", "SUPER_FLEX"]
+    pick = {starting[i]: pid for i, pid in _assign(positions, scores, starting).items()}
+
+    assert pick["QB"] == "qb1"          # most restrictive slot, best QB
+    assert pick["WR"] == "wr1"
+    assert pick["SUPER_FLEX"] == "qb2"  # only QB left fits superflex here
+    assert pick["FLEX"] == "rb1"        # last flex-eligible skill player
+
+
 def test_non_laminar_flex_slots_are_flagged_not_misfilled():
     # WRRB_FLEX + REC_FLEX overlap non-laminarly; greedy could be wrong, so they
     # are reported as unsupported instead of silently mis-filled.

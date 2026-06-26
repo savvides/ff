@@ -80,31 +80,66 @@ def projected_points(roster: Roster, projections: Dict[str, Dict[str, Any]],
     return out
 
 
-def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
-                   scoring: Dict[str, Any], roster_positions: List[str],
-                   players_meta: Optional[Dict[str, Any]] = None,
-                   season: str = "", week: int = 0) -> Lineup:
-    info = projected_points(roster, projections, scoring, players_meta)
-    starting = [s for s in roster_positions if s in SLOT_ELIGIBILITY]
-    # Starting-slot-shaped tokens we don't optimize (e.g. WRRB_FLEX, IDP slots).
-    unsupported = [s for s in roster_positions
-                   if s not in SLOT_ELIGIBILITY and s not in BENCH_SLOTS]
+def starting_slots(roster_positions: List[str]) -> List[str]:
+    """The ordered starting slots we optimize (duplicates kept, e.g. two 'RB').
 
-    # Fill the most restrictive slots first (fewest eligible positions).
+    Bench tokens (BN/IR/TAXI) and unsupported overlapping flexes are dropped, so
+    the result is exactly the laminar slots the greedy assignment is optimal for.
+    """
+    return [s for s in roster_positions if s in SLOT_ELIGIBILITY]
+
+
+def starting_slot_counts(roster_positions: List[str]) -> Dict[str, int]:
+    """Slot-count template, e.g. {QB:1, RB:2, WR:2, TE:1, FLEX:3, SUPER_FLEX:1}."""
+    out: Dict[str, int] = {}
+    for s in starting_slots(roster_positions):
+        out[s] = out.get(s, 0) + 1
+    return out
+
+
+def _assign(positions: Dict[str, Optional[str]], scores: Dict[str, float],
+            starting: List[str]) -> Dict[int, Optional[str]]:
+    """Greedy laminar assignment: most-restrictive slot first, each taking the
+    highest-scoring eligible player left. Returns {slot_index -> player_id|None}.
+
+    Score-agnostic: `scores` may be projected points (lineup) or dynasty value
+    (fit). Iterates `scores` in its own insertion order so the strict-`>`
+    tie-break is stable - callers pass insertion-aligned `positions`/`scores`.
+    """
     order = sorted(range(len(starting)), key=lambda i: len(SLOT_ELIGIBILITY[starting[i]]))
     chosen: Dict[int, Optional[str]] = {}
     used: set = set()
     for i in order:
         eligible = SLOT_ELIGIBILITY[starting[i]]
-        best_pid, best_pts = None, None
-        for pid, d in info.items():
-            if pid in used or d["position"] not in eligible:
+        best_pid, best_score = None, None
+        for pid in scores:
+            if pid in used or positions.get(pid) not in eligible:
                 continue
-            if best_pts is None or d["points"] > best_pts:
-                best_pid, best_pts = pid, d["points"]
+            if best_score is None or scores[pid] > best_score:
+                best_pid, best_score = pid, scores[pid]
         if best_pid is not None:
             used.add(best_pid)
         chosen[i] = best_pid
+    return chosen
+
+
+def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
+                   scoring: Dict[str, Any], roster_positions: List[str],
+                   players_meta: Optional[Dict[str, Any]] = None,
+                   season: str = "", week: int = 0) -> Lineup:
+    info = projected_points(roster, projections, scoring, players_meta)
+    starting = starting_slots(roster_positions)
+    # Starting-slot-shaped tokens we don't optimize (e.g. WRRB_FLEX, IDP slots).
+    unsupported = [s for s in roster_positions
+                   if s not in SLOT_ELIGIBILITY and s not in BENCH_SLOTS]
+
+    # Fill the most restrictive slots first (fewest eligible positions). Build the
+    # score/position maps over `info` so iteration order (hence the tie-break) is
+    # identical to the original inline loop.
+    chosen = _assign({pid: d["position"] for pid, d in info.items()},
+                     {pid: d["points"] for pid, d in info.items()},
+                     starting)
+    used = {pid for pid in chosen.values() if pid is not None}
 
     slots: List[LineupSlot] = []
     for i, slot in enumerate(starting):

@@ -180,3 +180,44 @@ class Lineup(BaseModel):
     @property
     def total(self) -> float:
         return round(sum(s.points for s in self.slots), 2)
+
+
+class PositionStanding(BaseModel):
+    """Where one roster stands at a position vs the league, by startable value."""
+
+    position: str
+    mine: int = 0  # this team's startable value at the position
+    median: int = 0  # league median startable value at the position
+
+    @property
+    def gap(self) -> int:
+        """Positive => stronger than the median team at this position."""
+        return self.mine - self.median
+
+    @property
+    def is_hole(self) -> bool:
+        return self.median > 0 and self.mine < self.median
+
+
+class TeamContext(BaseModel):
+    """A team's competitive status and positional standing - the lens a draft
+    recommendation is made through."""
+
+    status: str = "balanced"  # "contend" | "rebuild" | "balanced"
+    power_rank: Optional[int] = None  # 1 = most valuable roster in the league
+    num_teams: int = 12
+    standings: List[PositionStanding] = Field(default_factory=list)
+
+
+class DraftFit(BaseModel):
+    """One available player scored for *this* team: market value (the anchor)
+    adjusted by roster-fit and win-now/rebuild horizon."""
+
+    asset: Asset
+    fit_score: float = 0.0
+    market_rank: int = 0  # 1-based rank by raw dynasty value among available
+    marginal_starter: int = 0  # value this player adds to the starting lineup
+    upgrade_tilt: float = 0.0
+    horizon_tilt: float = 0.0
+    standing_tilt: float = 0.0
+    why: str = ""

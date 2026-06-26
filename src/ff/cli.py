@@ -28,10 +28,12 @@ from ff import __version__
 from ff.analysis import (
     analyze_trade,
     available,
+    detect_status,
     my_picks,
     optimal_lineup,
     position_deltas,
     projected_points,
+    rank_fits,
     top_movers,
     value_all_rosters,
     value_roster,
@@ -493,10 +495,14 @@ def draft(
                                            help="QB/RB/WR/TE; filter the available list."),
     limit: int = typer.Option(30, help="How many available players to list."),
     rookies: bool = typer.Option(False, "--rookies", "-r", help="Available rookies only."),
+    mode: str = typer.Option("auto", "--mode",
+                             help="contend|rebuild|auto (auto reads your power rank)."),
     draft_id: Optional[str] = typer.Option(None, "--draft-id",
                                            help="Override the auto-detected draft."),
 ) -> None:
-    """Live draft board: your picks, your roster by position, best available by value."""
+    """Live draft board scored FOR your team: your picks, where you stand, and the
+    best available ranked by fit (roster need + win-now/rebuild horizon), not raw
+    market value alone."""
     cfg, sc = _load()
     if not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you.")
@@ -583,40 +589,65 @@ def draft(
     merged = mine.model_copy(update={
         "player_ids": list(mine.player_ids) + [p for p in drafted_by_me if p not in have]})
     val = value_roster(merged, book, players_meta)
-    pos_vals: Dict[str, List[int]] = {}
-    for a in val.assets:
-        pos_vals.setdefault(a.position or "?", []).append(a.value)
-    nt = Table(title="your roster (needs glance)")
-    for c in ("pos", "count", "top value"):
-        nt.add_column(c, justify="right" if c != "pos" else "left")
-    for pos in ("QB", "RB", "WR", "TE"):
-        vals = sorted(pos_vals.get(pos, []), reverse=True)
-        nt.add_row(pos, str(len(vals)), f"{vals[0]:,}" if vals else "-")
-    console.print(nt)
 
-    # best available
+    # Team context FIRST: a pick recommendation that ignores your roster is just
+    # the market read back to you. Slots drive both standing and starter-upgrade.
+    league = sc.league(cfg.league_id)
+    roster_positions = league.get("roster_positions") or []
+    all_vals = value_all_rosters(rosters, book, players_meta)
+    my_rank = next((v.power_rank for v in all_vals if v.roster_id == mine.roster_id), None)
+    val.power_rank = my_rank
+    status = mode if mode in ("contend", "rebuild") else detect_status(my_rank, teams)
+
     pool = available(book, taken, position=position)
     if rookies:
         pool = [a for a in pool
                 if (players_meta.get(str(a.id)) or {}).get("years_exp") == 0]
-    pool = pool[:limit]
+    ctx, fits = rank_fits(pool, val, all_vals, roster_positions, status, limit)
 
-    title = "best available" + (f" - {position.upper()}" if position else "") + \
+    badge = {"contend": "[green]CONTEND[/]", "rebuild": "[yellow]REBUILD[/]",
+             "balanced": "[cyan]BALANCED[/]"}.get(status, status.upper())
+    rank_txt = f"power rank {my_rank}/{len(all_vals)}" if my_rank else "power rank n/a"
+    console.print(Panel.fit(f"[bold]{val.team_name}[/]   status: {badge}   {rank_txt}",
+                            title="your team"))
+    if not roster_positions:
+        console.print("[dim]roster slots unknown - showing market-anchored fit.[/]")
+
+    stt = Table(title="where you stand")
+    for c in ("pos", "your startable", "league median", "gap"):
+        stt.add_column(c, justify="right" if c != "pos" else "left")
+    for s in ctx.standings:
+        flag = " [yellow]thin[/]" if s.is_hole else ""
+        stt.add_row(s.position, f"{s.mine:,}", f"{s.median:,}", f"{_signed(s.gap)}{flag}")
+    console.print(stt)
+
+    # recommended pick + best available FOR YOU
+    if fits:
+        top = fits[0]
+        console.print(f"[bold green]recommend[/] -> [bold]{top.asset.name}[/] "
+                      f"({top.asset.position or '-'}) - {top.why}")
+    title = "best available - FOR YOU" + (f" - {position.upper()}" if position else "") + \
             (" (rookies)" if rookies else "")
     at = Table(title=title)
-    right = ("value", "30d", "age", "#", "posrk")
-    for c in ("#", "player", "r", "pos", "posrk", "team", "age", "value", "30d"):
+    right = ("fit#", "mkt#", "FitScore", "value", "30d", "posrk")
+    for c in ("fit#", "player", "pos", "posrk", "mkt#", "FitScore", "value", "30d", "why"):
         at.add_column(c, justify="right" if c in right else "left")
-    for i, a in enumerate(pool, 1):
-        meta = players_meta.get(str(a.id)) or {}
-        rk = "[cyan]R[/]" if meta.get("years_exp") == 0 else ""
+    tep_on = cfg.format.tep > 0
+    for i, f in enumerate(fits, 1):
+        a = f.asset
+        pos = (a.position or "-") + ("*" if tep_on and a.position == "TE" else "")
         posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
-        at.add_row(str(i), a.name, rk, a.position or "-", posrk, a.team or "-",
-                   f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
-                   _signed(a.trend_30day) if a.trend_30day else "-")
+        at.add_row(str(i), a.name, pos, posrk, str(f.market_rank),
+                   f"{f.fit_score:,.0f}", f"{a.value:,}",
+                   _signed(a.trend_30day) if a.trend_30day else "-", f.why)
     console.print(at)
-    console.print("[dim]available = valued players not yet drafted and not on any "
-                  "roster. Ranking is dynasty value; the pick call is yours.[/]")
+    if tep_on:
+        console.print(f"[dim]* TE value runs conservative: FantasyCalc has no TEP "
+                      f"param, but your league scores +{cfg.format.tep:g} TEP, so TEs "
+                      f"are worth a bit more than shown.[/]")
+    console.print("[dim]FitScore = market value adjusted for YOUR roster fit + "
+                  "win-now/rebuild horizon. mkt# is the raw dynasty-value rank. "
+                  "The pick call is yours.[/]")
 
 
 @app.command()

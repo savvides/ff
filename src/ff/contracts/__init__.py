@@ -7,12 +7,15 @@ change - update both sides.
 
 from ff.contracts.models import (
     Asset,
+    DraftFit,
     DraftPickInfo,
     Format,
     Lineup,
     LineupSlot,
+    PositionStanding,
     Roster,
     RosterValuation,
+    TeamContext,
     TradeEvaluation,
     TradeSide,
     WaiverTarget,
@@ -29,4 +32,7 @@ __all__ = [
     "LineupSlot",
     "Lineup",
     "DraftPickInfo",
+    "PositionStanding",
+    "TeamContext",
+    "DraftFit",
 ]
