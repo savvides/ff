@@ -69,6 +69,7 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
 ```bash
 make test          # gate suite - offline, deterministic, < 2s
 make test-live     # contract checks against the real APIs
+FF_LIVE_LEAGUE_ID=<a completed league id> make test-live   # also runs the draft-shape canary
 ./.venv/bin/pytest tests/test_trade.py::test_trade_with_players_and_picks   # one test
 ```
 

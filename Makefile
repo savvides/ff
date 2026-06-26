@@ -12,7 +12,7 @@ install:               ## create venv + install package (editable) with dev deps
 test:                  ## gate suite: offline, deterministic, < 2s
 	$(PY) -m pytest -q
 
-test-live:             ## hit the real Sleeper + FantasyCalc APIs
+test-live:             ## hit the real Sleeper + FantasyCalc APIs (set FF_LIVE_LEAGUE_ID for the draft-shape check)
 	$(PY) -m pytest -m live
 
 hooks:                 ## enable the pre-commit gate

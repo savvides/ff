@@ -3,6 +3,8 @@ Sleeper + FantasyCalc APIs). Run on demand with `pytest -m live` to confirm the
 upstream payload shapes haven't drifted.
 """
 
+import os
+
 import pytest
 
 from ff.contracts import Format
@@ -42,10 +44,14 @@ def test_sleeper_live_trending_and_state():
 
 def test_sleeper_draft_endpoints_live_have_expected_shape():
     # Shape canary for the four draft endpoints `ff draft` depends on. Anchored on
-    # a real league id (drafts persist after completion), like the projections test
-    # anchors on 2025 wk1. Asserts shape, not values.
+    # a real league whose draft has completed (drafts persist after completion),
+    # like the projections test anchors on 2025 wk1. Asserts shape, not values. The
+    # id comes from FF_LIVE_LEAGUE_ID so no personal league id lives in the source;
+    # set it to any league you can see, e.g. `FF_LIVE_LEAGUE_ID=123 make test-live`.
+    league_id = os.environ.get("FF_LIVE_LEAGUE_ID")
+    if not league_id:
+        pytest.skip("set FF_LIVE_LEAGUE_ID to a real (completed) league id to run this")
     sc = SleeperClient()
-    league_id = "1366910390553804800"
     drafts = sc.drafts(league_id)
     assert isinstance(drafts, list) and drafts and "draft_id" in drafts[0]
 
