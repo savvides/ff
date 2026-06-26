@@ -106,15 +106,20 @@ def positional_standing(my_val: RosterValuation, all_vals: List[RosterValuation]
 def _why(fit: DraftFit, status: str) -> str:
     anchor = fit.asset.value or 1
     up = anchor * fit.upgrade_tilt
-    hz = anchor * abs(fit.horizon_tilt)
+    # Only a tilt that actually HELPED this player rank up may headline the
+    # rationale. horizon_tilt is sign-flipped by status in score_candidate, so a
+    # penalty (negative tilt) must never be sold as a merit.
+    hz = anchor * fit.horizon_tilt if fit.horizon_tilt > 0 else 0.0
     st = anchor * fit.standing_tilt
     # Dynasty-timeline signals (horizon, standing) lead the rationale over the
     # win-now upgrade; "starts now" is only the headline for a contender.
     if hz > 0 and hz >= up and hz >= st:
-        return ("young: dynasty > redraft, a building block" if fit.horizon_tilt > 0
-                else "win-now value, ready to contribute")
+        # Post-sign, a positive horizon tilt means win-now for a contender and
+        # youth otherwise. Branch on status, never on the flipped tilt sign.
+        return ("win-now value, ready to contribute" if status == "contend"
+                else "young: dynasty > redraft, a building block")
     if st > 0 and st >= up:
-        return f"fills your thinnest startable spot ({fit.asset.position})"
+        return f"fills a thin startable spot ({fit.asset.position})"
     if up > 0:
         if status == "contend":
             return f"starts for you now (+{fit.marginal_starter:,} to your lineup)"

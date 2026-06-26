@@ -196,6 +196,14 @@ def test_draft_mode_override_sets_status(fake_clients, league):
     assert "CONTEND" in con.output
 
 
+def test_draft_rejects_unknown_mode(fake_clients, league):
+    """A typo'd --mode must fail loudly, not silently fall back to auto-detect."""
+    _write_config(league)
+    result = runner.invoke(app, ["draft", "--mode", "contnd", "--limit", "5"])
+    assert result.exit_code == 1
+    assert "--mode must be" in result.output
+
+
 def test_corrupt_config_is_a_clean_message(fake_clients):
     from ff.core import config as cfgmod
     home = cfgmod.home()

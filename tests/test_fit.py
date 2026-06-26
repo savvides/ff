@@ -75,6 +75,15 @@ def test_horizon_flips_order_by_status():
     assert oc.index("vet") < oc.index("yng")  # contend favors win-now vet
     assert orr.index("yng") < orr.index("vet")  # rebuild favors young
 
+    # The rationale must describe the REAL signal, not the post-sign tilt. The
+    # horizon sign is flipped by status inside score_candidate, so keying the
+    # message off the flipped tilt sign inverts it for contenders.
+    why_c = {f.asset.id: f.why for f in fc}
+    why_r = {f.asset.id: f.why for f in fr}
+    assert "win-now" in why_c["vet"]  # contend boosts the vet *as* win-now value
+    assert "building block" in why_r["yng"]  # rebuild boosts the young *as* future
+    assert "building block" not in why_c["vet"]  # never call a win-now vet "young"
+
 
 # (c2) standing tilt promotes a startable hole, contenders only -------------
 def test_standing_tilt_promotes_hole_position_in_contend_only():

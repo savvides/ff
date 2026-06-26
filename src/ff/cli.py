@@ -507,6 +507,10 @@ def draft(
     if not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you.")
 
+    mode = mode.lower()
+    if mode not in ("auto", "contend", "rebuild"):
+        _fail("--mode must be auto, contend, or rebuild.")
+
     if not draft_id:
         summary = _active_draft(sc, cfg.league_id)
         if not summary:
@@ -597,7 +601,9 @@ def draft(
     all_vals = value_all_rosters(rosters, book, players_meta)
     my_rank = next((v.power_rank for v in all_vals if v.roster_id == mine.roster_id), None)
     val.power_rank = my_rank
-    status = mode if mode in ("contend", "rebuild") else detect_status(my_rank, teams)
+    # Status thirds are over the ranked rosters (len(all_vals)), the same
+    # denominator as TeamContext.num_teams, not the draft-settings team count.
+    status = mode if mode in ("contend", "rebuild") else detect_status(my_rank, len(all_vals))
 
     pool = available(book, taken, position=position)
     if rookies:
