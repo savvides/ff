@@ -85,6 +85,10 @@ class Roster(BaseModel):
     team_name: str = "Unknown"
     player_ids: List[str] = Field(default_factory=list)
     starters: List[str] = Field(default_factory=list)
+    # Taxi (practice squad) and reserve (IR) are subsets of player_ids that do
+    # NOT occupy an active roster slot. Empty for leagues without those pools.
+    taxi: List[str] = Field(default_factory=list)
+    reserve: List[str] = Field(default_factory=list)
     wins: int = 0
     losses: int = 0
     ties: int = 0
@@ -102,6 +106,85 @@ class RosterValuation(BaseModel):
     assets: List[Asset] = Field(default_factory=list)  # sorted desc by value
     unvalued: List[str] = Field(default_factory=list)  # player_ids with no value
     power_rank: Optional[int] = None  # 1 = most valuable roster in the league
+
+
+class RosterSlot(BaseModel):
+    """One rostered player, categorized by where they sit, with the signals a
+    roster-cleanup decision needs: value, age/experience, and taxi eligibility."""
+
+    player_id: str
+    name: str
+    position: Optional[str] = None
+    age: Optional[float] = None
+    years_exp: Optional[int] = None
+    value: int = 0
+    trend_30day: Optional[int] = None
+    slot: str = "BENCH"  # START | BENCH | TAXI | IR
+    taxi_eligible: bool = False
+
+    @property
+    def is_active(self) -> bool:
+        """Occupies a starter/bench slot (so dropping it frees active room).
+        Taxi and IR players do not, which is why cutting them adds no waiver room."""
+        return self.slot in ("START", "BENCH")
+
+
+class RosterAudit(BaseModel):
+    """A roster's capacity vs its fill, plus ranked drop and taxi-move
+    suggestions - the input to a cleanup decision. Pure, deterministic."""
+
+    team_name: str
+    starter_cap: int = 0
+    bench_cap: int = 0
+    taxi_cap: int = 0
+    ir_cap: int = 0
+    slots: List[RosterSlot] = Field(default_factory=list)  # every owned player
+    # Non-starters ranked worst-first (lowest value); dropping one frees an active
+    # slot only if it is_active (bench), not if it is on taxi/IR.
+    drop_candidates: List[RosterSlot] = Field(default_factory=list)
+    # Taxi-eligible bench players (best first) that could be stashed to free an
+    # active slot WITHOUT dropping anyone; capped at the open taxi slots.
+    taxi_candidates: List[RosterSlot] = Field(default_factory=list)
+
+    def _in(self, slot: str) -> List[RosterSlot]:
+        return [s for s in self.slots if s.slot == slot]
+
+    @property
+    def starters(self) -> List[RosterSlot]:
+        return self._in("START")
+
+    @property
+    def bench(self) -> List[RosterSlot]:
+        return self._in("BENCH")
+
+    @property
+    def taxi(self) -> List[RosterSlot]:
+        return self._in("TAXI")
+
+    @property
+    def ir(self) -> List[RosterSlot]:
+        return self._in("IR")
+
+    @property
+    def active_count(self) -> int:
+        return len(self.starters) + len(self.bench)
+
+    @property
+    def active_cap(self) -> int:
+        return self.starter_cap + self.bench_cap
+
+    @property
+    def active_open(self) -> int:
+        """Open active slots; negative means the roster is over the cap."""
+        return self.active_cap - self.active_count
+
+    @property
+    def taxi_open(self) -> int:
+        return self.taxi_cap - len(self.taxi)
+
+    @property
+    def ir_open(self) -> int:
+        return self.ir_cap - len(self.ir)
 
 
 class TradeSide(BaseModel):

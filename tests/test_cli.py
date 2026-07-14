@@ -119,6 +119,18 @@ def test_trade_command(fake_clients, league):
     assert "win" in result.output.lower()
 
 
+def test_cleanup_command(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["cleanup"])
+    assert result.exit_code == 0, result.output
+    # roster 1: 2 starters + 1 bench kicker, cap 12 -> 9 open
+    assert "9 open" in result.output
+    assert "taxi 0/2" in result.output
+    # the 0-value bench kicker is the drop candidate, and its drop frees an active slot
+    assert "Test Kicker" in result.output
+    assert "active slot" in result.output
+
+
 def test_waivers_command(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["waivers"])

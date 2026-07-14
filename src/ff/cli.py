@@ -6,6 +6,7 @@
     ff values [-p WR]       dynasty rankings for your format (FantasyPros killer)
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
     ff waivers              trending free agents worth grabbing, by value
+    ff cleanup [team]       roster capacity: who to drop / stash on taxi for room
     ff draft [-p QB] [-r]   live draft board: your picks + best available by value
 """
 
@@ -27,6 +28,7 @@ from rich.table import Table
 from ff import __version__
 from ff.analysis import (
     analyze_trade,
+    audit_roster,
     available,
     detect_status,
     my_picks,
@@ -370,6 +372,90 @@ def waivers(
         status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
         t.add_row(a.name, a.position or "-", f"{a.value:,}", f"{tgt.add_count:,}", status)
     console.print(t)
+
+
+@app.command()
+@_guard
+def cleanup(
+    team: Optional[str] = typer.Argument(None, help="Team name; defaults to yours."),
+    drops: int = typer.Option(8, help="How many drop candidates to list."),
+) -> None:
+    """Roster cleanup: capacity vs fill, who to drop, and which young players to
+    stash on taxi so you free active room for a waiver add without losing value."""
+    cfg, sc = _load()
+    if team is None and not cfg.user_id:
+        _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
+    league = sc.league(cfg.league_id)
+    settings = league.get("settings") or {}
+    roster_positions = league.get("roster_positions") or []
+    book = _book(cfg)
+    rosters = _league_rosters(cfg, sc)
+    target = _pick_roster(rosters, team, cfg.user_id)
+    if target is None:
+        _fail("could not find that team. Try `ff power` to list teams.")
+    players_meta = sc.players()
+
+    audit = audit_roster(
+        target, book, players_meta,
+        roster_positions=roster_positions,
+        taxi_slots=int(settings.get("taxi_slots") or 0),
+        reserve_slots=int(settings.get("reserve_slots") or 0),
+        taxi_allow_vets=bool(settings.get("taxi_allow_vets")),
+        taxi_years=settings.get("taxi_years"),
+        drop_limit=drops,
+    )
+
+    if audit.active_open < 0:
+        active_txt = (f"[bold red]{audit.active_count}/{audit.active_cap} "
+                      f"- OVER by {-audit.active_open}[/]")
+    elif audit.active_open == 0:
+        active_txt = f"[yellow]{audit.active_count}/{audit.active_cap} - full[/]"
+    else:
+        active_txt = (f"[green]{audit.active_count}/{audit.active_cap} "
+                      f"- {audit.active_open} open[/]")
+    console.print(Panel.fit(
+        f"[bold]{audit.team_name}[/]\n"
+        f"active (start+bench) {active_txt}\n"
+        f"taxi {len(audit.taxi)}/{audit.taxi_cap}   IR {len(audit.ir)}/{audit.ir_cap}",
+        title="roster cleanup"))
+
+    # Concrete "how to make room" line: taxi stashes + zero-value bench drops each
+    # open one active slot right now.
+    bench_zeros = [s for s in audit.drop_candidates if s.is_active and s.value == 0]
+    openable = len(audit.taxi_candidates) + len(bench_zeros)
+    if audit.active_open <= 0 and openable:
+        console.print(f"[bold]make room:[/] up to [bold]{openable}[/] active slot(s) "
+                      f"available now ([green]{len(audit.taxi_candidates)} taxi stash[/], "
+                      f"[green]{len(bench_zeros)} zero-value bench drop[/]).")
+
+    dt = Table(title="drop candidates - worst value first")
+    right = ("age", "exp", "value", "30d")
+    for c in ("player", "pos", "age", "exp", "value", "30d", "where", "frees"):
+        dt.add_column(c, justify="right" if c in right else "left")
+    for s in audit.drop_candidates:
+        frees = "[green]active slot[/]" if s.is_active else f"[dim]{s.slot.lower()} slot only[/]"
+        dt.add_row(s.name, s.position or "-",
+                   f"{s.age:.0f}" if s.age else "-",
+                   str(s.years_exp) if s.years_exp is not None else "-",
+                   f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-",
+                   s.slot, frees)
+    console.print(dt)
+
+    if audit.taxi_candidates:
+        tt = Table(title="stash on taxi - frees an active slot, keeps the player")
+        for c in ("player", "pos", "age", "value", "30d"):
+            tt.add_column(c, justify="right" if c in ("age", "value", "30d") else "left")
+        for s in audit.taxi_candidates:
+            tt.add_row(s.name, s.position or "-", f"{s.age:.0f}" if s.age else "-",
+                       f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-")
+        console.print(tt)
+    elif audit.taxi_open > 0:
+        console.print(f"[dim]{audit.taxi_open} taxi slot(s) open, but no taxi-eligible "
+                      f"bench player to stash.[/]")
+
+    console.print("[dim]Dropping a taxi/IR player frees a taxi/IR slot, not an active one; "
+                  "only a bench drop or a taxi stash opens room for a waiver add. "
+                  "ff is read-only - make the moves in Sleeper.[/]")
 
 
 @app.command()

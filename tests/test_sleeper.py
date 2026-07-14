@@ -62,6 +62,19 @@ def test_build_rosters(rosters_raw, users_raw):
     assert r1.starters == ["7564", "9221"]
     assert r1.wins == 8 and r1.losses == 5
     assert r1.points_for == 1500.45
+    # leagues without taxi/IR: those lists default empty
+    assert r1.taxi == [] and r1.reserve == []
+
+
+def test_build_rosters_taxi_and_reserve():
+    raw = [{"roster_id": 1, "owner_id": "u",
+            "players": ["a", "b", "c", "d"], "starters": ["a"],
+            "taxi": ["c", "0"], "reserve": ["d"], "settings": {}}]
+    users = [{"user_id": "u", "display_name": "x", "metadata": {}}]
+    r = build_rosters(raw, users)[0]
+    assert r.taxi == ["c"]          # empty-slot "0" filtered out
+    assert r.reserve == ["d"]
+    assert r.player_ids == ["a", "b", "c", "d"]  # taxi/IR are subsets of players
 
 
 @responses.activate
