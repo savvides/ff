@@ -23,6 +23,33 @@ def test_fantasycalc_live_has_players_and_picks():
     assert star is not None and star.value > 0 and star.overall_rank
 
 
+def test_fantasycalc_live_pick_tiers_stay_distinct():
+    # `ff picks` and tiered trade input depend on FantasyCalc naming near-season
+    # rounds "YYYY 1st (Early)/(Mid)/(Late)". If that naming drifts, the tier keys
+    # vanish and every pick silently prices at the flat round value - catch it here.
+    book = ValuesClient().fetch(Format(superflex=True, num_qbs=2, num_teams=12, ppr=1.0))
+    tiers = [k for k in book.picks if k.endswith((" early", " mid", " late"))]
+    assert tiers, "no tiered pick entries - has FantasyCalc renamed its tiers?"
+    year = tiers[0].split()[0]
+    early = book.picks.get(f"{year} 1 early")
+    late = book.picks.get(f"{year} 1 late")
+    assert early and late and early.value > late.value
+    # the flat round entry must survive alongside the tiers (collision regression)
+    assert f"{year} 1" in book.picks
+
+
+def test_sleeper_live_traded_picks_shape():
+    # Shape canary for the endpoint `ff picks` reconciles ownership from.
+    league_id = os.environ.get("FF_LIVE_LEAGUE_ID")
+    if not league_id:
+        pytest.skip("set FF_LIVE_LEAGUE_ID to a real league id to run this")
+    traded = SleeperClient().traded_picks(league_id)
+    assert isinstance(traded, list)
+    if traded:
+        assert {"season", "round", "roster_id", "owner_id"} <= set(traded[0])
+        assert isinstance(traded[0]["season"], str)  # season is a string, round an int
+
+
 def test_fantasycalc_values_actually_track_format():
     # Superflex must value QBs far higher than 1QB. If FantasyCalc silently
     # ignored numQbs, these would be equal - exactly the regression to catch.

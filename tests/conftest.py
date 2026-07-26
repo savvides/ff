@@ -56,3 +56,8 @@ def players_meta():
 @pytest.fixture
 def trending():
     return load("trending")
+
+
+@pytest.fixture
+def traded_picks():
+    return load("traded_picks")

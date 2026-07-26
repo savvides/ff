@@ -1,6 +1,8 @@
 """End-to-end CLI tests. The two network clients are faked with fixtures; the
 real Typer app, config I/O, valuation, and rendering all run for real."""
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
@@ -12,7 +14,8 @@ runner = CliRunner()
 
 
 @pytest.fixture
-def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta, trending):
+def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta,
+                 trending, traded_picks):
     class FakeSleeper:
         def state(self, sport="nfl"):
             return {"season": "2026", "previous_season": "2025"}
@@ -37,6 +40,9 @@ def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta
 
         def trending(self, sport="nfl", kind="add", lookback_hours=24, limit=25):
             return trending
+
+        def traded_picks(self, lid):
+            return traded_picks
 
         def drafts(self, lid):
             # The list endpoint summary deliberately omits slot_to_roster_id,
@@ -102,6 +108,33 @@ def test_power_lists_all_teams(fake_clients, league):
     assert result.exit_code == 0, result.output
     assert "Gridiron" in result.output
     assert "22,000" in result.output
+
+
+def test_picks_league_summary(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["picks"])
+    assert result.exit_code == 0, result.output
+    assert "draft capital" in result.output
+    # Latest draft is season 2026 -> the window is 2027-28, rounds=2 (league
+    # draft_rounds unset -> the draft settings). Warriors: own mid 1st 3,100 +
+    # acquired late 1st 2,400 + acquired flat 2nd 1,400 + flat 2028 1st 2,200.
+    assert "9,100" in result.output
+    # The full 2027 cell pins the per-pick acquired marker AND the cell order.
+    assert "1st, 1st*, 2nd*" in result.output
+    # And rounds derivation: 2 rounds means no 3rd/4th anywhere in the window.
+    assert "3rd" not in result.output
+    assert "2027" in result.output and "2028" in result.output
+
+
+def test_picks_team_detail(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["picks", "Dynasty Warriors"])
+    assert result.exit_code == 0, result.output
+    assert "9,100" in result.output
+    assert "from Gridiron Kings" in result.output  # acquired pick names its origin
+    # The tier COLUMN itself, not the footer text: own 2027 1st row reads
+    # own | mid | 3,100. (The footer always contains "early/mid/late".)
+    assert re.search(r"own\s+│\s+mid\s+│\s+3,100", result.output)
 
 
 def test_values_by_position(fake_clients, league):

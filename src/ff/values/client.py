@@ -39,9 +39,14 @@ def normalize_name(name: str) -> str:
 def normalize_pick(label: str) -> Optional[str]:
     """Canonicalize a draft-pick label to a stable key.
 
-    Slot picks   -> "<year> pick R.SS"   (e.g. "2026 pick 1.05")
-    Round picks  -> "<year> <round>"      (e.g. "2027 1")
+    Slot picks   -> "<year> pick R.SS"        (e.g. "2026 pick 1.05")
+    Round picks  -> "<year> <round>"           (e.g. "2027 1")
+    Tiered picks -> "<year> <round> <tier>"    (e.g. "2027 1 early")
     Returns None if `label` is not pick-shaped.
+
+    The tier suffix is what keeps FantasyCalc's "2027 1st (Early)/(Mid)/(Late)"
+    entries distinct: without it all three collapse onto "2027 1" and whichever
+    loads last silently overwrites the others in `ValueBook.picks`.
     """
     s = label.lower().strip()
     year = re.search(r"\b(20\d{2})\b", s)
@@ -53,13 +58,16 @@ def normalize_pick(label: str) -> Optional[str]:
     if slot:
         return f"{yr} pick {int(slot.group(1))}.{int(slot.group(2)):02d}"
 
+    tier_m = re.search(r"\b(early|mid|late)\b", s)
+    tier = f" {tier_m.group(1)}" if tier_m else ""
+
     # round-level: an ordinal word/number, or "round N" / "rN"
     rnd = re.search(r"\bround\s*([1-9])\b", s) or re.search(r"\br([1-9])\b", s)
     if rnd:
-        return f"{yr} {rnd.group(1)}"
+        return f"{yr} {rnd.group(1)}{tier}"
     for tok in s.split():
         if tok in _ORDINALS:
-            return f"{yr} {_ORDINALS[tok]}"
+            return f"{yr} {_ORDINALS[tok]}{tier}"
     return None
 
 
@@ -133,6 +141,14 @@ class ValueBook:
             m = re.match(r"(20\d{2}) pick (\d+)\.\d+", pk)
             if m and f"{m.group(1)} {m.group(2)}" in self.picks:
                 return self.picks[f"{m.group(1)} {m.group(2)}"]
+            # tier fallback both ways: a tiered ask without a tiered entry drops
+            # to the flat round value; a flat ask with only tiered entries takes
+            # mid, the neutral assumption when the slot is unknown.
+            m = re.match(r"(20\d{2} [1-9]) (?:early|mid|late)$", pk)
+            if m and m.group(1) in self.picks:
+                return self.picks[m.group(1)]
+            if f"{pk} mid" in self.picks:
+                return self.picks[f"{pk} mid"]
             return None
 
         # a player, by exact normalized name then fuzzy

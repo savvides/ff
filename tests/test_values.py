@@ -69,8 +69,32 @@ def test_suggest_offers_ambiguous_surname_candidates():
 
 
 def test_resolve_round_pick(book):
+    # Regression: the tiered "2027 1st (Early/Mid/Late)" entries load after the
+    # flat one; before tier-aware keys they all collapsed onto "2027 1" and the
+    # last tier silently overwrote this flat value.
     assert book.resolve("2027 1st").value == 3000
     assert book.resolve("2026 2nd").value == 1500
+
+
+def test_resolve_tiered_pick(book):
+    assert book.resolve("2027 1st (Early)").value == 4200
+    assert book.resolve("2027 early 1st").value == 4200
+    assert book.resolve("2027 Late 1st").value == 2400
+
+
+def test_resolve_tiered_ask_falls_back_to_flat(book):
+    # No tiered 2028 entries exist -> a tiered ask uses the flat round value.
+    assert book.resolve("2028 early 1st").value == 2200
+
+
+def test_resolve_flat_ask_falls_back_to_mid():
+    # Only tiered entries exist -> a flat ask takes mid, the neutral slot.
+    from ff.values.client import _asset_from_entry
+    from ff.values import ValueBook
+    b = ValueBook([_asset_from_entry(
+        {"player": {"id": i, "name": f"2029 1st ({t})", "position": "PICK"},
+         "value": v}) for i, (t, v) in enumerate([("Early", 40), ("Mid", 30), ("Late", 20)])])
+    assert b.resolve("2029 1st").value == 30
 
 
 def test_resolve_slot_pick_exact(book):
@@ -99,3 +123,6 @@ def test_normalize_helpers():
     assert normalize_pick("2027 1st") == "2027 1"
     assert normalize_pick("2026 Pick 1.05") == "2026 pick 1.05"
     assert normalize_pick("Josh Allen") is None
+    assert normalize_pick("2027 1st (Early)") == "2027 1 early"
+    assert normalize_pick("2027 Mid 1st") == "2027 1 mid"
+    assert normalize_pick("2027 round 2 late") == "2027 2 late"

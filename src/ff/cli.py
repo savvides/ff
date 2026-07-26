@@ -3,6 +3,7 @@
     ff setup <username>     pick your league, auto-detect its format, save it
     ff roster [team]        price out a roster, with power rank + positions
     ff power                league power rankings by dynasty value
+    ff picks [team]         future draft capital by team, tier-valued
     ff values [-p WR]       dynasty rankings for your format (FantasyPros killer)
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
     ff waivers              trending free agents worth grabbing, by value
@@ -33,6 +34,7 @@ from ff.analysis import (
     detect_status,
     my_picks,
     optimal_lineup,
+    pick_ledger,
     position_deltas,
     projected_points,
     rank_fits,
@@ -258,6 +260,82 @@ def power() -> None:
                   "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
 
 
+# --- picks ---------------------------------------------------------------
+
+@app.command()
+@_guard
+def picks(
+    team: Optional[str] = typer.Argument(None, help="Team name; omit for the whole league."),
+    years: int = typer.Option(2, help="How many future seasons to show."),
+    rounds: Optional[int] = typer.Option(None, help="Rookie rounds per season; "
+                                         "overrides auto-detection."),
+) -> None:
+    """Future draft capital by team: every pick's current owner (endowment
+    reconciled with trades), valued like `ff trade`. The half of team value
+    that `power` leaves out."""
+    cfg, sc = _load()
+    book = _book(cfg)
+    rosters = _league_rosters(cfg, sc)
+    league = sc.league(cfg.league_id)
+
+    # "Future" starts after the latest draft's season: once a year's rookie
+    # draft exists its picks live on the draft board (`ff draft`), not here.
+    latest = _active_draft(sc, cfg.league_id)
+    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
+    start = base + 1 if latest else base
+    seasons = [str(start + i) for i in range(max(1, years))]
+    # Future rookie drafts are sized by the league's draft_rounds setting; the
+    # latest draft's own round count is only a fallback because in a first-year
+    # league that draft is the startup, whose 20+ rounds would fabricate future
+    # picks. --rounds overrides both (the year-one escape hatch).
+    rounds_n = int(rounds
+                   or (league.get("settings") or {}).get("draft_rounds")
+                   or (((latest or {}).get("settings")) or {}).get("rounds")
+                   or 4)
+
+    valuations = value_all_rosters(rosters, book, sc.players())
+    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book, ranks,
+                         seasons=seasons, rounds=rounds_n)
+
+    if team is None:
+        span = seasons[0] if len(seasons) == 1 else f"{seasons[0]}-{seasons[-1][2:]}"
+        t = Table(title=f"draft capital - {span} ({cfg.format.label()})")
+        for c in ("#", "team", *seasons, "pick value"):
+            t.add_column(c, justify="right" if c in ("#", "pick value") else "left")
+        for i, tp in enumerate(ledger, 1):
+            cells = []
+            for season in seasons:
+                have = [p.label.split()[1] + ("[cyan]*[/]" if p.acquired else "")
+                        for p in tp.picks if p.season == season]
+                cells.append(", ".join(have) or "[dim]none[/]")
+            t.add_row(str(i), tp.team_name, *cells, f"{tp.total_value:,}")
+        console.print(t)
+        console.print("[dim]* acquired via trade.[/]")
+    else:
+        target = _pick_roster(rosters, team, cfg.user_id)
+        if target is None:
+            _fail("could not find that team. Try `ff power` to list teams.")
+        tp = next(x for x in ledger if x.roster_id == target.roster_id)
+        rank = next((i for i, x in enumerate(ledger, 1) if x.roster_id == tp.roster_id))
+        console.print(Panel.fit(
+            f"[bold]{tp.team_name}[/]   pick value [bold cyan]{tp.total_value:,}[/]   "
+            f"draft capital rank [bold]#{rank}[/]/{len(ledger)}", title="picks"))
+        t = Table()
+        for c in ("pick", "origin", "tier", "value"):
+            t.add_column(c, justify="right" if c == "value" else "left")
+        for p in tp.picks:
+            t.add_row(p.label,
+                      f"[cyan]from {p.original_team}[/]" if p.acquired else "own",
+                      p.tier or "-", f"{p.value:,}")
+        console.print(t)
+    console.print("[dim]picks only - players are `ff power`. 1sts/2nds are tiered "
+                  "early/mid/late by the ORIGINAL team's power rank (a bad team's own "
+                  "1st is an early one); other rounds use the flat round value; "
+                  "0 = FantasyCalc does not price that round. This year's board: "
+                  "`ff draft`.[/]")
+
+
 # --- values / rankings ---------------------------------------------------
 
 @app.command()
@@ -340,7 +418,7 @@ def trade(
         console.print(f"[dim]matched '{tok}' -> {name}[/]")
     if unresolved:
         console.print(f"[bold red]unmatched (ignored):[/] {', '.join(unresolved)} "
-                      f"[dim]- check spelling or use 'YEAR 1st' for picks[/]")
+                      f"[dim]- check spelling, or '2027 1st' / '2027 early 1st' for picks[/]")
         for tok in unresolved:
             cands = book.suggest(tok)
             if cands:

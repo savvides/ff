@@ -8,5 +8,10 @@
   {"player": {"id": 100, "name": "2026 Pick 1.05", "sleeperId": null, "position": "PICK"}, "value": 3500, "overallRank": 25, "positionRank": 5, "trend30Day": 0, "redraftValue": 0},
   {"player": {"id": 101, "name": "2026 1st", "sleeperId": null, "position": "PICK"}, "value": 4000, "overallRank": 18, "positionRank": 3, "trend30Day": 0, "redraftValue": 0},
   {"player": {"id": 102, "name": "2027 1st", "sleeperId": null, "position": "PICK"}, "value": 3000, "overallRank": 30, "positionRank": 6, "trend30Day": 0, "redraftValue": 0},
-  {"player": {"id": 103, "name": "2026 2nd", "sleeperId": null, "position": "PICK"}, "value": 1500, "overallRank": 60, "positionRank": 12, "trend30Day": 0, "redraftValue": 0}
+  {"player": {"id": 103, "name": "2026 2nd", "sleeperId": null, "position": "PICK"}, "value": 1500, "overallRank": 60, "positionRank": 12, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 104, "name": "2027 1st (Early)", "sleeperId": null, "position": "PICK"}, "value": 4200, "overallRank": 22, "positionRank": 4, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 105, "name": "2027 1st (Mid)", "sleeperId": null, "position": "PICK"}, "value": 3100, "overallRank": 28, "positionRank": 5, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 106, "name": "2027 1st (Late)", "sleeperId": null, "position": "PICK"}, "value": 2400, "overallRank": 40, "positionRank": 8, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 107, "name": "2027 2nd", "sleeperId": null, "position": "PICK"}, "value": 1400, "overallRank": 65, "positionRank": 13, "trend30Day": 0, "redraftValue": 0},
+  {"player": {"id": 108, "name": "2028 1st", "sleeperId": null, "position": "PICK"}, "value": 2200, "overallRank": 45, "positionRank": 9, "trend30Day": 0, "redraftValue": 0}
 ]

@@ -77,6 +77,45 @@ class DraftPickInfo(BaseModel):
     position: Optional[str] = None
 
 
+class FuturePick(BaseModel):
+    """One future rookie-draft pick a roster currently owns.
+
+    Sleeper has no per-team pick endpoint: ownership is the default endowment
+    (every team owns its own pick per season/round) reconciled with the league's
+    `traded_picks`. `tier` records which FantasyCalc tier priced it (early/mid/
+    late, from the original team's power rank), None when only the flat round
+    value existed."""
+
+    season: str
+    round: int
+    original_roster_id: int
+    original_team: str = ""
+    acquired: bool = False  # came from another team via trade
+    tier: Optional[str] = None  # "early" | "mid" | "late" | None (flat round value)
+    value: int = 0
+
+    @property
+    def label(self) -> str:
+        n = self.round
+        if 10 <= n % 100 <= 20:  # 11th-13th, not 11st/12nd/13rd
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+        return f"{self.season} {n}{suffix}"
+
+
+class TeamPicks(BaseModel):
+    """Every future pick one roster owns, valued - a team's draft capital."""
+
+    roster_id: int
+    team_name: str = ""
+    picks: List[FuturePick] = Field(default_factory=list)
+
+    @property
+    def total_value(self) -> int:
+        return sum(p.value for p in self.picks)
+
+
 class Roster(BaseModel):
     """A team in the league, as Sleeper reports it (before valuation)."""
 
