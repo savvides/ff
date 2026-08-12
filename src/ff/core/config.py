@@ -35,28 +35,35 @@ class Config(BaseModel):
     """The saved league. Written once by `ff setup`, read by every command."""
 
     league_id: str
-    season: str
+    season: int
     name: str = ""
     format: Format = Format()
     username: Optional[str] = None
     user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    league_name: Optional[str] = None
+    # LLM Terminal Runner settings
+    llm_backend: str = "auto"  # "auto" | "agy" | "gemini" | "claude" | "ollama"
+    ollama_model: str = "llama3.2"
 
 
-def load_config() -> Config:
-    path = _config_path()
-    if not path.exists():
+def load_config(path: Optional[Path] = None) -> Config:
+    p = path or _config_path()
+    if not p.exists():
         raise FileNotFoundError(
             "No league configured yet. Run `ff setup <sleeper-username>` first."
         )
-    return Config.model_validate_json(path.read_text())
+    return Config.model_validate_json(p.read_text())
 
 
-def save_config(cfg: Config) -> Path:
-    home().mkdir(parents=True, exist_ok=True)
-    path = _config_path()
-    path.write_text(cfg.model_dump_json(indent=2))
-    return path
+def save_config(cfg: Config, path: Optional[Path] = None) -> Path:
+    p = path or _config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(cfg.model_dump_json(indent=2))
+    return p
 
 
-def config_exists() -> bool:
-    return _config_path().exists()
+def config_exists(path: Optional[Path] = None) -> bool:
+    p = path or _config_path()
+    return p.exists()
+
