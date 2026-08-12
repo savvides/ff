@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Roster, RosterAudit, RosterSlot
+from ff.sleeper import player_name
 from ff.values import ValueBook
 
 # Slots in roster_positions that are not active starting slots.
@@ -45,16 +46,6 @@ def taxi_eligible(
     return years_exp == 0
 
 
-def _meta(player_id: str, players_meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    return (players_meta or {}).get(player_id) or {}
-
-
-def _name(player_id: str, m: Dict[str, Any]) -> str:
-    name = m.get("full_name")
-    if not name:
-        name = " ".join(x for x in (m.get("first_name"), m.get("last_name")) if x)
-    return name or player_id
-
 
 def audit_roster(
     roster: Roster,
@@ -79,7 +70,7 @@ def audit_roster(
 
     slots: List[RosterSlot] = []
     for pid in roster.player_ids:
-        m = _meta(pid, players_meta)
+        m = (players_meta or {}).get(pid, {})
         valued = book.value_for_sleeper_id(pid)
         # Category precedence: a player can appear in both `starters` and `taxi`
         # only through bad data; taxi/IR win because they define slot occupancy.
@@ -94,7 +85,7 @@ def audit_roster(
         years_exp = m.get("years_exp")
         slots.append(RosterSlot(
             player_id=pid,
-            name=valued.name if valued else _name(pid, m),
+            name=valued.name if valued else player_name(pid, players_meta),
             position=(valued.position if valued else m.get("position")),
             age=(valued.age if valued and valued.age is not None else m.get("age")),
             years_exp=years_exp,

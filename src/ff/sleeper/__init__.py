@@ -8,7 +8,8 @@ from ff.sleeper.client import (
     SleeperClient,
     build_rosters,
     detect_format,
+    player_name,
     team_names,
 )
 
-__all__ = ["SleeperClient", "detect_format", "build_rosters", "team_names"]
+__all__ = ["SleeperClient", "detect_format", "build_rosters", "player_name", "team_names"]

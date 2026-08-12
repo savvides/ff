@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Asset, Roster, WaiverTarget
+from ff.sleeper import player_name
 from ff.values import ValueBook
 
 
@@ -34,9 +35,7 @@ def waiver_targets(
             name, pos = pid, None
             if players_meta and pid in players_meta:
                 m = players_meta[pid]
-                name = m.get("full_name") or " ".join(
-                    x for x in (m.get("first_name"), m.get("last_name")) if x
-                ) or pid
+                name = player_name(pid, players_meta)
                 pos = m.get("position")
             asset = Asset(id=pid, name=name, position=pos, value=0)
         targets.append(

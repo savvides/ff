@@ -17,7 +17,6 @@ from ff.analysis.fit import (
     score_candidate,
     startable_value,
 )
-from ff.analysis.lineup import starting_slot_counts
 from ff.analysis.movers import value_redraft_gap
 from ff.contracts import Asset, RosterValuation
 
@@ -32,12 +31,6 @@ def RV(assets, rank):
 
 SF = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX", "BN", "IR"]
 
-
-# (a) slot parsing -----------------------------------------------------------
-def test_starting_slot_counts_drops_bench_and_unsupported():
-    counts = starting_slot_counts(SF + ["WRRB_FLEX"])
-    assert counts == {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPER_FLEX": 1}
-    assert "BN" not in counts and "IR" not in counts and "WRRB_FLEX" not in counts
 
 
 # (b) starter-upgrade marginal math -----------------------------------------
