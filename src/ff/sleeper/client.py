@@ -83,14 +83,37 @@ class SleeperClient:
         ) or []
 
 
-# --- pure helpers (no I/O) ----------------------------------------------
+# --- pure helpers & module wrappers ------------------------------------
 
-def detect_format(league: Dict[str, Any]) -> Format:
-    """Derive a `Format` from a Sleeper league object.
+def get_user(username_or_id: str) -> Dict[str, Any]:
+    sc = SleeperClient()
+    user = sc.user(username_or_id)
+    if not user:
+        raise ValueError(f"Sleeper user '{username_or_id}' not found.")
+    return user
+
+
+def get_user_leagues(user_id: str, season: Optional[str] = None) -> List[Dict[str, Any]]:
+    sc = SleeperClient()
+    s = season or sc.state().get("season", "2026")
+    leagues = sc.user_leagues(user_id, str(s))
+    if not leagues:
+        prev = sc.state().get("previous_season")
+        if prev:
+            leagues = sc.user_leagues(user_id, str(prev))
+    return leagues or []
+
+
+def detect_format(league: Dict[str, Any] | str) -> Format:
+    """Derive a `Format` from a Sleeper league object or league_id.
 
     This is the keystone: we never ask the user for superflex/PPR/team count -
     Sleeper already knows, so the values we pull are always right for the league.
     """
+    if isinstance(league, str):
+        sc = SleeperClient()
+        league = sc.league(league) or {}
+
     positions: List[str] = league.get("roster_positions") or []
     superflex = "SUPER_FLEX" in positions
     num_qbs = positions.count("QB") + positions.count("SUPER_FLEX")
@@ -111,6 +134,7 @@ def detect_format(league: Dict[str, Any]) -> Format:
         ppr=ppr,
         tep=float(scoring.get("bonus_rec_te", 0.0) or 0.0),
     )
+
 
 
 def team_names(users: List[Dict[str, Any]]) -> Dict[str, str]:
