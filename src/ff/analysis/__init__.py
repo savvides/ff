@@ -12,7 +12,6 @@ from ff.analysis.lineup import (
     optimal_lineup,
     project_points,
     projected_points,
-    starting_slot_counts,
     starting_slots,
 )
 from ff.analysis.movers import top_movers, value_redraft_gap
@@ -33,7 +32,6 @@ __all__ = [
     "project_points",
     "projected_points",
     "starting_slots",
-    "starting_slot_counts",
     "pick_number",
     "my_picks",
     "available",

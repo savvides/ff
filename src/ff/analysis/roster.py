@@ -5,23 +5,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Asset, Roster, RosterValuation
+from ff.sleeper import player_name
 from ff.values import ValueBook
 
-
-def _player_name(player_id: str, players_meta: Optional[Dict[str, Any]]) -> str:
-    if not players_meta or player_id not in players_meta:
-        return player_id
-    m = players_meta[player_id]
-    name = m.get("full_name")
-    if not name:
-        name = " ".join(x for x in (m.get("first_name"), m.get("last_name")) if x)
-    return name or player_id
-
-
-def _player_position(player_id: str, players_meta: Optional[Dict[str, Any]]) -> Optional[str]:
-    if not players_meta or player_id not in players_meta:
-        return None
-    return players_meta[player_id].get("position")
 
 
 def value_roster(
@@ -48,8 +34,8 @@ def value_roster(
         else:
             asset = Asset(
                 id=pid,
-                name=_player_name(pid, players_meta),
-                position=_player_position(pid, players_meta),
+                name=player_name(pid, players_meta),
+                position=(players_meta or {}).get(pid, {}).get("position"),
                 value=0,
             )
             unvalued.append(pid)

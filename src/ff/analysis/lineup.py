@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Lineup, LineupSlot, Roster
+from ff.sleeper import player_name
 
 # Which positions may fill each starting slot. This set is intentionally laminar
 # (every pair of eligibility sets is disjoint or nested) so the greedy assignment
@@ -69,8 +70,7 @@ def projected_points(roster: Roster, projections: Dict[str, Dict[str, Any]],
     out: Dict[str, Dict[str, Any]] = {}
     for pid in roster.player_ids:
         m = meta.get(pid, {})
-        name = m.get("full_name") or " ".join(
-            x for x in (m.get("first_name"), m.get("last_name")) if x) or pid
+        name = player_name(pid, meta)
         pos = m.get("position")
         out[pid] = {
             "name": name,
@@ -88,13 +88,6 @@ def starting_slots(roster_positions: List[str]) -> List[str]:
     """
     return [s for s in roster_positions if s in SLOT_ELIGIBILITY]
 
-
-def starting_slot_counts(roster_positions: List[str]) -> Dict[str, int]:
-    """Slot-count template, e.g. {QB:1, RB:2, WR:2, TE:1, FLEX:3, SUPER_FLEX:1}."""
-    out: Dict[str, int] = {}
-    for s in starting_slots(roster_positions):
-        out[s] = out.get(s, 0) + 1
-    return out
 
 
 def _assign(positions: Dict[str, Optional[str]], scores: Dict[str, float],

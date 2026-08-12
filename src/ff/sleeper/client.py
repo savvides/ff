@@ -52,12 +52,6 @@ class SleeperClient:
     def league_users(self, league_id: str) -> List[Dict[str, Any]]:
         return self._get(f"league/{league_id}/users", ttl=LEAGUE_TTL) or []
 
-    def matchups(self, league_id: str, week: int) -> List[Dict[str, Any]]:
-        return self._get(f"league/{league_id}/matchups/{week}", ttl=LEAGUE_TTL) or []
-
-    def transactions(self, league_id: str, week: int) -> List[Dict[str, Any]]:
-        return self._get(f"league/{league_id}/transactions/{week}", ttl=LEAGUE_TTL) or []
-
     def traded_picks(self, league_id: str) -> List[Dict[str, Any]]:
         return self._get(f"league/{league_id}/traded_picks", ttl=LEAGUE_TTL) or []
 
@@ -127,6 +121,17 @@ def team_names(users: List[Dict[str, Any]]) -> Dict[str, str]:
         name = meta.get("team_name") or u.get("display_name") or "Unknown"
         out[u["user_id"]] = name
     return out
+
+
+def player_name(player_id: str, players_meta: Optional[Dict[str, Any]]) -> str:
+    """Extract a player's full name from Sleeper metadata."""
+    if not players_meta or player_id not in players_meta:
+        return str(player_id)
+    m = players_meta[player_id]
+    name = m.get("full_name")
+    if not name:
+        name = " ".join(x for x in (m.get("first_name"), m.get("last_name")) if x)
+    return name.strip() or str(player_id)
 
 
 def build_rosters(rosters: List[Dict[str, Any]],

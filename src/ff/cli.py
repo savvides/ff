@@ -499,7 +499,8 @@ def cleanup(
 
     # Concrete "how to make room" line: taxi stashes + zero-value bench drops each
     # open one active slot right now.
-    bench_zeros = [s for s in audit.drop_candidates if s.is_active and s.value == 0]
+    taxi_ids = {s.player_id for s in audit.taxi_candidates}
+    bench_zeros = [s for s in audit.drop_candidates if s.is_active and s.value == 0 and s.player_id not in taxi_ids]
     openable = len(audit.taxi_candidates) + len(bench_zeros)
     if audit.active_open <= 0 and openable:
         console.print(f"[bold]make room:[/] up to [bold]{openable}[/] active slot(s) "
