@@ -1,23 +1,20 @@
-# ff - manage a Sleeper dynasty league without paying FantasyPros
+# ff
 
-`ff` pulls your Sleeper dynasty league and overlays free dynasty trade values so
-you get the things you were paying FantasyPros for - rankings, a trade analyzer,
-roster valuation, power rankings, and waiver targets - from the command line.
+[![CI](https://github.com/savvides/ff/actions/workflows/ci.yml/badge.svg)](https://github.com/savvides/ff/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Why this exists
+A command-line tool for managing a Sleeper dynasty fantasy football league -
+rankings, trade analyzer, roster valuation, power rankings, lineup optimizer,
+waiver targets, live draft board.
 
-FantasyPros' dynasty tools sit behind the MVP/HOF tiers (~$72-108/yr). Almost
-everything they give a dynasty manager is available free:
+## Why a CLI
 
-| What you used FantasyPros for | Free replacement here |
-| --- | --- |
-| Dynasty rankings | `ff values` - FantasyCalc values for *your* format |
-| Trade Analyzer (players + picks) | `ff trade --give … --get …` |
-| Start/sit & lineup optimizer | `ff lineup` - best lineup by your exact scoring (incl TEP) |
-| Roster / team value | `ff roster` (rostered players; picks are valued in `trade`) |
-| League power rankings | `ff power` |
-| Buy-low / sell-high | `ff movers [--buy]` - dynasty vs win-now value gap |
-| Waiver suggestions | `ff waivers` - trending adds joined to value |
+- **Fast** - no page loads, no ads, answers in milliseconds from cache.
+- **Scriptable** - pipe it, cron it, wire it into your own tools.
+- **Yours** - runs locally, reads only public league data, no account or
+  tracking.
+- **Hackable** - pure Python, small, typed contracts between modules, easy to
+  extend for your own league's quirks.
 
 **Data sources (all free, no account, read-only):**
 - [Sleeper API](https://docs.sleeper.com/) - your league, rosters, matchups,
@@ -87,3 +84,12 @@ See `CLAUDE.md` for architecture and the design decisions behind it.
 - **No trade *finder* and no tiers/VORP yet.** `trade` evaluates a deal you
   specify; it does not scan the league to propose one. Rankings are raw value,
   without tier breaks or value-over-replacement.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the test lanes, and PR
+expectations.
+
+## License
+
+MIT - see [LICENSE](LICENSE).
