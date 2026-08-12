@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ff"
 version = "0.1.0"
-description = "Manage a Sleeper dynasty fantasy football league with free data - a FantasyPros replacement."
+description = "Command-line tool for managing a Sleeper dynasty fantasy football league: rosters, trade values, lineup optimizer, draft board, and waivers."
+authors = [{ name = "Philippos Savvides" }]
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
