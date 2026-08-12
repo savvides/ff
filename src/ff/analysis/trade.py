@@ -27,6 +27,16 @@ def _resolve_side(tokens: List[str], book: ValueBook) -> Tuple[List[Asset], List
     return assets, unresolved
 
 
+def evaluate_trade(
+    give_inputs: List[str],
+    get_inputs: List[str],
+    book: ValueBook,
+) -> TradeEvaluation:
+    """Evaluate trade given assets to give and assets to receive."""
+    evaluation, _ = analyze_trade(side_a_tokens=get_inputs, side_b_tokens=give_inputs, book=book)
+    return evaluation
+
+
 def analyze_trade(
     side_a_tokens: List[str],
     side_b_tokens: List[str],
