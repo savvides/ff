@@ -16,6 +16,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import re
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -47,6 +48,8 @@ from ff.analysis import (
 from ff.contracts import Roster
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
+from ff.services.llm.dispatcher import dispatch_tool
+from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import TOOL_SCHEMAS
 from ff.sleeper import SleeperClient, build_rosters, detect_format
@@ -827,6 +830,7 @@ def draft(
 
 
 @app.command()
+@_guard
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your league"),
     backend: Optional[str] = typer.Option(None, "--backend", help="Override LLM backend (agy, gemini, claude, ollama)"),
@@ -837,10 +841,70 @@ def ask(
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
     runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
-    system_prompt = f"You are an assistant for dynasty fantasy football. Available tools: {json.dumps(TOOL_SCHEMAS)}"
 
-    response = runner_inst.run(prompt=query, system_prompt=system_prompt)
-    console.print(Markdown(response))
+    system_prompt = (
+        f"You are an AI assistant for a Sleeper dynasty fantasy football CLI (`ff`).\n"
+        f"Available tools: {json.dumps(TOOL_SCHEMAS)}\n"
+        f"If the query requires league data, trade calculations, lineup optimization, waivers, draft fit, or onboarding, "
+        f"respond with ONLY a JSON tool call block in this format:\n"
+        f'{{"tool": "<tool_name>", "kwargs": {{ ... }}}}\n'
+        f"Do NOT include conversational text when issuing a tool call. If no tool is needed, respond in plain Markdown."
+    )
+
+    first_response = runner_inst.run(prompt=query, system_prompt=system_prompt)
+
+    tool_call = None
+    try:
+        data = json.loads(first_response.strip())
+        if isinstance(data, dict) and "tool" in data:
+            tool_call = data
+    except Exception:
+        match = re.search(r"```(?:json)?\s*(\{\s*\"tool\".*?\})\s*```", first_response, re.DOTALL)
+        if match:
+            try:
+                tool_call = json.loads(match.group(1))
+            except Exception:
+                pass
+
+    if not tool_call:
+        console.print(Markdown(first_response))
+        return
+
+    tool_name = tool_call.get("tool")
+    kwargs = tool_call.get("kwargs", {})
+
+    if tool_name == "setup_league":
+        username = kwargs.get("username")
+        if not username:
+            console.print("[yellow]Please provide your Sleeper username to complete onboarding.[/]")
+            return
+        cfg = onboard_user(username=username)
+        console.print(f"[bold green]Successfully onboarded Sleeper league[/] [cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!")
+        return
+
+    if not cfg:
+        console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
+        return
+
+    rosters = build_rosters(cfg.league_id)
+    value_book = ValuesClient().get_value_book(cfg.format)
+    ctx = {
+        "config": cfg,
+        "rosters": rosters,
+        "value_book": value_book,
+        "onboard_user": onboard_user,
+    }
+
+    result = dispatch_tool(tool_name, kwargs, ctx)
+
+    synthesis_prompt = (
+        f"User Query: '{query}'\n"
+        f"Executed Tool: '{tool_name}' with args {json.dumps(kwargs)}\n"
+        f"Deterministic Calculation Result:\n{json.dumps(result, indent=2)}\n\n"
+        f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
+    )
+    final_response = runner_inst.run(prompt=synthesis_prompt)
+    console.print(Markdown(final_response))
 
 
 @config_app.command(name="set-llm")

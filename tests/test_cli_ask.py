@@ -31,6 +31,31 @@ def test_ask_command_backend_override() -> None:
         assert "Mock answer" in res.output
 
 
+def test_ask_command_tool_execution_loop(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
+    cfg = Config(league_id="123", season=2026, format=Format(), llm_backend="auto")
+    save_config(cfg, path=cfg_path)
+
+    tool_call_json = '{"tool": "evaluate_trade", "kwargs": {"give": ["Gibbs"], "get": ["Bijan"]}}'
+    
+    with patch("ff.cli.TerminalRunner") as MockRunner, \
+         patch("ff.cli.build_rosters", return_value=[]), \
+         patch("ff.cli.ValuesClient") as MockValuesClient, \
+         patch("ff.cli.dispatch_tool", return_value={"give_total": 5000, "get_total": 5500}) as mock_dispatch:
+        
+        mock_inst = MagicMock()
+        # First call returns tool call json, second call returns final text
+        mock_inst.run.side_effect = [tool_call_json, "Final synthesized trade analysis: Bijan side is better."]
+        MockRunner.return_value = mock_inst
+        MockValuesClient.return_value.get_value_book.return_value = MagicMock()
+
+        res = runner.invoke(app, ["ask", "Should I trade Gibbs for Bijan?"])
+        assert res.exit_code == 0
+        assert mock_dispatch.called
+        assert "Bijan side is better" in res.output
+
+
 def test_config_set_llm_command(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)

@@ -13,8 +13,12 @@ class TerminalRunner:
         self.backend = self._resolve_backend(backend)
 
     def _resolve_backend(self, backend: str) -> str:
-        if backend in SUPPORTED_BACKENDS:
-            return backend
+        if backend != "auto":
+            if backend in SUPPORTED_BACKENDS:
+                if not shutil.which(backend):
+                    raise RuntimeError(f"Backend '{backend}' requested but binary '{backend}' was not found in PATH.")
+                return backend
+            raise ValueError(f"Unsupported backend '{backend}'. Must be 'auto' or one of {SUPPORTED_BACKENDS}")
         for b in SUPPORTED_BACKENDS:
             if shutil.which(b):
                 return b
