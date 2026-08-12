@@ -895,7 +895,11 @@ def ask(
         "onboard_user": onboard_user,
     }
 
-    result = dispatch_tool(tool_name, kwargs, ctx)
+    try:
+        result = dispatch_tool(tool_name, kwargs, ctx)
+    except Exception as e:
+        console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")
+        return
 
     synthesis_prompt = (
         f"User Query: '{query}'\n"
