@@ -12,7 +12,7 @@ def onboard_user(username: str, config_path: Optional[Path] = None) -> Config:
     try:
         user = sleeper_client.get_user(username)
         user_id = user["user_id"] if isinstance(user, dict) else username
-    except Exception:
+    except (ValueError, KeyError, TypeError, AttributeError):
         user_id = username
 
     leagues = sleeper_client.get_user_leagues(user_id)
@@ -24,7 +24,7 @@ def onboard_user(username: str, config_path: Optional[Path] = None) -> Config:
 
     try:
         raw_fmt: Any = sleeper_client.detect_format(league_id)
-    except Exception:
+    except (TypeError, ValueError, AttributeError):
         raw_fmt = sleeper_client.detect_format(league)
 
     if isinstance(raw_fmt, Format):
