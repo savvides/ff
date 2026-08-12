@@ -1,10 +1,12 @@
-from typer.testing import CliRunner
+from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
 import pytest
+from typer.testing import CliRunner
 
 from ff.cli import app
-from ff.core.config import Config, save_config, load_config
 from ff.contracts import Format
+from ff.core.config import Config, load_config, save_config
 
 runner = CliRunner()
 
@@ -24,14 +26,13 @@ def test_ask_command_backend_override() -> None:
 
         res = runner.invoke(app, ["ask", "Who to draft?", "--backend", "gemini"])
         assert res.exit_code == 0
-        MockRunner.assert_called_once_with(backend="gemini")
+        MockRunner.assert_called_once_with(backend="gemini", ollama_model="llama3.2")
         mock_inst.run.assert_called_once()
         assert "Mock answer" in res.output
 
 
 def test_config_set_llm_command(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr("ff.cli._config_path", lambda: cfg_path)
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
 
     cfg = Config(league_id="123", season=2026, format=Format(), llm_backend="auto")
@@ -47,7 +48,6 @@ def test_config_set_llm_command(tmp_path: pytest.TempPathFactory, monkeypatch: p
 
 def test_config_set_llm_invalid_backend(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr("ff.cli._config_path", lambda: cfg_path)
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
 
     cfg = Config(league_id="123", season=2026, format=Format(), llm_backend="auto")
@@ -56,3 +56,12 @@ def test_config_set_llm_invalid_backend(tmp_path: pytest.TempPathFactory, monkey
     res = runner.invoke(app, ["config", "set-llm", "invalid_backend"])
     assert res.exit_code != 0
     assert "Invalid backend" in res.output
+
+
+def test_config_set_llm_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
+
+    res = runner.invoke(app, ["config", "set-llm", "claude"])
+    assert res.exit_code != 0
+    assert "No league configured" in res.output

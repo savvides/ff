@@ -44,11 +44,9 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Format, Roster
-from ff.core.config import Config, _config_path, config_exists, load_config, save_config
+from ff.contracts import Roster
+from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
-from ff.services.llm.dispatcher import dispatch_tool
-from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import TOOL_SCHEMAS
 from ff.sleeper import SleeperClient, build_rosters, detect_format
@@ -836,8 +834,9 @@ def ask(
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
     target_backend = backend or (cfg.llm_backend if cfg else "auto")
+    ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
-    runner_inst = TerminalRunner(backend=target_backend)
+    runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
     system_prompt = f"You are an assistant for dynasty fantasy football. Available tools: {json.dumps(TOOL_SCHEMAS)}"
 
     response = runner_inst.run(prompt=query, system_prompt=system_prompt)
@@ -851,7 +850,12 @@ def set_llm(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
 ) -> None:
     """Configure the LLM backend used by 'ff ask'."""
-    cfg = load_config()
+    if not config_exists():
+        _fail("No league configured. Run 'ff setup <username>' first.")
+    try:
+        cfg = load_config()
+    except FileNotFoundError:
+        _fail("No league configured. Run 'ff setup <username>' first.")
     valid_backends = SUPPORTED_BACKENDS + ["auto"]
     if backend not in valid_backends:
         _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
