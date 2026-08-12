@@ -4,7 +4,7 @@
     ff roster [team]        price out a roster, with power rank + positions
     ff power                league power rankings by dynasty value
     ff picks [team]         future draft capital by team, tier-valued
-    ff values [-p WR]       dynasty rankings for your format (FantasyPros killer)
+    ff values [-p WR]       dynasty rankings for your league format
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
     ff waivers              trending free agents worth grabbing, by value
     ff cleanup [team]       roster capacity: who to drop / stash on taxi for room
@@ -345,7 +345,7 @@ def values(
                                             help="QB/RB/WR/TE; omit for overall."),
     limit: int = typer.Option(40, help="How many to list."),
 ) -> None:
-    """Dynasty rankings for your league format - the FantasyPros rankings page, free."""
+    """Dynasty rankings for your league format."""
     cfg, sc = _load()
     book = _book(cfg)
     assets = book.top(position, limit)

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ff is a command-line tool to manage a Sleeper dynasty fantasy football league using only free data, as a replacement for a paid FantasyPros subscription. It joins two free, auth-free, read-only APIs:
+ff is a command-line tool to manage a Sleeper dynasty fantasy football league using only free data. It joins two free, auth-free, read-only APIs:
 
 - Sleeper (docs.sleeper.com): league, rosters, users, matchups, transactions, trending adds, the players file.
 - FantasyCalc (api.fantasycalc.com): dynasty trade values for players and draft picks.

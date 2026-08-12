@@ -1,6 +1,6 @@
 """ff - manage a Sleeper dynasty league with free data.
 
-A FantasyPros replacement built on two free, auth-free sources:
+Built on two free, auth-free sources:
   * Sleeper API      - your league, rosters, matchups, transactions, trending.
   * FantasyCalc API  - dynasty trade values (players + draft picks), keyed by
                        sleeper_id so they join straight onto your roster.
