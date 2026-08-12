@@ -44,29 +44,44 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
 
 ## Commands
 
-- `ff setup <username> [--season Y] [--league-id ID]` - pick a league, detect
-  format, save it to `.ff/config.json`.
+- `ff setup <username> [--season Y] [--league-id ID] [-n INDEX]` - pick a
+  league (or `-n` to pick the Nth from the printed list non-interactively),
+  detect format, save it to `.ff/config.json`.
 - `ff roster [team] [--top N]` - price a roster: total value, power rank,
   positional breakdown, top assets.
 - `ff power` - league power rankings by dynasty value, next to W-L record.
+- `ff picks [team] [--years N] [--rounds N]` - future draft capital by team:
+  every pick's current owner (reconciled through traded picks), tier-valued
+  like `trade`. The half of team value `power` leaves out.
 - `ff values [-p QB|RB|WR|TE] [--limit N]` - dynasty rankings for your format.
-- `ff lineup [team] [--week N] [--season Y]` - optimal start/sit for a week,
-  scored by your league's exact rules (TEP included), with the start/sit moves
-  vs your current lineup. Defaults to the current/upcoming week.
 - `ff trade --give "A, B" --get "C, D"` - value both baskets and call it
   fair / win / lose, with a positional swing. Picks count; ambiguous names get
   a "did you mean" hint.
-- `ff movers [--buy] [--limit N]` - sell-high (win-now > dynasty) or, with
-  `--buy`, buy-low (dynasty > win-now) candidates by value gap.
-- `ff waivers [--limit N] [--all]` - trending adds that are still free agents in
-  your league, ranked by dynasty value.
+- `ff waivers [--limit N] [--all]` - trending adds still on waivers in your
+  league, ranked by dynasty value (or, with `--all`, including rostered
+  players too).
+- `ff cleanup [team] [--drops N]` - roster capacity vs. fill: drop candidates
+  (worst value first, flagged if the drop frees an active slot) and
+  taxi-stash suggestions that free active room without dropping anyone.
+- `ff movers [--buy] [--limit N] [--min-value N]` - sell-high (win-now >
+  dynasty) or, with `--buy`, buy-low (dynasty > win-now) candidates by value
+  gap; `--min-value` (default 1000) floors both values so deep stashes don't
+  dominate.
+- `ff lineup [team] [--week N] [--season Y]` - optimal start/sit for a week,
+  scored by your league's exact rules (TEP included), with the start/sit moves
+  vs your current lineup. Defaults to the current/upcoming week.
+- `ff draft [-p QB|RB|WR|TE] [--limit N] [-r] [--mode contend|rebuild|auto]
+  [--draft-id ID]` - live draft board scored FOR your team: your picks, where
+  you stand vs the league, and best available ranked by fit (roster need +
+  win-now/rebuild horizon), not raw market value alone.
+- `ff version` - print the ff version.
 
 ## Development
 
 ```bash
 make test          # gate suite - offline, deterministic, < 2s
 make test-live     # contract checks against the real APIs
-FF_LIVE_LEAGUE_ID=<a completed league id> make test-live   # also runs the draft-shape canary
+FF_LIVE_LEAGUE_ID=<a completed league id> make test-live   # also runs the traded-picks + draft-shape canaries
 ./.venv/bin/pytest tests/test_trade.py::test_trade_with_players_and_picks   # one test
 ```
 
@@ -74,9 +89,10 @@ See `CLAUDE.md` for architecture and the design decisions behind it.
 
 ## Limits (by design)
 
-- **`roster` and `power` value rostered players only**, not draft picks. Picks
-  are valued where you name them (`trade`); whole-team pick ownership from
-  `traded_picks` is not yet computed, so it is not in roster/power totals.
+- **`roster` and `power` value rostered players only**, not draft picks.
+  Whole-team pick ownership is reconciled from `traded_picks` and tier-valued
+  by `ff picks` - kept out of roster/power totals on purpose, so player value
+  and draft capital stay separately legible.
 - **Lineup projections are single-source** (RotoWire, via Sleeper) and exclude
   K/DEF unless your league starts them. TEP *is* applied here, because `lineup`
   scores the raw projected stats with your league's settings - only the
