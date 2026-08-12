@@ -35,6 +35,7 @@ make install                 # venv + deps + pre-commit hook
 ./.venv/bin/ff lineup                 # optimal start/sit for the current week
 ./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st"
 ./.venv/bin/ff waivers
+./.venv/bin/ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
 ```
 
 `setup` reads your league's settings from Sleeper and **auto-detects the format**
@@ -44,6 +45,8 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
 
 ## Commands
 
+- `ff ask "<query>" [--backend B]` - ask questions in natural language (e.g., `"Should I trade Gibbs for Bijan?"`, `"Who should I start at FLEX?"`, `"Connect Sleeper account <username>"`). Uses your terminal's active AI subscription runner (`agy`, `gemini`, `claude`, `ollama`) with zero API keys, executing deterministic Python tools under the hood and synthesizing plain-English explanations.
+- `ff config set-llm <backend> [--model M]` - set preferred LLM backend (`auto`, `agy`, `gemini`, `claude`, `ollama`) and optional model (e.g. `--model llama3.2`).
 - `ff setup <username> [--season Y] [--league-id ID] [-n INDEX]` - pick a
   league (or `-n` to pick the Nth from the printed list non-interactively),
   detect format, save it to `.ff/config.json`.
