@@ -23,6 +23,7 @@ import requests
 import typer
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
@@ -44,12 +45,18 @@ from ff.analysis import (
     waiver_targets,
 )
 from ff.contracts import Format, Roster
-from ff.core.config import Config, config_exists, load_config, save_config
+from ff.core.config import Config, _config_path, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
+from ff.services.llm.dispatcher import dispatch_tool
+from ff.services.llm.onboarding import onboard_user
+from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
+from ff.services.llm.tools import TOOL_SCHEMAS
 from ff.sleeper import SleeperClient, build_rosters, detect_format
 from ff.values import ValueBook, ValuesClient, normalize_name
 
 app = typer.Typer(add_completion=False, help="Manage a Sleeper dynasty league with free data.")
+config_app = typer.Typer(help="Manage configuration settings.")
+app.add_typer(config_app, name="config")
 console = Console()
 
 
@@ -819,6 +826,42 @@ def draft(
     console.print("[dim]FitScore = market value adjusted for YOUR roster fit + "
                   "win-now/rebuild horizon. mkt# is the raw dynasty-value rank. "
                   "The pick call is yours.[/]")
+
+
+@app.command()
+def ask(
+    query: str = typer.Argument(..., help="Natural language question about your league"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Override LLM backend (agy, gemini, claude, ollama)"),
+) -> None:
+    """Ask natural language questions about trades, lineups, waivers, or league setup."""
+    cfg = load_config() if config_exists() else None
+    target_backend = backend or (cfg.llm_backend if cfg else "auto")
+
+    runner_inst = TerminalRunner(backend=target_backend)
+    system_prompt = f"You are an assistant for dynasty fantasy football. Available tools: {json.dumps(TOOL_SCHEMAS)}"
+
+    response = runner_inst.run(prompt=query, system_prompt=system_prompt)
+    console.print(Markdown(response))
+
+
+@config_app.command(name="set-llm")
+@_guard
+def set_llm(
+    backend: str = typer.Argument(..., help="LLM backend: auto, agy, gemini, claude, ollama"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
+) -> None:
+    """Configure the LLM backend used by 'ff ask'."""
+    cfg = load_config()
+    valid_backends = SUPPORTED_BACKENDS + ["auto"]
+    if backend not in valid_backends:
+        _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
+    cfg.llm_backend = backend
+    if model:
+        cfg.ollama_model = model
+    path = save_config(cfg)
+    console.print(f"[bold green]Updated LLM backend[/] to [cyan]{backend}[/]"
+                  + (f" (model: [cyan]{model}[/])" if model else "")
+                  + f"\nconfig: {path}")
 
 
 @app.command()
