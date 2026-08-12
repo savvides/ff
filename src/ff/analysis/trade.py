@@ -1,7 +1,7 @@
 """The trade analyzer - value both baskets (players + picks) and judge fairness.
 
-This is the headline FantasyPros replacement: name the assets on each side and
-get totals, the gap as a %, who wins, and a positional breakdown.
+Name the assets on each side and get totals, the gap as a %, who wins, and a
+positional breakdown.
 """
 
 from __future__ import annotations
