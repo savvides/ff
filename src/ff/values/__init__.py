@@ -12,5 +12,7 @@ from ff.values.client import (
     normalize_name,
     normalize_pick,
 )
+from ff.values.ktc import KtcClient
 
-__all__ = ["ValuesClient", "ValueBook", "normalize_name", "normalize_pick"]
+__all__ = ["ValuesClient", "ValueBook", "KtcClient", "normalize_name", "normalize_pick"]
+
