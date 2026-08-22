@@ -141,8 +141,9 @@ def test_dispatch_unknown_team_does_not_fallback() -> None:
     from ff.services.llm.dispatcher import dispatch_tool
     a = Roster(roster_id=1, team_name="Gridiron Kings", owner_id="u1")
     b = Roster(roster_id=2, team_name="Dynasty Warriors", owner_id="u2")
+    cfg = MagicMock(user_id="u1", user_name="")
     with pytest.raises(ValueError, match="could not find that team"):
-        dispatch_tool("get_roster", {"team": "zzzz-not-a-team"}, ctx={"rosters": [a, b]})
+        dispatch_tool("get_roster", {"team": "zzzz-not-a-team"}, ctx={"rosters": [a, b], "config": cfg})
 
 
 def test_dispatch_get_draft_fit_excludes_rostered_players() -> None:
