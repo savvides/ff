@@ -71,7 +71,10 @@ def normalize_pick(label: str) -> Optional[str]:
     return None
 
 
-def _asset_from_entry(entry: dict) -> Asset:
+from ff.values.ktc import KtcClient
+
+
+def _asset_from_entry(entry: dict, ktc_map: Optional[Dict[str, int]] = None) -> Asset:
     p = entry.get("player", {})
     position = p.get("position")
     is_pick = position == "PICK"
@@ -80,6 +83,22 @@ def _asset_from_entry(entry: dict) -> Asset:
         ident = normalize_pick(name) or normalize_name(name)
     else:
         ident = str(p.get("sleeperId") or p.get("id"))
+
+    ktc_val: Optional[int] = None
+    if ktc_map:
+        if is_pick:
+            norm_pk = normalize_pick(name)
+            if norm_pk and norm_pk in ktc_map:
+                ktc_val = ktc_map[norm_pk]
+            elif ident in ktc_map:
+                ktc_val = ktc_map[ident]
+        else:
+            sleeper_id = p.get("sleeperId")
+            if sleeper_id is not None and str(sleeper_id) in ktc_map:
+                ktc_val = ktc_map[str(sleeper_id)]
+            elif ident in ktc_map:
+                ktc_val = ktc_map[ident]
+
     return Asset(
         id=ident,
         name=name,
@@ -88,6 +107,7 @@ def _asset_from_entry(entry: dict) -> Asset:
         team=p.get("maybeTeam"),
         age=p.get("maybeAge"),
         value=int(entry.get("value", 0) or 0),
+        ktc_value=ktc_val,
         overall_rank=entry.get("overallRank"),
         position_rank=entry.get("positionRank"),
         trend_30day=entry.get("trend30Day"),
@@ -195,9 +215,16 @@ class ValueBook:
 
 
 class ValuesClient:
-    def __init__(self, url: str = VALUES_URL) -> None:
+    def __init__(self, url: str = VALUES_URL, ktc_client: Optional[KtcClient] = None) -> None:
         self.url = url
+        self.ktc_client = ktc_client or KtcClient()
 
-    def fetch(self, fmt: Format) -> ValueBook:
+    def fetch(self, fmt: Format, include_ktc: bool = True) -> ValueBook:
         data = get_json(self.url, params=fmt.fantasycalc_params(), ttl=VALUES_TTL)
-        return ValueBook([_asset_from_entry(e) for e in data])
+        ktc_map: Dict[str, int] = {}
+        if include_ktc:
+            try:
+                ktc_map = self.ktc_client.fetch_values(fmt) or {}
+            except Exception:
+                ktc_map = {}
+        return ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in data])
