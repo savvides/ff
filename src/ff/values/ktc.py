@@ -28,7 +28,11 @@ class KtcClient:
         self.ttl = ttl
 
     def fetch_values(self, fmt: Optional[Format] = None) -> Dict[str, int]:
-        """Fetch and return KTC values mapped by sleeper_id or canonical pick label."""
+        """Fetch and return KTC values mapped by sleeper_id or canonical pick label.
+
+        Note: KeepTradeCut dynasty values are currently not adjusted for format
+        (1QB vs Superflex) by this endpoint.
+        """
         try:
             data = get_json(self.url, ttl=self.ttl)
         except Exception as err:

@@ -223,7 +223,7 @@ def roster(
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you, "
               "or pass a team name: ff roster \"<team>\".")
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     rosters = _league_rosters(cfg, sc)
     players_meta = sc.players()
 
@@ -284,7 +284,7 @@ def _pick_roster(rosters: List[Roster], team: Optional[str],
 def power() -> None:
     """League power rankings by total dynasty value."""
     cfg, sc = _load()
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     rosters = _league_rosters(cfg, sc)
     valuations = value_all_rosters(rosters, book, sc.players())
     by_id = {r.roster_id: r for r in rosters}
@@ -316,7 +316,7 @@ def picks(
     reconciled with trades), valued like `ff trade`. The half of team value
     that `power` leaves out."""
     cfg, sc = _load()
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     rosters = _league_rosters(cfg, sc)
     league = sc.league(cfg.league_id)
 
@@ -599,7 +599,7 @@ def waivers(
 ) -> None:
     """Trending adds across Sleeper, joined to dynasty value and your league."""
     cfg, sc = _load()
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     rosters = _league_rosters(cfg, sc)
     trending = sc.trending(kind="add", limit=max(limit * 3, 50))
     targets = waiver_targets(trending, book, rosters, sc.players(),
@@ -629,7 +629,7 @@ def cleanup(
     league = sc.league(cfg.league_id)
     settings = league.get("settings") or {}
     roster_positions = league.get("roster_positions") or []
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     rosters = _league_rosters(cfg, sc)
     target = _pick_roster(rosters, team, cfg.user_id)
     if target is None:
@@ -713,7 +713,7 @@ def movers(
 ) -> None:
     """Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage."""
     cfg, sc = _load()
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
 
     if arbitrage:
         rosters = _league_rosters(cfg, sc)
@@ -968,7 +968,7 @@ def draft(
 
     # your roster by position (a needs glance) - includes what you drafted today.
     # Value it through value_roster so positions/values match `roster`/`power`.
-    book = _book(cfg)
+    book = _book(cfg, include_ktc=False)
     have = set(mine.player_ids)
     merged = mine.model_copy(update={
         "player_ids": list(mine.player_ids) + [p for p in drafted_by_me if p not in have]})

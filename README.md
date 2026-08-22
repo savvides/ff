@@ -23,6 +23,7 @@ waiver targets, live draft board.
   (RotoWire), scored by your league's own rules for the lineup optimizer.
 - [FantasyCalc API](https://fantasycalc.com/) - dynasty values for players **and
   draft picks**, tagged with `sleeperId` so they join straight onto your roster.
+- [KeepTradeCut API](https://keeptradecut.com/) via [Dynasty Daddy](https://dynasty-daddy.com/) - crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
 
 ## Quickstart
 
@@ -31,9 +32,10 @@ make install                 # venv + deps + pre-commit hook
 ./.venv/bin/ff setup <your-sleeper-username>
 ./.venv/bin/ff power
 ./.venv/bin/ff roster
-./.venv/bin/ff values -p WR
+./.venv/bin/ff values -p WR --market ktc
 ./.venv/bin/ff lineup                 # optimal start/sit for the current week
-./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st"
+./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st" --market both
+./.venv/bin/ff movers --arbitrage
 ./.venv/bin/ff waivers
 ./.venv/bin/ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
 ```
@@ -56,8 +58,8 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
 - `ff picks [team] [--years N] [--rounds N]` - future draft capital by team:
   every pick's current owner (reconciled through traded picks), tier-valued
   like `trade`. The half of team value `power` leaves out.
-- `ff values [-p QB|RB|WR|TE] [--limit N]` - dynasty rankings for your format.
-- `ff trade --give "A, B" --get "C, D"` - value both baskets and call it
+- `ff values [--market both|fc|ktc] [-p QB|RB|WR|TE] [--limit N]` - dynasty rankings for your format.
+- `ff trade --give "A, B" --get "C, D" [--market both|fc|ktc]` - value both baskets and call it
   fair / win / lose, with a positional swing. Picks count; ambiguous names get
   a "did you mean" hint.
 - `ff waivers [--limit N] [--all]` - trending adds still on waivers in your
@@ -66,7 +68,7 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
 - `ff cleanup [team] [--drops N]` - roster capacity vs. fill: drop candidates
   (worst value first, flagged if the drop frees an active slot) and
   taxi-stash suggestions that free active room without dropping anyone.
-- `ff movers [--buy] [--limit N] [--min-value N]` - sell-high (win-now >
+- `ff movers [--buy] [--arbitrage] [--limit N] [--min-value N]` - sell-high (win-now >
   dynasty) or, with `--buy`, buy-low (dynasty > win-now) candidates by value
   gap; `--min-value` (default 1000) floors both values so deep stashes don't
   dominate.
