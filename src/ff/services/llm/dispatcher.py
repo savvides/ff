@@ -22,6 +22,7 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
             team_name = (getattr(r, "team_name", "") or "").lower()
             if q in team_name:
                 return r
+        return None
     cfg = ctx.get("config")
     if cfg:
         user_name = (getattr(cfg, "user_name", "") or "").lower()
@@ -33,7 +34,7 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
                 return r
             if user_id and user_id == owner_id:
                 return r
-    return rosters[0] if rosters else None
+    return None
 
 
 def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: Dict[str, Any]) -> Any:
@@ -50,6 +51,7 @@ def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: 
             team_name = (getattr(v, "team_name", "") or "").lower()
             if q in team_name:
                 return v
+        return None
     cfg = ctx.get("config")
     if cfg:
         user_name = (getattr(cfg, "user_name", "") or "").lower()
@@ -57,6 +59,12 @@ def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: 
             team_name = (getattr(v, "team_name", "") or "").lower()
             if user_name and user_name in team_name:
                 return v
+        mine = _find_roster(ctx.get("rosters") or [], None, ctx)
+        if mine is not None:
+            rid = getattr(mine, "roster_id", None)
+            for v in all_vals:
+                if getattr(v, "roster_id", None) == rid:
+                    return v
     return None
 
 
