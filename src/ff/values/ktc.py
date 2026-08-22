@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 from ff.contracts import Format
 from ff.core.http import get_json
-from ff.values.client import normalize_pick
+from ff.values.normalize import normalize_pick
 
 logger = logging.getLogger(__name__)
 

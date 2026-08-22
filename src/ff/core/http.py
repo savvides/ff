@@ -40,7 +40,7 @@ def _build_session() -> requests.Session:
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({"User-Agent": "ff/0.1 (+https://github.com/local/ff)"})
+    session.headers.update({"User-Agent": "ff/0.1 (+https://github.com/savvides/ff)"})
     return session
 
 
