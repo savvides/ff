@@ -1,6 +1,6 @@
-"""Buy-low / sell-high ranking from the dynasty-vs-redraft gap."""
-
-from ff.analysis import top_movers
+from ff.analysis import find_arbitrage_movers, top_movers
+from ff.contracts import ArbitrageMover, Asset, Roster
+from ff.values import ValueBook
 
 
 def test_buy_low_ranks_dynasty_over_redraft_first(book):
@@ -23,8 +23,6 @@ def test_picks_and_unvalued_excluded(book):
 
 
 def test_min_value_floor_excludes_deep_stashes():
-    from ff.contracts import Asset
-    from ff.values import ValueBook
     b = ValueBook([
         Asset(id="1", name="Real Stud", position="WR", value=5000, redraft_value=3000),
         # near-zero redraft would yield a bogus +74900% gap without the floor
@@ -33,3 +31,79 @@ def test_min_value_floor_excludes_deep_stashes():
     names = [a.name for a, _ in top_movers(b, buy=True, min_value=1000)]
     assert "Deep Stash" not in names
     assert "Real Stud" in names
+
+
+def test_find_arbitrage_movers_basic():
+    book = ValueBook([
+        Asset(id="1", name="Hype Stud", position="WR", value=4000, ktc_value=6000),  # diff +2000
+        Asset(id="2", name="Old Producer", position="RB", value=5000, ktc_value=3500),  # diff -1500
+        Asset(id="3", name="Consensus Pick", position="QB", value=7000, ktc_value=7000),  # diff 0
+        Asset(id="4", name="No KTC Player", position="TE", value=3000, ktc_value=None),  # no KTC
+        Asset(id="5", name="Deep Stash", position="WR", value=200, ktc_value=300),  # below min_value 1000
+    ])
+    movers = find_arbitrage_movers(book=book, min_value=1000)
+    assert len(movers) == 3
+    # Ranked by abs(diff) descending:
+    # 1. Hype Stud: abs(2000)
+    # 2. Old Producer: abs(-1500)
+    # 3. Consensus Pick: abs(0)
+    assert movers[0].asset.name == "Hype Stud"
+    assert movers[0].diff == 2000
+    assert movers[0].fc_value == 4000
+    assert movers[0].ktc_value == 6000
+    assert movers[0].market_bias == "KTC"
+
+    assert movers[1].asset.name == "Old Producer"
+    assert movers[1].diff == -1500
+    assert movers[1].fc_value == 5000
+    assert movers[1].ktc_value == 3500
+    assert movers[1].market_bias == "FC"
+
+    assert movers[2].asset.name == "Consensus Pick"
+    assert movers[2].diff == 0
+
+
+def test_find_arbitrage_movers_with_rosters():
+    book = ValueBook([
+        Asset(id="1", name="Player One", position="WR", value=4000, ktc_value=6000),
+        Asset(id="2", name="Player Two", position="RB", value=5000, ktc_value=3500),
+    ])
+    rosters = [
+        Roster(roster_id=1, team_name="Team Alpha", player_ids=["1"]),
+        Roster(roster_id=2, team_name="Team Beta", player_ids=["2"]),
+    ]
+    movers = find_arbitrage_movers(rosters, book)
+    assert movers[0].asset.name == "Player One"
+    assert movers[0].roster_id == 1
+    assert movers[0].team_name == "Team Alpha"
+
+    assert movers[1].asset.name == "Player Two"
+    assert movers[1].roster_id == 2
+    assert movers[1].team_name == "Team Beta"
+
+
+def test_find_arbitrage_movers_filter_market():
+    book = ValueBook([
+        Asset(id="1", name="Hype Player", position="WR", value=4000, ktc_value=6000),  # KTC > FC
+        Asset(id="2", name="Value Veteran", position="RB", value=5000, ktc_value=3500),  # FC > KTC
+    ])
+    ktc_movers = find_arbitrage_movers(book=book, market="ktc")
+    assert len(ktc_movers) == 1
+    assert ktc_movers[0].asset.name == "Hype Player"
+
+    fc_movers = find_arbitrage_movers(book=book, market="fc")
+    assert len(fc_movers) == 1
+    assert fc_movers[0].asset.name == "Value Veteran"
+
+
+def test_find_arbitrage_movers_positional_args_flexibility():
+    book = ValueBook([
+        Asset(id="1", name="Player One", position="WR", value=4000, ktc_value=6000),
+    ])
+    # Call as find_arbitrage_movers(book)
+    m1 = find_arbitrage_movers(book)
+    assert len(m1) == 1
+    # Call as find_arbitrage_movers(None, book)
+    m2 = find_arbitrage_movers(None, book)
+    assert len(m2) == 1
+

@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.analysis import cleanup, fit, lineup, movers, picks, roster, trade, waivers
+from ff.analysis.draft import available
+from ff.services.llm.tools import ALLOWED_TOOLS
 
 
 def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, Any]) -> Any:
@@ -20,6 +22,7 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
             team_name = (getattr(r, "team_name", "") or "").lower()
             if q in team_name:
                 return r
+        return None
     cfg = ctx.get("config")
     if cfg:
         user_name = (getattr(cfg, "user_name", "") or "").lower()
@@ -31,7 +34,7 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
                 return r
             if user_id and user_id == owner_id:
                 return r
-    return rosters[0]
+    return None
 
 
 def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: Dict[str, Any]) -> Any:
@@ -48,6 +51,7 @@ def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: 
             team_name = (getattr(v, "team_name", "") or "").lower()
             if q in team_name:
                 return v
+        return None
     cfg = ctx.get("config")
     if cfg:
         user_name = (getattr(cfg, "user_name", "") or "").lower()
@@ -55,10 +59,26 @@ def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: 
             team_name = (getattr(v, "team_name", "") or "").lower()
             if user_name and user_name in team_name:
                 return v
-    return all_vals[0]
+        mine = _find_roster(ctx.get("rosters") or [], None, ctx)
+        if mine is not None:
+            rid = getattr(mine, "roster_id", None)
+            for v in all_vals:
+                if getattr(v, "roster_id", None) == rid:
+                    return v
+    return None
+
+
+def _require_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, Any]) -> Any:
+    r = _find_roster(rosters, team_query, ctx)
+    if r is None:
+        raise ValueError("could not find that team")
+    return r
 
 
 def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+    if tool_name not in ALLOWED_TOOLS:
+        raise ValueError(f"Unknown tool: {tool_name}")
+
     if tool_name == "setup_league":
         username = kwargs.get("username", "")
         onboard_fn = ctx.get("onboard_user")
@@ -81,7 +101,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
     elif tool_name == "get_lineup":
         rosters = ctx.get("rosters", [])
         team = kwargs.get("team")
-        r = _find_roster(rosters, team, ctx)
+        r = _require_roster(rosters, team, ctx)
         projections = ctx.get("projections", {})
         scoring = ctx.get("scoring", {})
         roster_positions = ctx.get("roster_positions", [])
@@ -114,7 +134,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
     elif tool_name == "get_roster":
         rosters = ctx.get("rosters", [])
         team = kwargs.get("team")
-        r = _find_roster(rosters, team, ctx)
+        r = _require_roster(rosters, team, ctx)
         value_book = ctx.get("value_book")
         players_meta = ctx.get("players_meta")
         res = roster.value_roster(r, value_book, players_meta)
@@ -147,7 +167,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
     elif tool_name == "get_roster_cleanup":
         rosters = ctx.get("rosters", [])
         team = kwargs.get("team")
-        r = _find_roster(rosters, team, ctx)
+        r = _require_roster(rosters, team, ctx)
         value_book = ctx.get("value_book")
         players_meta = ctx.get("players_meta")
         roster_positions = ctx.get("roster_positions", [])
@@ -182,10 +202,20 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         roster_positions = ctx.get("roster_positions", [])
         all_vals = roster.value_all_rosters(rosters, value_book, players_meta) if (rosters and value_book) else []
         my_val = _find_roster_valuation(all_vals, team, ctx)
+        if all_vals and my_val is None:
+            raise ValueError("could not find that team")
         status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
         position = kwargs.get("position")
         limit = kwargs.get("limit", 10)
-        candidates = value_book.top(position=position, limit=None) if value_book else []
+        taken = {
+            str(pid)
+            for r in rosters
+            for pid in (getattr(r, "player_ids", None) or [])
+        }
+        candidates = (
+            available(value_book, taken, position=position)
+            if value_book else []
+        )
         team_ctx, fit_list = fit.rank_fits(candidates, my_val, all_vals, roster_positions, status, limit)
         return {
             "context": team_ctx.model_dump() if hasattr(team_ctx, "model_dump") else team_ctx,

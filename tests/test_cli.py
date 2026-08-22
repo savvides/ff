@@ -14,7 +14,7 @@ runner = CliRunner()
 
 
 @pytest.fixture
-def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta,
+def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, users_raw, players_meta,
                  trending, traded_picks):
     class FakeSleeper:
         def state(self, sport="nfl"):
@@ -65,8 +65,8 @@ def fake_clients(monkeypatch, book, league, rosters_raw, users_raw, players_meta
             return []
 
     class FakeValues:
-        def fetch(self, fmt):
-            return book
+        def fetch(self, fmt, include_ktc=True):
+            return multi_market_book if include_ktc else book
 
     class FakeProjections:
         def week(self, season, week, positions=None):
@@ -196,7 +196,7 @@ def test_network_error_is_a_clean_message(fake_clients, league, monkeypatch):
     import requests
 
     class Boom:
-        def fetch(self, fmt):
+        def fetch(self, fmt, *args, **kwargs):
             raise requests.exceptions.ConnectionError("no network")
 
     monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: Boom())
@@ -257,3 +257,77 @@ def test_corrupt_config_is_a_clean_message(fake_clients):
     result = runner.invoke(app, ["power"])
     assert result.exit_code == 1
     assert "corrupt" in result.output
+
+
+def test_cli_trade_dual_market_output(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st"])
+    assert result.exit_code == 0, result.output
+    # Must have both FC and KTC columns
+    assert "FC" in result.output
+    assert "KTC" in result.output
+    # Must display dual-market verdict banner and arbitrage classification
+    assert "Consensus Win" in result.output
+
+
+def test_cli_trade_market_flag(fake_clients, league):
+    _write_config(league)
+    # --market fc should only show single market
+    res_fc = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "fc"])
+    assert res_fc.exit_code == 0, res_fc.output
+    assert "KTC" not in res_fc.output
+
+    # --market ktc should show KTC evaluation
+    res_ktc = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "ktc"])
+    assert res_ktc.exit_code == 0, res_ktc.output
+    assert "KTC" in res_ktc.output
+
+    # Invalid market
+    res_inv = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "invalid"])
+    assert res_inv.exit_code == 1
+    assert "--market must be" in res_inv.output
+
+
+def test_cli_values_market_flag(fake_clients, league):
+    _write_config(league)
+    # Default (both) shows FC and KTC columns
+    res_both = runner.invoke(app, ["values", "-p", "WR"])
+    assert res_both.exit_code == 0, res_both.output
+    assert "FC" in res_both.output
+    assert "KTC" in res_both.output
+
+    # --market fc
+    res_fc = runner.invoke(app, ["values", "-p", "WR", "--market", "fc"])
+    assert res_fc.exit_code == 0, res_fc.output
+    assert "KTC" not in res_fc.output
+
+    # --market ktc
+    res_ktc = runner.invoke(app, ["values", "-p", "WR", "--market", "ktc"])
+    assert res_ktc.exit_code == 0, res_ktc.output
+    assert "KTC" in res_ktc.output
+
+    # Invalid market
+    res_inv = runner.invoke(app, ["values", "--market", "bad"])
+    assert res_inv.exit_code == 1
+    assert "--market must be" in res_inv.output
+
+
+def test_cli_movers_arbitrage(fake_clients, league):
+    """Header-only empty tables must fail: the dual-market book has Gibbs."""
+    _write_config(league)
+    res = runner.invoke(app, ["movers", "--arbitrage"])
+    assert res.exit_code == 0, res.output
+    assert "Jahmyr Gibbs" in res.output
+    assert "8,000" in res.output  # FC
+    assert "8,400" in res.output  # KTC
+    assert "No market arbitrage opportunities found" not in res.output
+
+    # --buy = KTC > FC; --sell = FC > KTC
+    res_buy = runner.invoke(app, ["movers", "--arbitrage", "--buy"])
+    assert res_buy.exit_code == 0, res_buy.output
+    assert "Jahmyr Gibbs" in res_buy.output
+
+    res_sell = runner.invoke(app, ["movers", "--arbitrage", "--sell"])
+    assert res_sell.exit_code == 0, res_sell.output
+    assert "Bijan Robinson" in res_sell.output
+

@@ -120,3 +120,5 @@ TOOL_SCHEMAS = [
         }
     }
 ]
+
+ALLOWED_TOOLS = [t["name"] for t in TOOL_SCHEMAS]

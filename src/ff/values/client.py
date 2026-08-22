@@ -10,68 +10,20 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from ff.contracts import Asset, Format
 from ff.core.http import get_json
+from ff.values.normalize import normalize_name, normalize_pick
+
+if TYPE_CHECKING:
+    from ff.values.ktc import KtcClient
 
 VALUES_URL = "https://api.fantasycalc.com/values/current"
 VALUES_TTL = 6 * 3600  # values drift slowly; refresh a few times a day
 
-_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
-_ORDINALS = {
-    "1": "1", "1st": "1", "first": "1",
-    "2": "2", "2nd": "2", "second": "2",
-    "3": "3", "3rd": "3", "third": "3",
-    "4": "4", "4th": "4", "fourth": "4",
-}
 
-
-def normalize_name(name: str) -> str:
-    """Lowercase, strip punctuation + generational suffixes, collapse spaces."""
-    s = name.lower()
-    s = re.sub(r"[.'`]", "", s)
-    s = re.sub(r"[^a-z0-9 ]", " ", s)
-    parts = [p for p in s.split() if p not in _SUFFIXES]
-    return " ".join(parts).strip()
-
-
-def normalize_pick(label: str) -> Optional[str]:
-    """Canonicalize a draft-pick label to a stable key.
-
-    Slot picks   -> "<year> pick R.SS"        (e.g. "2026 pick 1.05")
-    Round picks  -> "<year> <round>"           (e.g. "2027 1")
-    Tiered picks -> "<year> <round> <tier>"    (e.g. "2027 1 early")
-    Returns None if `label` is not pick-shaped.
-
-    The tier suffix is what keeps FantasyCalc's "2027 1st (Early)/(Mid)/(Late)"
-    entries distinct: without it all three collapse onto "2027 1" and whichever
-    loads last silently overwrites the others in `ValueBook.picks`.
-    """
-    s = label.lower().strip()
-    year = re.search(r"\b(20\d{2})\b", s)
-    if not year:
-        return None
-    yr = year.group(1)
-
-    slot = re.search(r"\b([1-9])\.(\d{1,2})\b", s)  # 1.05, 2.11
-    if slot:
-        return f"{yr} pick {int(slot.group(1))}.{int(slot.group(2)):02d}"
-
-    tier_m = re.search(r"\b(early|mid|late)\b", s)
-    tier = f" {tier_m.group(1)}" if tier_m else ""
-
-    # round-level: an ordinal word/number, or "round N" / "rN"
-    rnd = re.search(r"\bround\s*([1-9])\b", s) or re.search(r"\br([1-9])\b", s)
-    if rnd:
-        return f"{yr} {rnd.group(1)}{tier}"
-    for tok in s.split():
-        if tok in _ORDINALS:
-            return f"{yr} {_ORDINALS[tok]}{tier}"
-    return None
-
-
-def _asset_from_entry(entry: dict) -> Asset:
+def _asset_from_entry(entry: dict, ktc_map: Optional[Dict[str, int]] = None) -> Asset:
     p = entry.get("player", {})
     position = p.get("position")
     is_pick = position == "PICK"
@@ -80,6 +32,22 @@ def _asset_from_entry(entry: dict) -> Asset:
         ident = normalize_pick(name) or normalize_name(name)
     else:
         ident = str(p.get("sleeperId") or p.get("id"))
+
+    ktc_val: Optional[int] = None
+    if ktc_map:
+        if is_pick:
+            norm_pk = normalize_pick(name)
+            if norm_pk and norm_pk in ktc_map:
+                ktc_val = ktc_map[norm_pk]
+            elif ident in ktc_map:
+                ktc_val = ktc_map[ident]
+        else:
+            sleeper_id = p.get("sleeperId")
+            if sleeper_id is not None and str(sleeper_id) in ktc_map:
+                ktc_val = ktc_map[str(sleeper_id)]
+            elif ident in ktc_map:
+                ktc_val = ktc_map[ident]
+
     return Asset(
         id=ident,
         name=name,
@@ -88,6 +56,7 @@ def _asset_from_entry(entry: dict) -> Asset:
         team=p.get("maybeTeam"),
         age=p.get("maybeAge"),
         value=int(entry.get("value", 0) or 0),
+        ktc_value=ktc_val,
         overall_rank=entry.get("overallRank"),
         position_rank=entry.get("positionRank"),
         trend_30day=entry.get("trend30Day"),
@@ -195,9 +164,17 @@ class ValueBook:
 
 
 class ValuesClient:
-    def __init__(self, url: str = VALUES_URL) -> None:
+    def __init__(self, url: str = VALUES_URL, ktc_client: Optional["KtcClient"] = None) -> None:
+        from ff.values.ktc import KtcClient
         self.url = url
+        self.ktc_client = ktc_client or KtcClient()
 
-    def fetch(self, fmt: Format) -> ValueBook:
+    def fetch(self, fmt: Format, include_ktc: bool = True) -> ValueBook:
         data = get_json(self.url, params=fmt.fantasycalc_params(), ttl=VALUES_TTL)
-        return ValueBook([_asset_from_entry(e) for e in data])
+        ktc_map: Dict[str, int] = {}
+        if include_ktc:
+            try:
+                ktc_map = self.ktc_client.fetch_values(fmt) or {}
+            except Exception:
+                ktc_map = {}
+        return ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in data])

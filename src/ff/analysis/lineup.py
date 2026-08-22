@@ -126,11 +126,16 @@ def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
     unsupported = [s for s in roster_positions
                    if s not in SLOT_ELIGIBILITY and s not in BENCH_SLOTS]
 
+    # Taxi and IR are subsets of player_ids but do not occupy an active slot, so
+    # they cannot be started. They still appear on the leftover bench list.
+    inactive = set(roster.taxi) | set(roster.reserve)
+    eligible = {pid: d for pid, d in info.items() if pid not in inactive}
+
     # Fill the most restrictive slots first (fewest eligible positions). Build the
-    # score/position maps over `info` so iteration order (hence the tie-break) is
-    # identical to the original inline loop.
-    chosen = _assign({pid: d["position"] for pid, d in info.items()},
-                     {pid: d["points"] for pid, d in info.items()},
+    # score/position maps over `eligible` so iteration order (hence the tie-break)
+    # is identical to the original inline loop.
+    chosen = _assign({pid: d["position"] for pid, d in eligible.items()},
+                     {pid: d["points"] for pid, d in eligible.items()},
                      starting)
     used = {pid for pid in chosen.values() if pid is not None}
 

@@ -6,9 +6,10 @@ players and draft picks, because in dynasty a trade is a basket of both.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
 
 
 class Format(BaseModel):
@@ -55,6 +56,7 @@ class Asset(BaseModel):
     team: Optional[str] = None
     age: Optional[float] = None
     value: int = 0  # FantasyCalc dynasty value (0 if unvalued)
+    ktc_value: Optional[int] = None  # KeepTradeCut dynasty value
     overall_rank: Optional[int] = None
     position_rank: Optional[int] = None
     trend_30day: Optional[int] = None  # 30-day value change (+/-)
@@ -233,6 +235,12 @@ class TradeSide(BaseModel):
     def total(self) -> int:
         return sum(a.value for a in self.assets)
 
+    @property
+    def ktc_total(self) -> Optional[int]:
+        if not any(a.ktc_value is not None for a in self.assets):
+            return None
+        return sum(a.ktc_value or 0 for a in self.assets)
+
 
 class TradeEvaluation(BaseModel):
     """Result of analyzing a proposed trade between two sides."""
@@ -261,6 +269,27 @@ class TradeEvaluation(BaseModel):
         larger = max(self.value_a, self.value_b)
         return 0.0 if larger == 0 else abs(self.delta) / larger * 100.0
 
+    @property
+    def ktc_value_a(self) -> Optional[int]:
+        return self.side_a.ktc_total
+
+    @property
+    def ktc_value_b(self) -> Optional[int]:
+        return self.side_b.ktc_total
+
+    @property
+    def ktc_delta(self) -> Optional[int]:
+        if self.ktc_value_a is None or self.ktc_value_b is None:
+            return None
+        return self.ktc_value_a - self.ktc_value_b
+
+    @property
+    def ktc_pct_diff(self) -> Optional[float]:
+        if self.ktc_value_a is None or self.ktc_value_b is None:
+            return None
+        larger = max(self.ktc_value_a, self.ktc_value_b)
+        return 0.0 if larger == 0 else abs(self.ktc_delta) / larger * 100.0
+
     def winner(self) -> str:
         if self.delta == 0:
             return "even"
@@ -268,6 +297,66 @@ class TradeEvaluation(BaseModel):
 
     def is_fair(self, threshold_pct: float = 5.0) -> bool:
         return self.pct_diff <= threshold_pct
+
+    def arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
+        if self.ktc_delta is None or self.ktc_pct_diff is None:
+            return None
+        fc_fair = self.is_fair(threshold_pct)
+        ktc_fair = self.ktc_pct_diff <= threshold_pct
+
+        if fc_fair and ktc_fair:
+            return "Fair"
+
+        fc_win = self.delta > 0 and not fc_fair
+        fc_loss = self.delta < 0 and not fc_fair
+        ktc_win = self.ktc_delta > 0 and not ktc_fair
+        ktc_loss = self.ktc_delta < 0 and not ktc_fair
+
+        if fc_win and ktc_win:
+            return "Consensus Win"
+        if fc_loss and ktc_loss:
+            return "Consensus Loss"
+        if fc_win and (ktc_loss or ktc_fair):
+            return "Value Arbitrage"
+        if (fc_loss or fc_fair) and ktc_win:
+            return "Hype Arbitrage"
+        if fc_loss or ktc_loss:
+            return "Consensus Loss"
+        return "Fair"
+
+
+class ArbitrageMover(BaseModel):
+    """An asset with valuation discrepancies across FantasyCalc and KeepTradeCut."""
+
+    asset: Asset
+    fc_value: int = 0
+    ktc_value: int = 0
+    diff: int = 0  # ktc_value - fc_value
+    pct_diff: float = 0.0  # abs(diff) / max(fc, ktc) * 100.0
+    diff_pct: float = 0.0
+    roster_id: Optional[int] = None
+    team_name: Optional[str] = None
+    market_bias: str = ""  # "KTC" | "FC" | "EVEN"
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.fc_value == 0 and self.asset.value:
+            self.fc_value = self.asset.value
+        if self.ktc_value == 0 and self.asset.ktc_value:
+            self.ktc_value = self.asset.ktc_value
+        if self.diff == 0 and (self.ktc_value or self.fc_value):
+            self.diff = self.ktc_value - self.fc_value
+        if self.pct_diff == 0.0 and (self.ktc_value or self.fc_value):
+            larger = max(self.fc_value, self.ktc_value)
+            self.pct_diff = (abs(self.diff) / larger * 100.0) if larger > 0 else 0.0
+        if self.diff_pct == 0.0 and self.pct_diff != 0.0:
+            self.diff_pct = self.pct_diff
+        if not self.market_bias:
+            if self.diff > 0:
+                self.market_bias = "KTC"
+            elif self.diff < 0:
+                self.market_bias = "FC"
+            else:
+                self.market_bias = "EVEN"
 
 
 class WaiverTarget(BaseModel):

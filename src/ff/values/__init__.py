@@ -6,11 +6,9 @@ This module fetches them for a given `Format` and exposes lookups by sleeper id,
 by player name (fuzzy), and by pick label.
 """
 
-from ff.values.client import (
-    ValueBook,
-    ValuesClient,
-    normalize_name,
-    normalize_pick,
-)
+from ff.values.client import ValueBook, ValuesClient
+from ff.values.ktc import KtcClient
+from ff.values.normalize import normalize_name, normalize_pick
 
-__all__ = ["ValuesClient", "ValueBook", "normalize_name", "normalize_pick"]
+__all__ = ["ValuesClient", "ValueBook", "KtcClient", "normalize_name", "normalize_pick"]
+

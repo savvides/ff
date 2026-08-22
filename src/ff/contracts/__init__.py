@@ -6,6 +6,7 @@ change - update both sides.
 """
 
 from ff.contracts.models import (
+    ArbitrageMover,
     Asset,
     DraftFit,
     DraftPickInfo,
@@ -26,6 +27,7 @@ from ff.contracts.models import (
 )
 
 __all__ = [
+    "ArbitrageMover",
     "Asset",
     "Format",
     "Roster",
@@ -44,3 +46,4 @@ __all__ = [
     "TeamContext",
     "DraftFit",
 ]
+

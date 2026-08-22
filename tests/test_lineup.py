@@ -110,3 +110,26 @@ def test_te_premium_via_projected_points_is_not_doubled():
     meta = {"te1": {"position": "TE", "full_name": "TE One"}}
     info = projected_points(roster, stats, SCORING, meta)
     assert info["te1"]["points"] == 21.0  # 18 base + 0.5*6, not 24
+
+
+def test_optimal_lineup_does_not_start_taxi_or_ir():
+    # Taxi/IR are subsets of player_ids but cannot occupy a starting slot.
+    # A taxi QB with a better projection must not beat the active starter.
+    roster = Roster(
+        roster_id=1,
+        player_ids=["qb1", "taxi_qb", "ir_qb"],
+        starters=["qb1"],
+        taxi=["taxi_qb"],
+        reserve=["ir_qb"],
+    )
+    proj = {
+        "qb1": {"pass_yd": 200, "pass_td": 1},       # 12
+        "taxi_qb": {"pass_yd": 400, "pass_td": 4},   # 32
+        "ir_qb": {"pass_yd": 350, "pass_td": 3},     # 26
+    }
+    meta = _meta(qb1="QB", taxi_qb="QB", ir_qb="QB")
+    lu = optimal_lineup(roster, proj, SCORING, ["QB", "BN"], meta)
+    started = {s.player_id for s in lu.slots}
+    assert started == {"qb1"}
+    leftover = {b.player_id for b in lu.bench}
+    assert leftover == {"taxi_qb", "ir_qb"}
