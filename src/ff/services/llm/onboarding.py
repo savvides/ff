@@ -19,11 +19,8 @@ def onboard_user(
     is unambiguous (one league, or an explicit `league_id`). Multiple leagues
     without an id is an error pointing at `ff setup`.
     """
-    try:
-        user = sleeper_client.get_user(username)
-        user_id = user["user_id"] if isinstance(user, dict) else username
-    except Exception:
-        user_id = username
+    user = sleeper_client.get_user(username)
+    user_id = user["user_id"]
 
     leagues = sleeper_client.get_user_leagues(user_id)
     if not leagues:
@@ -45,18 +42,7 @@ def onboard_user(
         )
 
     raw_fmt = sleeper_client.detect_format(league)
-    if isinstance(raw_fmt, Format):
-        fmt = raw_fmt
-    elif isinstance(raw_fmt, dict):
-        fmt = Format.model_validate(raw_fmt)
-    else:
-        try:
-            fmt = Format.model_validate(raw_fmt)
-        except Exception:
-            fmt = Format(
-                superflex=bool(getattr(raw_fmt, "is_superflex", False) or getattr(raw_fmt, "superflex", False)),
-                ppr=float(getattr(raw_fmt, "ppr", 0.5) or 0.5),
-            )
+    fmt = raw_fmt if isinstance(raw_fmt, Format) else Format.model_validate(raw_fmt)
 
     cfg = Config(
         league_id=str(league["league_id"]),
