@@ -17,6 +17,7 @@ import functools
 import inspect
 import json
 import re
+import subprocess
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -53,7 +54,7 @@ from ff.projections import ProjectionsClient
 from ff.services.llm.dispatcher import dispatch_tool
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
-from ff.services.llm.tools import TOOL_SCHEMAS
+from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
 from ff.sleeper import SleeperClient, build_rosters, detect_format
 from ff.values import ValueBook, ValuesClient, normalize_name
 
@@ -100,6 +101,37 @@ def _book(cfg: Config, include_ktc: bool = True) -> ValueBook:
 
 def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
     return build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
+
+
+def _analysis_ctx(cfg: Config, sc: SleeperClient) -> Dict[str, Any]:
+    """I/O bundle the LLM dispatcher needs so tools see the same data as `ff` commands."""
+    league = sc.league(cfg.league_id) or {}
+    settings = league.get("settings") or {}
+    state = sc.state() or {}
+    week = int(state.get("display_week") or state.get("week") or 1)
+    season = str(cfg.season)
+    try:
+        projections = ProjectionsClient().week(season, week)
+    except Exception:
+        projections = {}
+    return {
+        "config": cfg,
+        "rosters": _league_rosters(cfg, sc),
+        "value_book": _book(cfg),
+        "onboard_user": onboard_user,
+        "players_meta": sc.players(),
+        "projections": projections,
+        "scoring": league.get("scoring_settings") or {},
+        "roster_positions": league.get("roster_positions") or [],
+        "trending": sc.trending(kind="add", limit=50),
+        "traded_picks": sc.traded_picks(cfg.league_id),
+        "taxi_slots": int(settings.get("taxi_slots") or 0),
+        "reserve_slots": int(settings.get("reserve_slots") or 0),
+        "taxi_allow_vets": bool(settings.get("taxi_allow_vets")),
+        "taxi_years": settings.get("taxi_years"),
+        "season": season,
+        "week": week,
+    }
 
 
 def _signed(n: int) -> str:
@@ -1015,7 +1047,10 @@ def ask(
     target_backend = backend or (cfg.llm_backend if cfg else "auto")
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
-    runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
+    try:
+        runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
+    except (RuntimeError, ValueError) as e:
+        _fail(str(e))
 
     system_prompt = (
         f"You are an AI assistant for a Sleeper dynasty fantasy football CLI (`ff`).\n"
@@ -1026,7 +1061,10 @@ def ask(
         f"Do NOT include conversational text when issuing a tool call. If no tool is needed, respond in plain Markdown."
     )
 
-    first_response = runner_inst.run(prompt=query, system_prompt=system_prompt)
+    try:
+        first_response = runner_inst.run(prompt=query, system_prompt=system_prompt)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
+        _fail(f"LLM runner failed ({e}).")
 
     tool_call = None
     try:
@@ -1046,14 +1084,24 @@ def ask(
         return
 
     tool_name = tool_call.get("tool")
-    kwargs = tool_call.get("kwargs", {})
+    kwargs = tool_call.get("kwargs") or {}
+    if not isinstance(kwargs, dict):
+        kwargs = {}
+
+    if tool_name not in ALLOWED_TOOLS:
+        console.print(f"[red]Unknown tool '{tool_name}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
+        return
 
     if tool_name == "setup_league":
         username = kwargs.get("username")
         if not username:
             console.print("[yellow]Please provide your Sleeper username to complete onboarding.[/]")
             return
-        cfg = onboard_user(username=username)
+        try:
+            cfg = onboard_user(username=username, league_id=kwargs.get("league_id"))
+        except ValueError as e:
+            console.print(f"[red]{e}[/]")
+            return
         console.print(f"[bold green]Successfully onboarded Sleeper league[/] [cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!")
         return
 
@@ -1061,14 +1109,7 @@ def ask(
         console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
         return
 
-    rosters = build_rosters(cfg.league_id)
-    value_book = ValuesClient().get_value_book(cfg.format)
-    ctx = {
-        "config": cfg,
-        "rosters": rosters,
-        "value_book": value_book,
-        "onboard_user": onboard_user,
-    }
+    ctx = _analysis_ctx(cfg, SleeperClient())
 
     try:
         result = dispatch_tool(tool_name, kwargs, ctx)
@@ -1082,7 +1123,10 @@ def ask(
         f"Deterministic Calculation Result:\n{json.dumps(result, indent=2)}\n\n"
         f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
     )
-    final_response = runner_inst.run(prompt=synthesis_prompt)
+    try:
+        final_response = runner_inst.run(prompt=synthesis_prompt)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
+        _fail(f"LLM runner failed ({e}).")
     console.print(Markdown(final_response))
 
 

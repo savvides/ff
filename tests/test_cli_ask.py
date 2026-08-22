@@ -42,6 +42,7 @@ def test_ask_command_tool_execution_loop(tmp_path: pytest.TempPathFactory, monke
     with patch("ff.cli.TerminalRunner") as MockRunner, \
          patch("ff.cli.build_rosters", return_value=[]), \
          patch("ff.cli.ValuesClient") as MockValuesClient, \
+         patch("ff.cli.SleeperClient") as MockSleeperClient, \
          patch("ff.cli.dispatch_tool", return_value={"give_total": 5000, "get_total": 5500}) as mock_dispatch:
         
         mock_inst = MagicMock()
@@ -49,6 +50,14 @@ def test_ask_command_tool_execution_loop(tmp_path: pytest.TempPathFactory, monke
         mock_inst.run.side_effect = [tool_call_json, "Final synthesized trade analysis: Bijan side is better."]
         MockRunner.return_value = mock_inst
         MockValuesClient.return_value.get_value_book.return_value = MagicMock()
+        MockValuesClient.return_value.fetch.return_value = MagicMock()
+        MockSleeperClient.return_value.league.return_value = {}
+        MockSleeperClient.return_value.state.return_value = {}
+        MockSleeperClient.return_value.players.return_value = {}
+        MockSleeperClient.return_value.trending.return_value = []
+        MockSleeperClient.return_value.traded_picks.return_value = []
+        MockSleeperClient.return_value.rosters.return_value = []
+        MockSleeperClient.return_value.league_users.return_value = []
 
         res = runner.invoke(app, ["ask", "Should I trade Gibbs for Bijan?"])
         assert res.exit_code == 0
