@@ -713,7 +713,7 @@ def movers(
 ) -> None:
     """Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_ktc=arbitrage)
 
     if arbitrage:
         rosters = _league_rosters(cfg, sc)

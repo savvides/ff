@@ -313,18 +313,21 @@ def test_cli_values_market_flag(fake_clients, league):
 
 
 def test_cli_movers_arbitrage(fake_clients, league):
+    """Header-only empty tables must fail: the dual-market book has Gibbs."""
     _write_config(league)
     res = runner.invoke(app, ["movers", "--arbitrage"])
     assert res.exit_code == 0, res.output
-    assert "arbitrage" in res.output.lower()
-    assert "FC" in res.output
-    assert "KTC" in res.output
-    assert "diff" in res.output.lower()
+    assert "Jahmyr Gibbs" in res.output
+    assert "8,000" in res.output  # FC
+    assert "8,400" in res.output  # KTC
+    assert "No market arbitrage opportunities found" not in res.output
 
-    # --buy and --sell with --arbitrage
+    # --buy = KTC > FC; --sell = FC > KTC
     res_buy = runner.invoke(app, ["movers", "--arbitrage", "--buy"])
     assert res_buy.exit_code == 0, res_buy.output
+    assert "Jahmyr Gibbs" in res_buy.output
 
     res_sell = runner.invoke(app, ["movers", "--arbitrage", "--sell"])
     assert res_sell.exit_code == 0, res_sell.output
+    assert "Bijan Robinson" in res_sell.output
 
