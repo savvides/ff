@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ff.values import ValueBook
-from ff.values.client import _asset_from_entry
+from ff.values.client import _asset_from_entry, normalize_pick
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -72,7 +72,18 @@ def ktc_entries():
 def ktc_map(ktc_entries):
     m = {}
     for entry in ktc_entries:
-        m[entry["player_id"]] = entry["value"]
+        raw_id = entry.get("player_id")
+        name = entry.get("name")
+        val = entry.get("value")
+        norm_name = normalize_pick(name) if name else None
+        norm_id = normalize_pick(raw_id) if raw_id else None
+        if norm_name or norm_id:
+            if norm_name:
+                m[norm_name] = val
+            if norm_id:
+                m[norm_id] = val
+        elif raw_id is not None:
+            m[str(raw_id)] = val
     return m
 
 
