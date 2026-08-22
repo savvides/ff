@@ -1,6 +1,15 @@
-"""Trade analyzer: the headline feature."""
+from ff.analysis import analyze_trade, evaluate_trade, ktc_position_deltas, position_deltas
+from ff.contracts import Asset
+from ff.values import ValueBook
 
-from ff.analysis import analyze_trade, position_deltas
+
+def make_mock_multi_market_book() -> ValueBook:
+    return ValueBook([
+        Asset(id="1", name="Player A", position="WR", value=2000, ktc_value=2500),
+        Asset(id="2", name="Player B", position="RB", value=1500, ktc_value=1200),
+        Asset(id="3", name="Player C", position="QB", value=3000, ktc_value=2000),
+        Asset(id="4", name="Player D", position="TE", value=1000, ktc_value=1800),
+    ])
 
 
 def test_trade_with_players_and_picks(book):
@@ -43,3 +52,65 @@ def test_position_deltas(book):
     deltas = position_deltas(evaluation)
     assert deltas["RB"] == 9000
     assert deltas["WR"] == -9500
+
+
+def test_trade_with_dual_market():
+    book = make_mock_multi_market_book()
+    eval = evaluate_trade(give=["Player B"], get=["Player A"], book=book)
+    assert eval.ktc_delta is not None
+    assert eval.arbitrage_label() in ["Consensus Win", "Hype Arbitrage", "Value Arbitrage", "Consensus Loss", "Fair"]
+    assert eval.delta == 500
+    assert eval.ktc_delta == 1300
+    assert eval.arbitrage_label() == "Consensus Win"
+
+
+def test_evaluate_trade_parameter_aliases():
+    book = make_mock_multi_market_book()
+    # Test (give, get, book)
+    e1 = evaluate_trade(give=["Player B"], get=["Player A"], book=book)
+    # Test (give_inputs, get_inputs, book)
+    e2 = evaluate_trade(give_inputs=["Player B"], get_inputs=["Player A"], book=book)
+    # Test positional (give_inputs, get_inputs, book)
+    e3 = evaluate_trade(["Player B"], ["Player A"], book)
+    assert e1.delta == e2.delta == e3.delta == 500
+    assert e1.ktc_delta == e2.ktc_delta == e3.ktc_delta == 1300
+
+
+def test_evaluate_trade_include_ktc_false():
+    book = make_mock_multi_market_book()
+    eval = evaluate_trade(give=["Player B"], get=["Player A"], book=book, include_ktc=False)
+    assert eval.delta == 500
+    assert eval.ktc_delta is None
+    assert eval.arbitrage_label() is None
+
+
+def test_trade_arbitrage_classifications_in_evaluation():
+    book = ValueBook([
+        Asset(id="1", name="Hype Buy", value=1000, ktc_value=2000),
+        Asset(id="2", name="Hype Sell", value=2000, ktc_value=1000),
+        Asset(id="3", name="Value Buy", value=2000, ktc_value=1000),
+        Asset(id="4", name="Value Sell", value=1000, ktc_value=2000),
+        Asset(id="5", name="Fair A", value=1000, ktc_value=1000),
+        Asset(id="6", name="Fair B", value=1000, ktc_value=1000),
+    ])
+    # Hype Arbitrage: You get Hype Buy (FC 1000, KTC 2000) for Hype Sell (FC 2000, KTC 1000)
+    eval_hype = evaluate_trade(give=["Hype Sell"], get=["Hype Buy"], book=book)
+    assert eval_hype.arbitrage_label() == "Hype Arbitrage"
+
+    # Value Arbitrage: You get Value Buy (FC 2000, KTC 1000) for Value Sell (FC 1000, KTC 2000)
+    eval_val = evaluate_trade(give=["Value Sell"], get=["Value Buy"], book=book)
+    assert eval_val.arbitrage_label() == "Value Arbitrage"
+
+    # Fair:
+    eval_fair = evaluate_trade(give=["Fair B"], get=["Fair A"], book=book)
+    assert eval_fair.arbitrage_label() == "Fair"
+
+
+def test_ktc_position_deltas():
+    book = make_mock_multi_market_book()
+    # Get Player A (WR 2500 KTC), Give Player B (RB 1200 KTC)
+    eval = evaluate_trade(give=["Player B"], get=["Player A"], book=book)
+    deltas = ktc_position_deltas(eval)
+    assert deltas["WR"] == 2500
+    assert deltas["RB"] == -1200
+

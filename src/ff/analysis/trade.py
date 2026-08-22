@@ -6,13 +6,17 @@ positional breakdown.
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ff.contracts import Asset, TradeEvaluation, TradeSide
 from ff.values import ValueBook
 
 
-def _resolve_side(tokens: List[str], book: ValueBook) -> Tuple[List[Asset], List[str]]:
+def _resolve_side(
+    tokens: List[str],
+    book: ValueBook,
+    include_ktc: bool = True,
+) -> Tuple[List[Asset], List[str]]:
     assets: List[Asset] = []
     unresolved: List[str] = []
     for tok in tokens:
@@ -23,17 +27,33 @@ def _resolve_side(tokens: List[str], book: ValueBook) -> Tuple[List[Asset], List
         if asset is None:
             unresolved.append(tok)
         else:
+            if not include_ktc and asset.ktc_value is not None:
+                asset = asset.model_copy(update={"ktc_value": None})
             assets.append(asset)
     return assets, unresolved
 
 
 def evaluate_trade(
-    give_inputs: List[str],
-    get_inputs: List[str],
-    book: ValueBook,
+    give_inputs: Optional[List[str]] = None,
+    get_inputs: Optional[List[str]] = None,
+    book: Optional[ValueBook] = None,
+    *,
+    give: Optional[List[str]] = None,
+    get: Optional[List[str]] = None,
+    include_ktc: bool = True,
 ) -> TradeEvaluation:
     """Evaluate trade given assets to give and assets to receive."""
-    evaluation, _ = analyze_trade(side_a_tokens=get_inputs, side_b_tokens=give_inputs, book=book)
+    give_list = give if give is not None else (give_inputs or [])
+    get_list = get if get is not None else (get_inputs or [])
+    if book is None:
+        raise ValueError("ValueBook is required for trade evaluation.")
+    evaluation, _ = analyze_trade(
+        side_a_tokens=get_list,
+        side_b_tokens=give_list,
+        book=book,
+        labels=("You get", "You give"),
+        include_ktc=include_ktc,
+    )
     return evaluation
 
 
@@ -42,6 +62,7 @@ def analyze_trade(
     side_b_tokens: List[str],
     book: ValueBook,
     labels: Tuple[str, str] = ("Side A", "Side B"),
+    include_ktc: bool = True,
 ) -> Tuple[TradeEvaluation, List[str]]:
     """Returns (evaluation, unresolved_tokens).
 
@@ -52,8 +73,8 @@ def analyze_trade(
     never silently dropped - a missing player would otherwise make a trade look
     lopsided.
     """
-    a_assets, a_missing = _resolve_side(side_a_tokens, book)
-    b_assets, b_missing = _resolve_side(side_b_tokens, book)
+    a_assets, a_missing = _resolve_side(side_a_tokens, book, include_ktc=include_ktc)
+    b_assets, b_missing = _resolve_side(side_b_tokens, book, include_ktc=include_ktc)
     evaluation = TradeEvaluation(
         side_a=TradeSide(assets=a_assets),
         side_b=TradeSide(assets=b_assets),
@@ -73,3 +94,18 @@ def position_deltas(evaluation: TradeEvaluation) -> Dict[str, int]:
         pos = b.position or "NA"
         deltas[pos] = deltas.get(pos, 0) - b.value
     return deltas
+
+
+def ktc_position_deltas(evaluation: TradeEvaluation) -> Dict[str, int]:
+    """Net KTC value gained per position from side A's perspective (A minus B)."""
+    deltas: Dict[str, int] = {}
+    for a in evaluation.side_a.assets:
+        if a.ktc_value is not None:
+            pos = a.position or "NA"
+            deltas[pos] = deltas.get(pos, 0) + a.ktc_value
+    for b in evaluation.side_b.assets:
+        if b.ktc_value is not None:
+            pos = b.position or "NA"
+            deltas[pos] = deltas.get(pos, 0) - b.ktc_value
+    return deltas
+

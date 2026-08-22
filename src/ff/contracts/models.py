@@ -6,9 +6,10 @@ players and draft picks, because in dynasty a trade is a basket of both.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
 
 
 class Format(BaseModel):
@@ -322,6 +323,40 @@ class TradeEvaluation(BaseModel):
         if fc_loss or ktc_loss:
             return "Consensus Loss"
         return "Fair"
+
+
+class ArbitrageMover(BaseModel):
+    """An asset with valuation discrepancies across FantasyCalc and KeepTradeCut."""
+
+    asset: Asset
+    fc_value: int = 0
+    ktc_value: int = 0
+    diff: int = 0  # ktc_value - fc_value
+    pct_diff: float = 0.0  # abs(diff) / max(fc, ktc) * 100.0
+    diff_pct: float = 0.0
+    roster_id: Optional[int] = None
+    team_name: Optional[str] = None
+    market_bias: str = ""  # "KTC" | "FC" | "EVEN"
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.fc_value == 0 and self.asset.value:
+            self.fc_value = self.asset.value
+        if self.ktc_value == 0 and self.asset.ktc_value:
+            self.ktc_value = self.asset.ktc_value
+        if self.diff == 0 and (self.ktc_value or self.fc_value):
+            self.diff = self.ktc_value - self.fc_value
+        if self.pct_diff == 0.0 and (self.ktc_value or self.fc_value):
+            larger = max(self.fc_value, self.ktc_value)
+            self.pct_diff = (abs(self.diff) / larger * 100.0) if larger > 0 else 0.0
+        if self.diff_pct == 0.0 and self.pct_diff != 0.0:
+            self.diff_pct = self.pct_diff
+        if not self.market_bias:
+            if self.diff > 0:
+                self.market_bias = "KTC"
+            elif self.diff < 0:
+                self.market_bias = "FC"
+            else:
+                self.market_bias = "EVEN"
 
 
 class WaiverTarget(BaseModel):

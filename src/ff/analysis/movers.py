@@ -1,16 +1,8 @@
-"""Buy-low / sell-high candidates from the dynasty-vs-redraft value gap.
-
-FantasyCalc gives every player both a dynasty value and a win-now (redraft)
-value. When win-now far exceeds dynasty the player is an aging asset to sell
-high; the reverse is a young, ascending buy-low. The data is already on each
-Asset; this just ranks by the gap.
-"""
-
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
-from ff.contracts import Asset
+from ff.contracts import ArbitrageMover, Asset, Roster
 from ff.values import ValueBook
 
 
@@ -49,3 +41,80 @@ def top_movers(book: ValueBook, buy: bool = False, limit: int = 20,
         scored.append((a, gap))
     scored.sort(key=lambda x: x[1], reverse=buy)
     return scored[:limit]
+
+
+def find_arbitrage_movers(
+    rosters: Optional[Union[List[Roster], ValueBook]] = None,
+    book: Optional[ValueBook] = None,
+    min_value: int = 1000,
+    limit: int = 20,
+    market: Optional[str] = None,
+) -> List[ArbitrageMover]:
+    """Scan and rank assets with market valuation discrepancies between FC and KTC.
+
+    If rosters is supplied, attaches owning team info to each arbitrage opportunity.
+    market can be 'ktc' (assets where KTC > FC) or 'fc' (assets where FC > KTC).
+    """
+    actual_book: Optional[ValueBook] = None
+    actual_rosters: Optional[List[Roster]] = None
+
+    if isinstance(rosters, ValueBook):
+        actual_book = rosters
+        actual_rosters = book if isinstance(book, list) else None
+    elif isinstance(book, ValueBook):
+        actual_book = book
+        actual_rosters = rosters if isinstance(rosters, list) else None
+    elif rosters is None and book is None:
+        return []
+
+    if actual_book is None:
+        return []
+
+    # Map player_id to (roster_id, team_name) if rosters provided
+    owner_map: Dict[str, Tuple[int, str]] = {}
+    if actual_rosters:
+        for r in actual_rosters:
+            all_ids = set(r.player_ids + r.starters + r.taxi + r.reserve)
+            for pid in all_ids:
+                owner_map[pid] = (r.roster_id, r.team_name)
+
+    scored: List[ArbitrageMover] = []
+    for a in actual_book.assets:
+        if a.ktc_value is None:
+            continue
+        fc_val = a.value
+        ktc_val = a.ktc_value
+
+        if min_value > 0 and max(fc_val, ktc_val) < min_value:
+            continue
+
+        diff = ktc_val - fc_val
+
+        if market == "ktc" and diff <= 0:
+            continue
+        if market == "fc" and diff >= 0:
+            continue
+
+        larger = max(fc_val, ktc_val)
+        pct_diff = (abs(diff) / larger * 100.0) if larger > 0 else 0.0
+        diff_pct = ((ktc_val - fc_val) / fc_val * 100.0) if fc_val > 0 else 0.0
+
+        r_info = owner_map.get(a.id)
+        roster_id, team_name = r_info if r_info else (None, None)
+
+        mover = ArbitrageMover(
+            asset=a,
+            fc_value=fc_val,
+            ktc_value=ktc_val,
+            diff=diff,
+            pct_diff=pct_diff,
+            diff_pct=diff_pct,
+            roster_id=roster_id,
+            team_name=team_name,
+            market_bias="KTC" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
+        )
+        scored.append(mover)
+
+    scored.sort(key=lambda m: (abs(m.diff), m.pct_diff), reverse=True)
+    return scored[:limit] if limit > 0 else scored
+

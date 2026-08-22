@@ -61,3 +61,22 @@ def trending():
 @pytest.fixture
 def traded_picks():
     return load("traded_picks")
+
+
+@pytest.fixture
+def ktc_entries():
+    return load("ktc_values")
+
+
+@pytest.fixture
+def ktc_map(ktc_entries):
+    m = {}
+    for entry in ktc_entries:
+        m[entry["player_id"]] = entry["value"]
+    return m
+
+
+@pytest.fixture
+def multi_market_book(fc_entries, ktc_map):
+    return ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in fc_entries])
+
