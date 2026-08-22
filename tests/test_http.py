@@ -5,6 +5,7 @@ limit and keeps in-season data fresh, so it gets real coverage."""
 import os
 import time
 
+import pytest
 import responses
 
 from ff.core import http
@@ -72,3 +73,19 @@ def test_distinct_params_distinct_cache_files():
     b = get_json(URL, params={"p": 2})
     assert a != b
     assert http._cache_file(URL, {"p": 1}) != http._cache_file(URL, {"p": 2})
+
+
+@responses.activate
+def test_http_error_raises():
+    import requests
+    responses.add(responses.GET, URL, body="not found", status=404)
+    with pytest.raises(requests.exceptions.HTTPError):
+        get_json(URL, use_cache=False)
+
+
+@responses.activate
+def test_non_json_body_raises():
+    responses.add(responses.GET, URL, body="<html>nope</html>", status=200,
+                  content_type="text/html")
+    with pytest.raises(ValueError):
+        get_json(URL, use_cache=False)
