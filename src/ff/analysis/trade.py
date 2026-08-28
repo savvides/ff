@@ -16,6 +16,7 @@ def _resolve_side(
     tokens: List[str],
     book: ValueBook,
     include_ktc: bool = True,
+    players_meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Asset], List[str]]:
     assets: List[Asset] = []
     unresolved: List[str] = []
@@ -27,8 +28,28 @@ def _resolve_side(
         if asset is None:
             unresolved.append(tok)
         else:
+            asset = asset.model_copy()
             if not include_ktc and asset.ktc_value is not None:
-                asset = asset.model_copy(update={"ktc_value": None})
+                asset.ktc_value = None
+            if players_meta and not asset.is_pick and asset.id in players_meta:
+                meta = players_meta[asset.id]
+                if isinstance(meta, dict):
+                    if asset.injury_status is None:
+                        asset.injury_status = meta.get("injury_status")
+                    if asset.injury_body_part is None:
+                        asset.injury_body_part = meta.get("injury_body_part")
+                    if asset.depth_chart_order is None:
+                        asset.depth_chart_order = meta.get("depth_chart_order")
+                    if asset.depth_chart_position is None:
+                        asset.depth_chart_position = meta.get("depth_chart_position")
+                    if asset.status is None:
+                        asset.status = meta.get("status")
+                    if asset.news_updated is None:
+                        asset.news_updated = meta.get("news_updated")
+                    if not asset.team and meta.get("team"):
+                        asset.team = meta.get("team")
+                    if asset.age is None and meta.get("age"):
+                        asset.age = meta.get("age")
             assets.append(asset)
     return assets, unresolved
 
@@ -41,6 +62,7 @@ def evaluate_trade(
     give: Optional[List[str]] = None,
     get: Optional[List[str]] = None,
     include_ktc: bool = True,
+    players_meta: Optional[Dict[str, Any]] = None,
 ) -> TradeEvaluation:
     """Evaluate trade given assets to give and assets to receive."""
     give_list = give if give is not None else (give_inputs or [])
@@ -53,6 +75,7 @@ def evaluate_trade(
         book=book,
         labels=("You get", "You give"),
         include_ktc=include_ktc,
+        players_meta=players_meta,
     )
     return evaluation
 
@@ -63,6 +86,7 @@ def analyze_trade(
     book: ValueBook,
     labels: Tuple[str, str] = ("Side A", "Side B"),
     include_ktc: bool = True,
+    players_meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TradeEvaluation, List[str]]:
     """Returns (evaluation, unresolved_tokens).
 
@@ -73,8 +97,8 @@ def analyze_trade(
     never silently dropped - a missing player would otherwise make a trade look
     lopsided.
     """
-    a_assets, a_missing = _resolve_side(side_a_tokens, book, include_ktc=include_ktc)
-    b_assets, b_missing = _resolve_side(side_b_tokens, book, include_ktc=include_ktc)
+    a_assets, a_missing = _resolve_side(side_a_tokens, book, include_ktc=include_ktc, players_meta=players_meta)
+    b_assets, b_missing = _resolve_side(side_b_tokens, book, include_ktc=include_ktc, players_meta=players_meta)
     evaluation = TradeEvaluation(
         side_a=TradeSide(assets=a_assets),
         side_b=TradeSide(assets=b_assets),

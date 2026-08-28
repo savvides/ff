@@ -91,10 +91,12 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
 
     elif tool_name == "evaluate_trade":
         value_book = ctx.get("value_book")
+        players_meta = ctx.get("players_meta")
         res = trade.evaluate_trade(
             give_inputs=kwargs.get("give", []),
             get_inputs=kwargs.get("get", []),
-            book=value_book
+            book=value_book,
+            players_meta=players_meta,
         )
         return res.model_dump() if hasattr(res, "model_dump") else res
 

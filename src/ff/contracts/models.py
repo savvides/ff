@@ -61,10 +61,53 @@ class Asset(BaseModel):
     position_rank: Optional[int] = None
     trend_30day: Optional[int] = None  # 30-day value change (+/-)
     redraft_value: Optional[int] = None  # win-now value, for buy-low/sell-high
+    injury_status: Optional[str] = None  # Questionable, Out, IR, Doubtful, Sus
+    injury_body_part: Optional[str] = None  # Foot, Knee, Hamstring, etc.
+    depth_chart_order: Optional[int] = None  # 1, 2, 3...
+    depth_chart_position: Optional[str] = None  # LWR, RWR, RB, QB, etc.
+    status: Optional[str] = None  # Active, Injured Reserve, etc.
+    news_updated: Optional[int] = None  # timestamp in ms
 
     @property
     def is_pick(self) -> bool:
         return self.kind == "pick"
+
+    @property
+    def injury_tag(self) -> str:
+        """Short injury label: '[Q]', '[Q - Foot]', '[IR]', '[O]', '[D]'. Empty if healthy."""
+        if self.is_pick:
+            return ""
+        if self.status == "Injured Reserve" or self.injury_status == "IR":
+            return "[IR]"
+        if not self.injury_status or self.injury_status.lower() in ("active", "healthy", "none"):
+            return ""
+        code = {
+            "Questionable": "Q",
+            "Doubtful": "D",
+            "Out": "O",
+            "Suspended": "SUS",
+        }.get(self.injury_status, self.injury_status[:1].upper())
+        if self.injury_body_part:
+            return f"[{code} - {self.injury_body_part}]"
+        return f"[{code}]"
+
+    @property
+    def depth_tag(self) -> str:
+        """Depth chart role: 'RB1', 'WR2', 'QB1', etc."""
+        if self.is_pick or not self.position or self.depth_chart_order is None:
+            return ""
+        return f"{self.position}{self.depth_chart_order}"
+
+    @property
+    def status_label(self) -> str:
+        """Combined depth & injury status string: 'RB3 [Q - Foot]' or 'WR1' or '[IR]'."""
+        parts = []
+        if self.depth_tag:
+            parts.append(self.depth_tag)
+        if self.injury_tag:
+            parts.append(self.injury_tag)
+        return " ".join(parts)
+
 
 
 class DraftPickInfo(BaseModel):
