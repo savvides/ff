@@ -59,4 +59,3 @@ def test_value_roster_enriches_injury_and_depth(book, rosters_raw, users_raw):
     assert gibbs.depth_tag == "RB2"
     assert gibbs.injury_tag == "[Q - Hamstring]"
     assert gibbs.status_label == "RB2 [Q - Hamstring]"
-

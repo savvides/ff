@@ -31,25 +31,8 @@ def _resolve_side(
             asset = asset.model_copy()
             if not include_ktc and asset.ktc_value is not None:
                 asset.ktc_value = None
-            if players_meta and not asset.is_pick and asset.id in players_meta:
-                meta = players_meta[asset.id]
-                if isinstance(meta, dict):
-                    if asset.injury_status is None:
-                        asset.injury_status = meta.get("injury_status")
-                    if asset.injury_body_part is None:
-                        asset.injury_body_part = meta.get("injury_body_part")
-                    if asset.depth_chart_order is None:
-                        asset.depth_chart_order = meta.get("depth_chart_order")
-                    if asset.depth_chart_position is None:
-                        asset.depth_chart_position = meta.get("depth_chart_position")
-                    if asset.status is None:
-                        asset.status = meta.get("status")
-                    if asset.news_updated is None:
-                        asset.news_updated = meta.get("news_updated")
-                    if not asset.team and meta.get("team"):
-                        asset.team = meta.get("team")
-                    if asset.age is None and meta.get("age"):
-                        asset.age = meta.get("age")
+            if players_meta and not asset.is_pick:
+                asset.fill_from_meta(players_meta.get(asset.id))
             assets.append(asset)
     return assets, unresolved
 

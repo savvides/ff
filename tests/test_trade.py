@@ -138,5 +138,3 @@ def test_trade_enriches_player_metadata():
     assert conner.depth_tag == "RB3"
     assert conner.injury_tag == "[Q - Foot]"
     assert conner.status_label == "RB3 [Q - Foot]"
-
-

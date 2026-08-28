@@ -110,4 +110,3 @@ def test_asset_injury_and_depth_tags():
     assert pick.depth_tag == ""
     assert pick.injury_tag == ""
     assert pick.status_label == ""
-
