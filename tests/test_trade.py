@@ -114,3 +114,29 @@ def test_ktc_position_deltas():
     assert deltas["WR"] == 2500
     assert deltas["RB"] == -1200
 
+
+def test_trade_enriches_player_metadata():
+    book = ValueBook([
+        Asset(id="8138", name="Bijan Robinson", position="RB", value=9000),
+        Asset(id="4137", name="James Conner", position="RB", value=600),
+    ])
+    players_meta = {
+        "8138": {"full_name": "Bijan Robinson", "position": "RB", "depth_chart_order": 1},
+        "4137": {"full_name": "James Conner", "position": "RB", "depth_chart_order": 3, "injury_status": "Questionable", "injury_body_part": "Foot"},
+    }
+    eval, _ = analyze_trade(
+        side_a_tokens=["Bijan Robinson"],
+        side_b_tokens=["James Conner"],
+        book=book,
+        players_meta=players_meta,
+    )
+    bijan = eval.side_a.assets[0]
+    assert bijan.depth_tag == "RB1"
+    assert bijan.injury_tag == ""
+
+    conner = eval.side_b.assets[0]
+    assert conner.depth_tag == "RB3"
+    assert conner.injury_tag == "[Q - Foot]"
+    assert conner.status_label == "RB3 [Q - Foot]"
+
+

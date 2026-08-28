@@ -82,3 +82,32 @@ def test_arbitrage_classifications():
     side_a = TradeSide(assets=[Asset(id="1", name="A", value=1000, ktc_value=1000)])
     side_b = TradeSide(assets=[Asset(id="2", name="B", value=1000, ktc_value=1000)])
     assert TradeEvaluation(side_a=side_a, side_b=side_b).arbitrage_label() == "Fair"
+
+
+def test_asset_injury_and_depth_tags():
+    # Healthy starter
+    a1 = Asset(id="1", name="Bijan Robinson", position="RB", depth_chart_order=1)
+    assert a1.depth_tag == "RB1"
+    assert a1.injury_tag == ""
+    assert a1.status_label == "RB1"
+
+    # Injured backup with body part
+    a2 = Asset(id="2", name="James Conner", position="RB", depth_chart_order=3,
+               injury_status="Questionable", injury_body_part="Foot")
+    assert a2.depth_tag == "RB3"
+    assert a2.injury_tag == "[Q - Foot]"
+    assert a2.status_label == "RB3 [Q - Foot]"
+
+    # IR player
+    a3 = Asset(id="3", name="Injured Guy", position="WR", depth_chart_order=2,
+               status="Injured Reserve", injury_status="IR")
+    assert a3.depth_tag == "WR2"
+    assert a3.injury_tag == "[IR]"
+    assert a3.status_label == "WR2 [IR]"
+
+    # Pick has no depth tag or injury tag
+    pick = Asset(id="2027 1st", name="2027 1st", kind="pick", position="PICK")
+    assert pick.depth_tag == ""
+    assert pick.injury_tag == ""
+    assert pick.status_label == ""
+

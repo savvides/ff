@@ -39,6 +39,26 @@ def value_roster(
                 value=0,
             )
             unvalued.append(pid)
+
+        meta = (players_meta or {}).get(pid)
+        if meta and isinstance(meta, dict):
+            if asset.injury_status is None:
+                asset.injury_status = meta.get("injury_status")
+            if asset.injury_body_part is None:
+                asset.injury_body_part = meta.get("injury_body_part")
+            if asset.depth_chart_order is None:
+                asset.depth_chart_order = meta.get("depth_chart_order")
+            if asset.depth_chart_position is None:
+                asset.depth_chart_position = meta.get("depth_chart_position")
+            if asset.status is None:
+                asset.status = meta.get("status")
+            if asset.news_updated is None:
+                asset.news_updated = meta.get("news_updated")
+            if not asset.team and meta.get("team"):
+                asset.team = meta.get("team")
+            if asset.age is None and meta.get("age"):
+                asset.age = meta.get("age")
+
         assets.append(asset)
         pos = asset.position or "NA"
         by_position[pos] = by_position.get(pos, 0) + asset.value

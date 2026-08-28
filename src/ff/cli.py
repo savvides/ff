@@ -55,7 +55,7 @@ from ff.services.llm.dispatcher import dispatch_tool
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
-from ff.sleeper import SleeperClient, build_rosters, detect_format
+from ff.sleeper import SleeperClient, build_rosters, detect_format, player_name
 from ff.values import ValueBook, ValuesClient, normalize_name
 
 app = typer.Typer(add_completion=False, help="Manage a Sleeper dynasty league with free data.")
@@ -250,7 +250,9 @@ def roster(
     for c in ("player", "pos", "age", "value", "ovr", "30d"):
         t.add_column(c, justify="right" if c in ("value", "ovr", "30d", "age") else "left")
     for a in val.assets[:top]:
-        t.add_row(a.name, a.position or "-",
+        name_cell = f"{a.name} [bold red]{a.injury_tag}[/]" if a.injury_tag else a.name
+        pos_cell = a.depth_tag if a.depth_tag else (a.position or "-")
+        t.add_row(name_cell, pos_cell,
                   f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
                   str(a.overall_rank or "-"),
                   _signed(a.trend_30day) if a.trend_30day else "-")
@@ -474,10 +476,16 @@ def trade(
         if a and not a.is_pick and normalize_name(tok) != normalize_name(a.name):
             subs.append((tok.strip(), a.name))
     # side_a = what you receive, side_b = what you give: delta>0 means you win.
+    players_meta = sc.players()
     evaluation, unresolved = analyze_trade(
         get_tokens, give_tokens, book, labels=("You get", "You give"),
         include_ktc=include_ktc,
+        players_meta=players_meta,
     )
+
+    def _fmt_trade_asset(a: Asset, val: int) -> str:
+        lbl = f" [{a.status_label}]" if a.status_label else ""
+        return f"{a.name}{lbl} ({val:,})"
 
     has_ktc = (
         evaluation.ktc_value_a is not None
@@ -490,30 +498,30 @@ def trade(
         for c in ("side", "assets", "FC", "KTC"):
             t.add_column(c, justify="right" if c in ("FC", "KTC") else "left")
         t.add_row("[green]You get[/]",
-                  ", ".join(f"{a.name} ({a.value:,})" for a in evaluation.side_a.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.value_a:,}[/]",
                   f"[bold]{evaluation.ktc_value_a:,}[/]")
         t.add_row("[red]You give[/]",
-                  ", ".join(f"{a.name} ({a.value:,})" for a in evaluation.side_b.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.value_b:,}[/]",
                   f"[bold]{evaluation.ktc_value_b:,}[/]")
     elif market == "ktc" and has_ktc:
         for c in ("side", "assets", "KTC"):
             t.add_column(c, justify="right" if c == "KTC" else "left")
         t.add_row("[green]You get[/]",
-                  ", ".join(f"{a.name} ({a.ktc_value or a.value:,})" for a in evaluation.side_a.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.ktc_value or a.value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.ktc_value_a:,}[/]")
         t.add_row("[red]You give[/]",
-                  ", ".join(f"{a.name} ({a.ktc_value or a.value:,})" for a in evaluation.side_b.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.ktc_value or a.value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.ktc_value_b:,}[/]")
     else:
         for c in ("side", "assets", "value"):
             t.add_column(c, justify="right" if c == "value" else "left")
         t.add_row("[green]You get[/]",
-                  ", ".join(f"{a.name} ({a.value:,})" for a in evaluation.side_a.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.value_a:,}[/]")
         t.add_row("[red]You give[/]",
-                  ", ".join(f"{a.name} ({a.value:,})" for a in evaluation.side_b.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.value_b:,}[/]")
     console.print(t)
 
@@ -613,6 +621,82 @@ def waivers(
         status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
         t.add_row(a.name, a.position or "-", f"{a.value:,}", f"{tgt.add_count:,}", status)
     console.print(t)
+
+
+# --- news / injuries -----------------------------------------------------
+
+@app.command()
+@_guard
+def news(
+    team: Optional[str] = typer.Argument(None, help="Team name; omit for the whole league."),
+    limit: int = typer.Option(15, help="How many trending adds/drops to display."),
+) -> None:
+    """Player health, depth chart roles, injuries, and trending news across Sleeper."""
+    cfg, sc = _load()
+    book = _book(cfg, include_ktc=False)
+    rosters = _league_rosters(cfg, sc)
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
+
+    if team:
+        target = _pick_roster(rosters, team, cfg.user_id)
+        if target is None:
+            _fail("could not find that team. Try `ff power` to list teams.")
+        target_rosters = [v for v in valuations if v.roster_id == target.roster_id]
+    else:
+        target_rosters = valuations
+
+    injured_assets = []
+    for val in target_rosters:
+        for a in val.assets:
+            if a.injury_tag or (a.status and a.status != "Active"):
+                injured_assets.append((val.team_name, a))
+
+    if injured_assets:
+        title = f"injuries & player status ({target_rosters[0].team_name if len(target_rosters) == 1 else 'league-wide'})"
+        t_inj = Table(title=title)
+        for c in ("team", "player", "depth", "injury", "status", "value"):
+            t_inj.add_column(c, justify="right" if c in ("value",) else "left")
+        for tname, a in sorted(injured_assets, key=lambda x: x[1].value, reverse=True):
+            t_inj.add_row(
+                tname,
+                a.name,
+                a.depth_tag or a.position or "-",
+                a.injury_tag or "-",
+                a.injury_status or a.status or "Active",
+                f"{a.value:,}",
+            )
+        console.print(t_inj)
+    else:
+        console.print("[dim]No reported injuries or reserve designations found.[/]")
+
+    adds = sc.trending(kind="add", lookback_hours=24, limit=limit)
+    drops = sc.trending(kind="drop", lookback_hours=24, limit=limit)
+
+    if adds or drops:
+        t_trend = Table(title="Sleeper trending movement (24h)")
+        for c in ("type", "player", "pos/team", "status", "count", "value"):
+            t_trend.add_column(c, justify="right" if c in ("count", "value") else "left")
+        for item in adds:
+            pid = item.get("player_id")
+            meta = players_meta.get(pid, {}) if players_meta else {}
+            name = player_name(pid, players_meta)
+            pos_team = f"{meta.get('position', '-')}/{meta.get('team', '-')}"
+            asset = book.value_for_sleeper_id(pid)
+            val_str = f"{asset.value:,}" if asset else "-"
+            status_str = meta.get("injury_status") or meta.get("status") or "Active"
+            t_trend.add_row("[green]+ ADD[/]", name, pos_team, status_str, f"{item.get('count', 0):,}", val_str)
+        for item in drops:
+            pid = item.get("player_id")
+            meta = players_meta.get(pid, {}) if players_meta else {}
+            name = player_name(pid, players_meta)
+            pos_team = f"{meta.get('position', '-')}/{meta.get('team', '-')}"
+            asset = book.value_for_sleeper_id(pid)
+            val_str = f"{asset.value:,}" if asset else "-"
+            status_str = meta.get("injury_status") or meta.get("status") or "Active"
+            t_trend.add_row("[red]- DROP[/]", name, pos_team, status_str, f"{item.get('count', 0):,}", val_str)
+        console.print(t_trend)
+
 
 
 @app.command()

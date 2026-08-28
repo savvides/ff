@@ -1,11 +1,12 @@
 {
-  "7564": {"full_name": "Ja'Marr Chase", "position": "WR", "team": "CIN"},
-  "9221": {"full_name": "Jahmyr Gibbs", "position": "RB", "team": "DET"},
-  "4984": {"full_name": "Josh Allen", "position": "QB", "team": "BUF"},
-  "8138": {"full_name": "Bijan Robinson", "position": "RB", "team": "ATL"},
-  "6666": {"full_name": "Brock Bowers", "position": "TE", "team": "LV"},
-  "9999": {"full_name": "Test Kicker", "position": "K", "team": "DET"},
-  "8888": {"full_name": "Backup Tightend", "position": "TE", "team": "ATL"},
-  "7777": {"full_name": "Deep Stash", "position": "WR", "team": "CHI"},
-  "5555": {"full_name": "Rome Odunze", "position": "WR", "team": "CHI"}
+  "7564": {"full_name": "Ja'Marr Chase", "position": "WR", "team": "CIN", "depth_chart_order": 1},
+  "9221": {"full_name": "Jahmyr Gibbs", "position": "RB", "team": "DET", "depth_chart_order": 1, "injury_status": "Questionable", "injury_body_part": "Hamstring"},
+  "4984": {"full_name": "Josh Allen", "position": "QB", "team": "BUF", "depth_chart_order": 1},
+  "8138": {"full_name": "Bijan Robinson", "position": "RB", "team": "ATL", "depth_chart_order": 1},
+  "6666": {"full_name": "Brock Bowers", "position": "TE", "team": "LV", "depth_chart_order": 1},
+  "9999": {"full_name": "Test Kicker", "position": "K", "team": "DET", "depth_chart_order": 1},
+  "8888": {"full_name": "Backup Tightend", "position": "TE", "team": "ATL", "depth_chart_order": 2, "injury_status": "Questionable", "injury_body_part": "Ankle"},
+  "7777": {"full_name": "Deep Stash", "position": "WR", "team": "CHI", "depth_chart_order": 4},
+  "5555": {"full_name": "Rome Odunze", "position": "WR", "team": "CHI", "depth_chart_order": 1}
 }
+

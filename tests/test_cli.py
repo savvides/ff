@@ -331,3 +331,31 @@ def test_cli_movers_arbitrage(fake_clients, league):
     assert res_sell.exit_code == 0, res_sell.output
     assert "Bijan Robinson" in res_sell.output
 
+
+def test_cli_roster_shows_depth_and_injury(fake_clients, league):
+    _write_config(league)
+    # Roster 3 has Backup Tightend with [Q - Ankle] and TE2
+    res = runner.invoke(app, ["roster", "carol"])
+    assert res.exit_code == 0, res.output
+    assert "Backup Tightend" in res.output
+    assert "TE2" in res.output
+    assert "[Q - Ankle]" in res.output
+
+
+def test_cli_trade_shows_depth_and_injury(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "fc"])
+    assert res.exit_code == 0, res.output
+    assert "Bijan Robinson [RB1]" in res.output
+    assert "Jahmyr Gibbs [RB1 [Q - Hamstring]]" in res.output
+
+
+
+def test_cli_news_command(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["news"])
+    assert res.exit_code == 0, res.output
+    assert "Backup Tightend" in res.output
+    assert "Questionable" in res.output or "Q - Ankle" in res.output
+
+
