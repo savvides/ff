@@ -48,7 +48,7 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Roster
+from ff.contracts import Asset, Roster
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.services.llm.dispatcher import dispatch_tool
@@ -670,33 +670,31 @@ def news(
     else:
         console.print("[dim]No reported injuries or reserve designations found.[/]")
 
-    adds = sc.trending(kind="add", lookback_hours=24, limit=limit)
-    drops = sc.trending(kind="drop", lookback_hours=24, limit=limit)
+    # Fetch the same superset `waivers` does and slice locally: the disk cache
+    # keys on url+params, so a per-command --limit would mint its own entry and
+    # its own round trip for what is one logical feed.
+    fetch = max(limit * 3, 50)
+    adds = sc.trending(kind="add", lookback_hours=24, limit=fetch)[:limit]
+    drops = sc.trending(kind="drop", lookback_hours=24, limit=fetch)[:limit]
 
     if adds or drops:
         t_trend = Table(title="Sleeper trending movement (24h)")
         for c in ("type", "player", "pos/team", "status", "count", "value"):
             t_trend.add_column(c, justify="right" if c in ("count", "value") else "left")
-        for item in adds:
-            pid = item.get("player_id")
-            meta = players_meta.get(pid, {}) if players_meta else {}
-            name = player_name(pid, players_meta)
-            pos_team = f"{meta.get('position', '-')}/{meta.get('team', '-')}"
-            asset = book.value_for_sleeper_id(pid)
-            val_str = f"{asset.value:,}" if asset else "-"
-            status_str = meta.get("injury_status") or meta.get("status") or "Active"
-            t_trend.add_row("[green]+ ADD[/]", name, pos_team, status_str, f"{item.get('count', 0):,}", val_str)
-        for item in drops:
-            pid = item.get("player_id")
-            meta = players_meta.get(pid, {}) if players_meta else {}
-            name = player_name(pid, players_meta)
-            pos_team = f"{meta.get('position', '-')}/{meta.get('team', '-')}"
-            asset = book.value_for_sleeper_id(pid)
-            val_str = f"{asset.value:,}" if asset else "-"
-            status_str = meta.get("injury_status") or meta.get("status") or "Active"
-            t_trend.add_row("[red]- DROP[/]", name, pos_team, status_str, f"{item.get('count', 0):,}", val_str)
+        for label, items in (("[green]+ ADD[/]", adds), ("[red]- DROP[/]", drops)):
+            for item in items:
+                pid = item.get("player_id")
+                meta = (players_meta or {}).get(pid, {})
+                asset = book.value_for_sleeper_id(pid)
+                t_trend.add_row(
+                    label,
+                    player_name(pid, players_meta),
+                    f"{meta.get('position', '-')}/{meta.get('team', '-')}",
+                    meta.get("injury_status") or meta.get("status") or "Active",
+                    f"{item.get('count', 0):,}",
+                    f"{asset.value:,}" if asset else "-",
+                )
         console.print(t_trend)
-
 
 
 @app.command()

@@ -350,12 +350,9 @@ def test_cli_trade_shows_depth_and_injury(fake_clients, league):
     assert "Jahmyr Gibbs [RB1 [Q - Hamstring]]" in res.output
 
 
-
 def test_cli_news_command(fake_clients, league):
     _write_config(league)
     res = runner.invoke(app, ["news"])
     assert res.exit_code == 0, res.output
     assert "Backup Tightend" in res.output
     assert "Questionable" in res.output or "Q - Ankle" in res.output
-
-

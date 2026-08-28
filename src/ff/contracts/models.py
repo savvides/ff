@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-
 class Format(BaseModel):
     """A league's scoring/roster format - everything needed to ask FantasyCalc
     for the *right* values. Derived from Sleeper's own league settings so it is
@@ -46,6 +45,11 @@ class Format(BaseModel):
         return f"{self.num_teams}-team {kind} {qb} {scoring}{tep}"
 
 
+# Availability fields only Sleeper's players file supplies; FantasyCalc has none
+# of them, so `Asset.fill_from_meta` only ever fills blanks.
+_META_FIELDS = ("injury_status", "injury_body_part", "depth_chart_order", "status")
+
+
 class Asset(BaseModel):
     """A tradeable thing: a player or a draft pick, with its dynasty value."""
 
@@ -64,13 +68,28 @@ class Asset(BaseModel):
     injury_status: Optional[str] = None  # Questionable, Out, IR, Doubtful, Sus
     injury_body_part: Optional[str] = None  # Foot, Knee, Hamstring, etc.
     depth_chart_order: Optional[int] = None  # 1, 2, 3...
-    depth_chart_position: Optional[str] = None  # LWR, RWR, RB, QB, etc.
     status: Optional[str] = None  # Active, Injured Reserve, etc.
-    news_updated: Optional[int] = None  # timestamp in ms
 
     @property
     def is_pick(self) -> bool:
         return self.kind == "pick"
+
+    def fill_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
+        """Fill blank availability fields from a Sleeper players-file entry.
+
+        The book prices players; only Sleeper knows whether they can play. Both
+        `value_roster` and the trade resolver need that join, so it lives here -
+        `contracts` is the one module they may both import from.
+        """
+        if not isinstance(meta, dict):
+            return
+        for field in _META_FIELDS:
+            if getattr(self, field) is None:
+                setattr(self, field, meta.get(field))
+        if not self.team and meta.get("team"):
+            self.team = meta.get("team")
+        if self.age is None and meta.get("age"):
+            self.age = meta.get("age")
 
     @property
     def injury_tag(self) -> str:
@@ -107,7 +126,6 @@ class Asset(BaseModel):
         if self.injury_tag:
             parts.append(self.injury_tag)
         return " ".join(parts)
-
 
 
 class DraftPickInfo(BaseModel):
