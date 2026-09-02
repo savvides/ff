@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Format(BaseModel):
@@ -61,7 +61,7 @@ class Asset(BaseModel):
     team: Optional[str] = None
     age: Optional[float] = None
     value: int = 0  # FantasyCalc dynasty value (0 if unvalued)
-    ktc_value: Optional[int] = None  # KeepTradeCut dynasty value
+    secondary_value: Optional[int] = None  # Secondary market (Dynasty Dealer / KTC) dynasty value
     overall_rank: Optional[int] = None
     position_rank: Optional[int] = None
     trend_30day: Optional[int] = None  # 30-day value change (+/-)
@@ -70,6 +70,35 @@ class Asset(BaseModel):
     injury_body_part: Optional[str] = None  # Foot, Knee, Hamstring, etc.
     depth_chart_order: Optional[int] = None  # 1, 2, 3...
     status: Optional[str] = None  # Active, Injured Reserve, etc.
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("secondary_value") is None:
+                if "ktc_value" in data and data.get("ktc_value") is not None:
+                    data = dict(data)
+                    data["secondary_value"] = data["ktc_value"]
+                elif "dealer_value" in data and data.get("dealer_value") is not None:
+                    data = dict(data)
+                    data["secondary_value"] = data["dealer_value"]
+        return data
+
+    @property
+    def ktc_value(self) -> Optional[int]:
+        return self.secondary_value
+
+    @ktc_value.setter
+    def ktc_value(self, val: Optional[int]) -> None:
+        self.secondary_value = val
+
+    @property
+    def dealer_value(self) -> Optional[int]:
+        return self.secondary_value
+
+    @dealer_value.setter
+    def dealer_value(self, val: Optional[int]) -> None:
+        self.secondary_value = val
 
     @property
     def is_pick(self) -> bool:
@@ -298,10 +327,18 @@ class TradeSide(BaseModel):
         return sum(a.value for a in self.assets)
 
     @property
-    def ktc_total(self) -> Optional[int]:
-        if not any(a.ktc_value is not None for a in self.assets):
+    def secondary_total(self) -> Optional[int]:
+        if not any(a.secondary_value is not None for a in self.assets):
             return None
-        return sum(a.ktc_value or 0 for a in self.assets)
+        return sum(a.secondary_value or 0 for a in self.assets)
+
+    @property
+    def ktc_total(self) -> Optional[int]:
+        return self.secondary_total
+
+    @property
+    def dealer_total(self) -> Optional[int]:
+        return self.secondary_total
 
 
 class TradeEvaluation(BaseModel):
@@ -332,25 +369,57 @@ class TradeEvaluation(BaseModel):
         return 0.0 if larger == 0 else abs(self.delta) / larger * 100.0
 
     @property
+    def secondary_value_a(self) -> Optional[int]:
+        return self.side_a.secondary_total
+
+    @property
+    def secondary_value_b(self) -> Optional[int]:
+        return self.side_b.secondary_total
+
+    @property
+    def secondary_delta(self) -> Optional[int]:
+        if self.secondary_value_a is None or self.secondary_value_b is None:
+            return None
+        return self.secondary_value_a - self.secondary_value_b
+
+    @property
+    def secondary_pct_diff(self) -> Optional[float]:
+        if self.secondary_value_a is None or self.secondary_value_b is None:
+            return None
+        larger = max(self.secondary_value_a, self.secondary_value_b)
+        return 0.0 if larger == 0 else abs(self.secondary_delta) / larger * 100.0
+
+    @property
     def ktc_value_a(self) -> Optional[int]:
-        return self.side_a.ktc_total
+        return self.secondary_value_a
+
+    @property
+    def dealer_value_a(self) -> Optional[int]:
+        return self.secondary_value_a
 
     @property
     def ktc_value_b(self) -> Optional[int]:
-        return self.side_b.ktc_total
+        return self.secondary_value_b
+
+    @property
+    def dealer_value_b(self) -> Optional[int]:
+        return self.secondary_value_b
 
     @property
     def ktc_delta(self) -> Optional[int]:
-        if self.ktc_value_a is None or self.ktc_value_b is None:
-            return None
-        return self.ktc_value_a - self.ktc_value_b
+        return self.secondary_delta
+
+    @property
+    def dealer_delta(self) -> Optional[int]:
+        return self.secondary_delta
 
     @property
     def ktc_pct_diff(self) -> Optional[float]:
-        if self.ktc_value_a is None or self.ktc_value_b is None:
-            return None
-        larger = max(self.ktc_value_a, self.ktc_value_b)
-        return 0.0 if larger == 0 else abs(self.ktc_delta) / larger * 100.0
+        return self.secondary_pct_diff
+
+    @property
+    def dealer_pct_diff(self) -> Optional[float]:
+        return self.secondary_pct_diff
 
     def winner(self) -> str:
         if self.delta == 0:
@@ -360,61 +429,110 @@ class TradeEvaluation(BaseModel):
     def is_fair(self, threshold_pct: float = 5.0) -> bool:
         return self.pct_diff <= threshold_pct
 
-    def arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
-        if self.ktc_delta is None or self.ktc_pct_diff is None:
+    def secondary_is_fair(self, threshold_pct: float = 5.0) -> bool:
+        if self.secondary_pct_diff is None:
+            return False
+        return self.secondary_pct_diff <= threshold_pct
+
+    def ktc_is_fair(self, threshold_pct: float = 5.0) -> bool:
+        return self.secondary_is_fair(threshold_pct)
+
+    def dealer_is_fair(self, threshold_pct: float = 5.0) -> bool:
+        return self.secondary_is_fair(threshold_pct)
+
+    def secondary_arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
+        if self.secondary_delta is None or self.secondary_pct_diff is None:
             return None
         fc_fair = self.is_fair(threshold_pct)
-        ktc_fair = self.ktc_pct_diff <= threshold_pct
+        sec_fair = self.secondary_is_fair(threshold_pct)
 
-        if fc_fair and ktc_fair:
+        if fc_fair and sec_fair:
             return "Fair"
 
         fc_win = self.delta > 0 and not fc_fair
         fc_loss = self.delta < 0 and not fc_fair
-        ktc_win = self.ktc_delta > 0 and not ktc_fair
-        ktc_loss = self.ktc_delta < 0 and not ktc_fair
+        sec_win = self.secondary_delta > 0 and not sec_fair
+        sec_loss = self.secondary_delta < 0 and not sec_fair
 
-        if fc_win and ktc_win:
+        if fc_win and sec_win:
             return "Consensus Win"
-        if fc_loss and ktc_loss:
+        if fc_loss and sec_loss:
             return "Consensus Loss"
-        if fc_win and (ktc_loss or ktc_fair):
+        if fc_win and (sec_loss or sec_fair):
             return "Value Arbitrage"
-        if (fc_loss or fc_fair) and ktc_win:
+        if (fc_loss or fc_fair) and sec_win:
             return "Hype Arbitrage"
-        if fc_loss or ktc_loss:
+        if fc_loss or sec_loss:
             return "Consensus Loss"
         return "Fair"
 
+    def arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
+        return self.secondary_arbitrage_label(threshold_pct)
+
+    def ktc_arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
+        return self.secondary_arbitrage_label(threshold_pct)
+
+    def dealer_arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
+        return self.secondary_arbitrage_label(threshold_pct)
+
 
 class ArbitrageMover(BaseModel):
-    """An asset with valuation discrepancies across FantasyCalc and KeepTradeCut."""
+    """An asset with valuation discrepancies across FantasyCalc and secondary market (Dynasty Dealer / KTC)."""
 
     asset: Asset
     fc_value: int = 0
-    ktc_value: int = 0
-    diff: int = 0  # ktc_value - fc_value
-    pct_diff: float = 0.0  # abs(diff) / max(fc, ktc) * 100.0
+    secondary_value: int = 0
+    diff: int = 0  # secondary_value - fc_value
+    pct_diff: float = 0.0  # abs(diff) / max(fc, secondary) * 100.0
     diff_pct: float = 0.0
     roster_id: Optional[int] = None
     team_name: Optional[str] = None
-    market_bias: str = ""  # "KTC" | "FC" | "EVEN"
+    market_bias: str = ""  # "Dealer" | "KTC" | "FC" | "EVEN"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "secondary_value" not in data or data.get("secondary_value") is None:
+                if "ktc_value" in data and data.get("ktc_value") is not None:
+                    data = dict(data)
+                    data["secondary_value"] = data["ktc_value"]
+                elif "dealer_value" in data and data.get("dealer_value") is not None:
+                    data = dict(data)
+                    data["secondary_value"] = data["dealer_value"]
+        return data
+
+    @property
+    def ktc_value(self) -> int:
+        return self.secondary_value
+
+    @ktc_value.setter
+    def ktc_value(self, val: int) -> None:
+        self.secondary_value = val
+
+    @property
+    def dealer_value(self) -> int:
+        return self.secondary_value
+
+    @dealer_value.setter
+    def dealer_value(self, val: int) -> None:
+        self.secondary_value = val
 
     def model_post_init(self, __context: Any) -> None:
         if self.fc_value == 0 and self.asset.value:
             self.fc_value = self.asset.value
-        if self.ktc_value == 0 and self.asset.ktc_value:
-            self.ktc_value = self.asset.ktc_value
-        if self.diff == 0 and (self.ktc_value or self.fc_value):
-            self.diff = self.ktc_value - self.fc_value
-        if self.pct_diff == 0.0 and (self.ktc_value or self.fc_value):
-            larger = max(self.fc_value, self.ktc_value)
+        if self.secondary_value == 0 and self.asset.secondary_value:
+            self.secondary_value = self.asset.secondary_value
+        if self.diff == 0 and (self.secondary_value or self.fc_value):
+            self.diff = self.secondary_value - self.fc_value
+        if self.pct_diff == 0.0 and (self.secondary_value or self.fc_value):
+            larger = max(self.fc_value, self.secondary_value)
             self.pct_diff = (abs(self.diff) / larger * 100.0) if larger > 0 else 0.0
         if self.diff_pct == 0.0 and self.pct_diff != 0.0:
             self.diff_pct = self.pct_diff
         if not self.market_bias:
             if self.diff > 0:
-                self.market_bias = "KTC"
+                self.market_bias = "Dealer"
             elif self.diff < 0:
                 self.market_bias = "FC"
             else:
