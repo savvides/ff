@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import difflib
 import re
+from typing import Any, Dict, List, Optional
+
 from ff.contracts import Asset, Format
 from ff.core.http import get_json
 from ff.values.dealer import DynastyDealerClient
 from ff.values.normalize import normalize_name, normalize_pick
+
 
 VALUES_URL = "https://api.fantasycalc.com/values/current"
 VALUES_TTL = 6 * 3600  # values drift slowly; refresh a few times a day

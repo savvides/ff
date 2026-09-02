@@ -200,3 +200,15 @@ def test_values_client_fetch_dynasty_dealer():
         asset_no_ktc = book_no_ktc.resolve("Jahmyr Gibbs")
         assert asset_no_ktc.secondary_value is None
 
+
+def test_values_client_type_hints_resolvable():
+    import typing
+    import ff.values.client as client_module
+
+    hints_asset = typing.get_type_hints(client_module._asset_from_entry)
+    assert hints_asset["return"] is client_module.Asset
+
+    hints_fetch = typing.get_type_hints(client_module.ValuesClient.fetch)
+    assert hints_fetch["return"] is client_module.ValueBook
+
+
