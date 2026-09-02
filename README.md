@@ -44,6 +44,10 @@ flowchart TD
         LLMRunner["services/llm/\n(TerminalRunner & Tool Dispatcher)"]
     end
 
+    subgraph Contracts["Typed Domain Contracts"]
+        Models["contracts/models.py\n(Domain models: Asset, TradeEvaluation, RosterValuation, Format)"]
+    end
+
     subgraph PureAnalysis["Pure Analysis Engine (No I/O)"]
         RosterAnalysis["analysis/roster.py\n(value_all_rosters)"]
         PicksAnalysis["analysis/picks.py\n(pick_ledger & price_pick)"]
@@ -55,17 +59,24 @@ flowchart TD
         WaiversAnalysis["analysis/waivers.py\n(waiver_targets)"]
     end
 
+    subgraph QALayer["Post-Command Invariant Verification & Telemetry"]
+        QAEngine["qa/engine.py & qa/validators.py\n(Post-command domain invariant verifications & telemetry)"]
+    end
+
     subgraph CLI["Rich Terminal Interface (cli.py)"]
         OutputSetup["ff setup / config"]
         OutputValuation["ff roster / power / picks / values"]
         OutputTrading["ff trade / movers / waivers"]
         OutputManagement["ff lineup / cleanup / news"]
         OutputDraft["ff draft / ask"]
+        OutputQA["ff qa (diagnostic audit)"]
     end
 
     DataSources --> CoreEngine
-    CoreEngine --> PureAnalysis
+    CoreEngine --> Contracts
+    Contracts --> PureAnalysis
     PureAnalysis --> CLI
+    CLI --> QALayer
 ```
 
 ## Quickstart
@@ -80,10 +91,11 @@ make install                 # venv + deps + pre-commit hook
 ./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st" --market both
 
 ./.venv/bin/ff movers --arbitrage
-./.venv/bin/ff news --player "Christian McCaffrey"
+./.venv/bin/ff news
 ./.venv/bin/ff cleanup
 ./.venv/bin/ff waivers
 ./.venv/bin/ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
+./.venv/bin/ff qa
 ```
 
 `setup` reads your league's settings from Sleeper and **auto-detects the format**
