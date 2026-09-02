@@ -134,6 +134,10 @@ flowchart TD
     Save --> Done(["Render updated configuration panel"])
 ```
 
+**Options:**
+- `backend`: Runner backend (`auto`, `agy`, `gemini`, `claude`, `ollama`).
+- `-m, --model M`: Model name when using Ollama (defaults to `llama3.2`).
+
 ---
 
 ### 2. Roster Valuation & League Standings
@@ -304,24 +308,24 @@ flowchart TD
 ---
 
 #### `ff news [team]`
-Tracks player health, injury designations, depth-chart status, Sleeper 24-hour trending adds/drops, and single-player headlines with analysis.
+Tracks player health, injury designations, depth-chart roles, and Sleeper 24-hour trending adds/drops across your league or for a specific team.
 
 ```mermaid
 flowchart TD
-    Start(["ff news [team] [--player P]"]) --> CheckMode{"--player specified?"}
-    CheckMode -- "Yes" --> ResolvePID["Resolve player_id\n(ValueBook / Sleeper players file)"]
-    ResolvePID --> FetchNews["Fetch Sleeper v2 news endpoint\n(api.sleeper.com/v2/player/{id}/news)"]
-    FetchNews --> RenderNews["Render:\n• Player headline table\n• Detailed blurbs, analysis & URLs"]
-    
-    CheckMode -- "No" --> ScanInjuries["Scan roster assets for injuries & reserve status\nFetch Sleeper 24h trending adds & drops"]
-    ScanInjuries --> RenderSweep["Render:\n• Injured players table (sorted by value)\n• Sleeper 24h trending adds/drops table"]
-    RenderNews & RenderSweep --> Done(["Done"])
+    Start(["ff news [team] [--limit N]"]) --> LoadConfig["Load .ff/config.json"]
+    LoadConfig --> FetchData["Fetch Sleeper rosters & players metadata\nFetch FantasyCalc ValueBook"]
+    FetchData --> FilterTeam{"Team argument\nspecified?"}
+    FilterTeam -- "Yes" --> PickTeam["Filter valuations to target team"]
+    FilterTeam -- "No" --> AllTeams["Evaluate all league rosters"]
+    PickTeam & AllTeams --> ScanInjuries["Scan assets for injury tags & reserve status\n(injury_status != 'Active')"]
+    ScanInjuries --> FetchTrending["Fetch Sleeper 24h trending adds & drops\n(sc.trending)"]
+    FetchTrending --> Render["Render:\n• Injured players table (sorted by dynasty value)\n• Sleeper 24h trending adds & drops table"]
+    Render --> Done(["Done"])
 ```
 
 **Options:**
-- `team`: Filter injuries to a specific team (omit for league-wide).
-- `-p, --player`: Query headlines and analysis for a single player.
-- `--limit N`: Number of items to display (default: 15).
+- `team`: Filter injuries to a specific team (defaults to league-wide).
+- `--limit N`: Number of trending adds and drops to display (default: 15).
 
 ---
 
@@ -394,6 +398,13 @@ flowchart TD
 
 #### `ff version`
 Prints the installed version of `ff`.
+
+```mermaid
+flowchart TD
+    Start(["ff version"]) --> ReadVersion["Read __version__"]
+    ReadVersion --> Render["Print version string\n(e.g. 'ff 0.1.0')"]
+    Render --> Done(["Done"])
+```
 
 ---
 
