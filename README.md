@@ -79,7 +79,17 @@ you never configure that by hand. Picks are first-class: `2027 1st`, `2026 2nd`,
   [--draft-id ID]` - live draft board scored FOR your team: your picks, where
   you stand vs the league, and best available ranked by fit (roster need +
   win-now/rebuild horizon), not raw market value alone.
+- `ff qa [--verbose]` - run full-system diagnostic invariant audits across all league domains.
 - `ff version` - print the ff version.
+
+## Post-Command QA & Invariant System
+
+`ff` features a built-in automated QA validation engine that validates domain mathematical and logical invariants after every command run. Control telemetry output via the `FF_QA` environment variable:
+
+- `FF_QA=0` or unset - Silent mode (default; runs checks and warns on invariant issues).
+- `FF_QA=1` or `FF_QA=summary` - Prints a concise 1-line check verification footer (e.g. `✔ QA: 5 checks passed (0.4ms)`).
+- `FF_QA=verbose` - Renders a detailed Rich table listing every executed check, status, and diagnostic messages.
+- `FF_QA=strict` - Raises `QAInvariantError` and halts execution if any invariant fails.
 
 ## Development
 

@@ -117,11 +117,17 @@ def validate_roster(valuation: RosterValuation, target_roster: Optional[Roster] 
     ))
 
     if target_roster is not None:
-        count_match = (len(valuation.assets) + len(valuation.unvalued)) == len(target_roster.player_ids)
+        count_match = len(valuation.assets) == len(target_roster.player_ids)
         checks.append(QACheck(
             name="Roster Player Count Match",
             passed=count_match,
-            message="" if count_match else f"Valued assets ({len(valuation.assets)}) + unvalued ({len(valuation.unvalued)}) != Sleeper roster count ({len(target_roster.player_ids)})",
+            message="" if count_match else f"Valued assets count ({len(valuation.assets)}) != Sleeper roster count ({len(target_roster.player_ids)})",
+        ))
+        unvalued_subset = set(valuation.unvalued).issubset(set(target_roster.player_ids))
+        checks.append(QACheck(
+            name="Roster Unvalued Subset Valid",
+            passed=unvalued_subset,
+            message="" if unvalued_subset else "unvalued list contains players not on the target roster",
         ))
 
     return checks
