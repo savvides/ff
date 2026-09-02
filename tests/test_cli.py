@@ -300,3 +300,69 @@ def test_cli_news_command(fake_clients, league):
     assert res.exit_code == 0, res.output
     assert "Backup Tightend" in res.output
     assert "Questionable" in res.output or "Q - Ankle" in res.output
+
+
+def test_cli_config_set_llm_case_insensitive(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["config", "set-llm", "CLAUDE"])
+    assert res.exit_code == 0, res.output
+    assert "Updated LLM backend to claude" in res.output
+
+
+def test_cli_doctor_alias(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["doctor"])
+    assert res.exit_code == 0, res.output
+    assert "System Health Scorecard" in res.output or "QA Report" in res.output or "Checks" in res.output
+
+
+def test_cli_setup_invalid_league_id(fake_clients, monkeypatch):
+    from ff.cli import SleeperClient
+    fake_inst = SleeperClient()
+    fake_inst.league = lambda lid: None
+    monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: fake_inst)
+    res = runner.invoke(app, ["setup", "alice", "--league-id", "nonexistent_id"])
+    assert res.exit_code == 1
+    assert "could not find Sleeper league" in res.output
+
+
+def test_cli_trade_dealer_positional_swings(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "dealer"])
+    assert res.exit_code == 0, res.output
+    assert "positional swing" in res.output
+    assert "Dealer" in res.output
+
+
+def test_cli_lineup_handles_unsupported_slots(fake_clients, league, monkeypatch):
+    # Add an unsupported slot to the league roster positions
+    from ff.cli import SleeperClient
+    custom_league = dict(league)
+    custom_league["roster_positions"] = list(league.get("roster_positions", [])) + ["IDP"]
+    _write_config(custom_league)
+    fake_inst = SleeperClient()
+    fake_inst.league = lambda lid: custom_league
+    monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: fake_inst)
+    res = runner.invoke(app, ["lineup"])
+    assert res.exit_code == 0, res.output
+    assert "optimal lineup" in res.output
+    assert "IDP" in res.output  # Surfaced in unsupported slots notice
+
+
+def test_cli_lazy_context(fake_clients, league):
+    from ff.cli import _LazyContext, SleeperClient
+    from ff.core.config import Config
+    cfg = Config(
+        league_id="LG1", season="2026", name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id="userA",
+    )
+    sc = SleeperClient()
+    ctx = _LazyContext(cfg, sc)
+    assert "config" in ctx
+    # rosters should not be in keys until accessed
+    assert "rosters" not in dict.keys(ctx)
+    rosters = ctx["rosters"]
+    assert len(rosters) > 0
+    assert "rosters" in dict.keys(ctx)
+
+

@@ -164,6 +164,7 @@ def test_validate_values_invalid_secondary():
     checks_dealer = validate_values([a2], market="dealer")
     failed_dealer = [c for c in checks_dealer if not c.passed]
     assert any("Secondary Prices Present" in c.name for c in failed_dealer)
+    assert any(c.is_warning for c in failed_dealer)
 
 
 def test_validate_trade_valid():

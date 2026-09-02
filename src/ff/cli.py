@@ -41,6 +41,7 @@ from ff.analysis import (
     optimal_lineup,
     pick_ledger,
     position_deltas,
+    secondary_position_deltas,
     projected_points,
     rank_fits,
     top_movers,
@@ -109,35 +110,85 @@ def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
     return build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
 
 
+class _LazyContext(dict):
+    """Lazy evaluation context for LLM dispatcher tools to avoid eager network/cache reads."""
+
+    def __init__(self, cfg: Config, sc: SleeperClient):
+        super().__init__()
+        self["config"] = cfg
+        self["onboard_user"] = onboard_user
+        self["season"] = str(cfg.season)
+        self._cfg = cfg
+        self._sc = sc
+        self._cache: Dict[str, Any] = {}
+
+    def _get_league(self) -> Dict[str, Any]:
+        if "_league" not in self._cache:
+            self._cache["_league"] = self._sc.league(self._cfg.league_id) or {}
+        return self._cache["_league"]
+
+    def _get_state(self) -> Dict[str, Any]:
+        if "_state" not in self._cache:
+            self._cache["_state"] = self._sc.state() or {}
+        return self._cache["_state"]
+
+    def __getitem__(self, key: str) -> Any:
+        if key in self:
+            return super().__getitem__(key)
+        val = self._compute(key)
+        self[key] = val
+        return val
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def _compute(self, key: str) -> Any:
+        if key == "rosters":
+            return _league_rosters(self._cfg, self._sc)
+        elif key == "value_book":
+            return _book(self._cfg)
+        elif key == "players_meta":
+            return self._sc.players()
+        elif key == "projections":
+            state = self._get_state()
+            week = int(state.get("display_week") or state.get("week") or 1)
+            season = str(self._cfg.season)
+            try:
+                return ProjectionsClient().week(season, week)
+            except Exception:
+                return {}
+        elif key == "scoring":
+            return self._get_league().get("scoring_settings") or {}
+        elif key == "roster_positions":
+            return self._get_league().get("roster_positions") or []
+        elif key == "trending":
+            return self._sc.trending(kind="add", limit=50)
+        elif key == "traded_picks":
+            return self._sc.traded_picks(self._cfg.league_id)
+        elif key == "week":
+            state = self._get_state()
+            return int(state.get("display_week") or state.get("week") or 1)
+        elif key == "taxi_slots":
+            settings = self._get_league().get("settings") or {}
+            return int(settings.get("taxi_slots") or 0)
+        elif key == "reserve_slots":
+            settings = self._get_league().get("settings") or {}
+            return int(settings.get("reserve_slots") or 0)
+        elif key == "taxi_allow_vets":
+            settings = self._get_league().get("settings") or {}
+            return bool(settings.get("taxi_allow_vets"))
+        elif key == "taxi_years":
+            settings = self._get_league().get("settings") or {}
+            return settings.get("taxi_years")
+        raise KeyError(key)
+
+
 def _analysis_ctx(cfg: Config, sc: SleeperClient) -> Dict[str, Any]:
     """I/O bundle the LLM dispatcher needs so tools see the same data as `ff` commands."""
-    league = sc.league(cfg.league_id) or {}
-    settings = league.get("settings") or {}
-    state = sc.state() or {}
-    week = int(state.get("display_week") or state.get("week") or 1)
-    season = str(cfg.season)
-    try:
-        projections = ProjectionsClient().week(season, week)
-    except Exception:
-        projections = {}
-    return {
-        "config": cfg,
-        "rosters": _league_rosters(cfg, sc),
-        "value_book": _book(cfg),
-        "onboard_user": onboard_user,
-        "players_meta": sc.players(),
-        "projections": projections,
-        "scoring": league.get("scoring_settings") or {},
-        "roster_positions": league.get("roster_positions") or [],
-        "trending": sc.trending(kind="add", limit=50),
-        "traded_picks": sc.traded_picks(cfg.league_id),
-        "taxi_slots": int(settings.get("taxi_slots") or 0),
-        "reserve_slots": int(settings.get("reserve_slots") or 0),
-        "taxi_allow_vets": bool(settings.get("taxi_allow_vets")),
-        "taxi_years": settings.get("taxi_years"),
-        "season": season,
-        "week": week,
-    }
+    return _LazyContext(cfg, sc)
 
 
 def _signed(n: int) -> str:
@@ -197,13 +248,17 @@ def setup(
         league_id = chosen["league_id"]
 
     league = sc.league(league_id)
+    if not league:
+        _fail(f"could not find Sleeper league with id '{league_id}'.")
     fmt = detect_format(league)
     cfg = Config(
         league_id=league_id,
         season=str(season),
         name=league.get("name", ""),
+        league_name=league.get("name", ""),
         format=fmt,
         username=username,
+        user_name=username,
         user_id=user_id,
     )
     path = save_config(cfg)
@@ -332,7 +387,7 @@ def picks(
     cfg, sc = _load()
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    league = sc.league(cfg.league_id)
+    league = sc.league(cfg.league_id) or {}
 
     # "Future" starts after the latest draft's season: once a year's rookie
     # draft exists its picks live on the draft board (`ff draft`), not here.
@@ -351,7 +406,8 @@ def picks(
 
     valuations = value_all_rosters(rosters, book, sc.players())
     ranks = {v.roster_id: v.power_rank for v in valuations}
-    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book, ranks,
+    traded = sc.traded_picks(cfg.league_id)
+    ledger = pick_ledger(rosters, traded, book, ranks,
                          seasons=seasons, rounds=rounds_n)
 
     if team is None:
@@ -390,7 +446,7 @@ def picks(
                   "1st is an early one); other rounds use the flat round value; "
                   "0 = FantasyCalc does not price that round. This year's board: "
                   "`ff draft`.[/]")
-    qa_rep = run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=sc.traded_picks(cfg.league_id))
+    qa_rep = run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded)
     render_qa_footer(qa_rep, console)
 
 
@@ -499,9 +555,10 @@ def trade(
         players_meta=players_meta,
     )
 
-    def _fmt_trade_asset(a: Asset, val: int) -> str:
+    def _fmt_trade_asset(a: Asset, val: Optional[int]) -> str:
         lbl = f" [{a.status_label}]" if a.status_label else ""
-        return f"{a.name}{lbl} ({val:,})"
+        val_str = f"{val:,}" if val is not None else "unpriced"
+        return f"{a.name}{lbl} ({val_str})"
 
     has_secondary = (
         evaluation.secondary_value_a is not None
@@ -525,10 +582,10 @@ def trade(
         for c in ("side", "assets", "Dealer"):
             t.add_column(c, justify="right" if c == "Dealer" else "left")
         t.add_row("[green]You get[/]",
-                  ", ".join(_fmt_trade_asset(a, a.secondary_value or a.value) for a in evaluation.side_a.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.secondary_value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.secondary_value_a:,}[/]")
         t.add_row("[red]You give[/]",
-                  ", ".join(_fmt_trade_asset(a, a.secondary_value or a.value) for a in evaluation.side_b.assets) or "-",
+                  ", ".join(_fmt_trade_asset(a, a.secondary_value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.secondary_value_b:,}[/]")
     else:
         for c in ("side", "assets", "value"):
@@ -595,7 +652,10 @@ def trade(
         console.print(Panel.fit(
             f"net {_signed(net)} value to you   |   {verdict}", title="verdict"))
 
-    deltas = position_deltas(evaluation)
+    if market in ("dealer", "ktc") and has_secondary:
+        deltas = secondary_position_deltas(evaluation)
+    else:
+        deltas = position_deltas(evaluation)
     if deltas:
         line = "   ".join(f"{p} {_signed(v)}" for p, v in
                           sorted(deltas.items(), key=lambda x: abs(x[1]), reverse=True) if v)
@@ -897,7 +957,7 @@ def lineup(
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
 
-    league = sc.league(cfg.league_id)
+    league = sc.league(cfg.league_id) or {}
     scoring = league.get("scoring_settings") or {}
     roster_positions = league.get("roster_positions") or []
     rosters = _league_rosters(cfg, sc)
@@ -905,7 +965,7 @@ def lineup(
     if target is None:
         _fail("could not find that team. Try `ff power` to list teams.")
 
-    state = sc.state()
+    state = sc.state() or {}
     season = season or cfg.season
     week = week or state.get("display_week") or state.get("week") or 1
     if week < 1:
@@ -939,14 +999,23 @@ def lineup(
 
     # Start/sit advice vs the lineup currently set on Sleeper.
     optimal_ids = {s.player_id for s in lu.slots if s.player_id}
-    current = [p for p in target.starters if p in info]
+    roster_positions = league.get("roster_positions") or []
+    unsupported_set = set(lu.unsupported_slots or [])
+    supported_starters = []
+    for idx, p in enumerate(target.starters):
+        if p and p in info:
+            slot_name = roster_positions[idx] if idx < len(roster_positions) else None
+            if slot_name not in unsupported_set:
+                supported_starters.append(p)
+    current = supported_starters
     if current:
         current_total = round(sum(info[p]["points"] for p in current), 2)
         sit = [p for p in current if p not in optimal_ids]
-        start = [s for s in lu.slots if s.player_id and s.player_id not in set(target.starters)]
+        start = [s for s in lu.slots if s.player_id and s.player_id not in set(supported_starters)]
         if start or sit:
             gain = round(lu.total - current_total, 2)
-            console.print(f"[bold green]+{gain:g} projected[/] vs your current lineup "
+            gain_str = f"+{gain:g}" if gain >= 0 else f"{gain:g}"
+            console.print(f"[bold green]{gain_str} projected[/] vs your current lineup "
                           f"([dim]{current_total:g} -> {lu.total:g}[/]):")
             for s in start:
                 console.print(f"  [green]START[/] {s.name} ({s.points:g}) in {s.slot}")
@@ -1059,8 +1128,11 @@ def draft(
         else:
             st = "[green]available[/]"
             gap = p.pick_no - prev - 1
-            when = ("[bold green]ON THE CLOCK[/]" if p.pick_no == on_clock
-                    else f"{gap} pick{'s' if gap != 1 else ''} away")
+            is_active_draft = status in ("drafting", "in_progress")
+            if p.pick_no == on_clock:
+                when = "[bold green]ON THE CLOCK[/]" if is_active_draft else "upcoming"
+            else:
+                when = f"{gap} pick{'s' if gap != 1 else ''} away"
             prev = p.pick_no
         pt.add_row(f"#{p.pick_no}", str(p.round), st, when)
     console.print(pt)
@@ -1088,7 +1160,7 @@ def draft(
 
     # Team context FIRST: a pick recommendation that ignores your roster is just
     # the market read back to you. Slots drive both standing and starter-upgrade.
-    league = sc.league(cfg.league_id)
+    league = sc.league(cfg.league_id) or {}
     roster_positions = league.get("roster_positions") or []
     all_vals = value_all_rosters(rosters, book, players_meta)
     my_rank = next((v.power_rank for v in all_vals if v.roster_id == mine.roster_id), None)
@@ -1206,6 +1278,8 @@ def ask(
 
     if tool_name not in ALLOWED_TOOLS:
         console.print(f"[red]Unknown tool '{tool_name}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
+        qa_rep = run_qa("ask", tool_name=str(tool_name), result={"error": f"Unknown tool: {tool_name}"}, query=query)
+        render_qa_footer(qa_rep, console)
         return
 
     if tool_name == "setup_league":
@@ -1233,6 +1307,8 @@ def ask(
         result = dispatch_tool(tool_name, kwargs, ctx)
     except Exception as e:
         console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")
+        qa_rep = run_qa("ask", tool_name=tool_name, result={"error": str(e)}, query=query)
+        render_qa_footer(qa_rep, console)
         return
 
     synthesis_prompt = (
@@ -1264,13 +1340,14 @@ def set_llm(
     except FileNotFoundError:
         _fail("No league configured. Run 'ff setup <username>' first.")
     valid_backends = SUPPORTED_BACKENDS + ["auto"]
-    if backend not in valid_backends:
+    backend_clean = backend.lower()
+    if backend_clean not in valid_backends:
         _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
-    cfg.llm_backend = backend
+    cfg.llm_backend = backend_clean
     if model:
         cfg.ollama_model = model
     path = save_config(cfg)
-    console.print(f"[bold green]Updated LLM backend[/] to [cyan]{backend}[/]"
+    console.print(f"[bold green]Updated LLM backend[/] to [cyan]{backend_clean}[/]"
                   + (f" (model: [cyan]{model}[/])" if model else "")
                   + f"\nconfig: {path}")
 
@@ -1341,6 +1418,15 @@ def qa_cmd(
         for r in reports:
             render_qa_footer(r, console, mode="verbose")
     render_qa_full_report(reports, console)
+
+
+@app.command(name="doctor", hidden=True)
+@_guard
+def doctor_cmd(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show granular check details."),
+) -> None:
+    """Diagnostic system health check (alias for `ff qa`)."""
+    qa_cmd(verbose=verbose)
 
 
 @app.command()

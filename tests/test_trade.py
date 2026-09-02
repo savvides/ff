@@ -166,3 +166,15 @@ def test_trade_enriches_player_metadata():
     assert conner.depth_tag == "RB3"
     assert conner.injury_tag == "[Q - Foot]"
     assert conner.status_label == "RB3 [Q - Foot]"
+
+
+def test_evaluate_trade_string_inputs(book):
+    eval_res = evaluate_trade(
+        give="Jahmyr Gibbs, 2026 2nd",
+        get="Bijan Robinson, 2027 1st",
+        book=book,
+    )
+    assert eval_res.value_a == 12000
+    assert eval_res.value_b == 9500
+    assert eval_res.delta == 2500
+
