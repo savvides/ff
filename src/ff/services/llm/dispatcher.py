@@ -25,15 +25,22 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
         return None
     cfg = ctx.get("config")
     if cfg:
-        user_name = (getattr(cfg, "user_name", "") or "").lower()
         user_id = (getattr(cfg, "user_id", "") or "").lower()
-        for r in rosters:
-            team_name = (getattr(r, "team_name", "") or "").lower()
-            owner_id = (getattr(r, "owner_id", "") or "").lower()
-            if user_name and (user_name == team_name or user_name in team_name):
-                return r
-            if user_id and user_id == owner_id:
-                return r
+        user_name = (getattr(cfg, "user_name", "") or getattr(cfg, "username", "") or "").lower()
+        if user_id:
+            for r in rosters:
+                owner_id = (getattr(r, "owner_id", "") or "").lower()
+                if user_id == owner_id:
+                    return r
+        if user_name:
+            for r in rosters:
+                team_name = (getattr(r, "team_name", "") or "").lower()
+                if user_name == team_name:
+                    return r
+            for r in rosters:
+                team_name = (getattr(r, "team_name", "") or "").lower()
+                if user_name in team_name:
+                    return r
     return None
 
 
@@ -54,16 +61,21 @@ def _find_roster_valuation(all_vals: List[Any], team_query: Optional[str], ctx: 
         return None
     cfg = ctx.get("config")
     if cfg:
-        user_name = (getattr(cfg, "user_name", "") or "").lower()
-        for v in all_vals:
-            team_name = (getattr(v, "team_name", "") or "").lower()
-            if user_name and user_name in team_name:
-                return v
         mine = _find_roster(ctx.get("rosters") or [], None, ctx)
         if mine is not None:
             rid = getattr(mine, "roster_id", None)
             for v in all_vals:
                 if getattr(v, "roster_id", None) == rid:
+                    return v
+        user_name = (getattr(cfg, "user_name", "") or getattr(cfg, "username", "") or "").lower()
+        if user_name:
+            for v in all_vals:
+                team_name = (getattr(v, "team_name", "") or "").lower()
+                if user_name == team_name:
+                    return v
+            for v in all_vals:
+                team_name = (getattr(v, "team_name", "") or "").lower()
+                if user_name in team_name:
                     return v
     return None
 
@@ -92,9 +104,15 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
     elif tool_name == "evaluate_trade":
         value_book = ctx.get("value_book")
         players_meta = ctx.get("players_meta")
+        give = kwargs.get("give", [])
+        get = kwargs.get("get", [])
+        if isinstance(give, str):
+            give = [t.strip() for t in give.split(",") if t.strip()]
+        if isinstance(get, str):
+            get = [t.strip() for t in get.split(",") if t.strip()]
         res = trade.evaluate_trade(
-            give_inputs=kwargs.get("give", []),
-            get_inputs=kwargs.get("get", []),
+            give_inputs=give,
+            get_inputs=get,
             book=value_book,
             players_meta=players_meta,
         )

@@ -174,3 +174,28 @@ def test_dispatch_get_draft_fit_excludes_rostered_players() -> None:
         })
     assert "7564" not in captured["ids"]
     assert "9221" in captured["ids"]
+
+
+def test_dispatch_evaluate_trade_coerces_string_inputs() -> None:
+    from ff.services.llm.dispatcher import dispatch_tool
+    mock_eval = MagicMock()
+    mock_eval.model_dump.return_value = {"give_total": 5000, "get_total": 5500}
+    with patch("ff.analysis.trade.evaluate_trade", return_value=mock_eval) as mock_trade:
+        res = dispatch_tool("evaluate_trade", {"give": "Gibbs, 2026 2nd", "get": "Bijan"}, ctx={})
+        assert res == {"give_total": 5000, "get_total": 5500}
+        mock_trade.assert_called_once()
+        _, kwargs = mock_trade.call_args
+        assert kwargs["give_inputs"] == ["Gibbs", "2026 2nd"]
+        assert kwargs["get_inputs"] == ["Bijan"]
+
+
+def test_dispatcher_find_roster_owner_id_priority() -> None:
+    from ff.contracts import Roster
+    from ff.services.llm.dispatcher import _find_roster
+    # Dan's owner id is "u1". Another team's name is "Dan's Rivals" owned by "u2".
+    user_team = Roster(roster_id=1, team_name="Champion Squad", owner_id="u1")
+    other_team = Roster(roster_id=2, team_name="Dan's Rivals", owner_id="u2")
+    cfg = MagicMock(user_id="u1", user_name="dan")
+    matched = _find_roster([other_team, user_team], None, {"config": cfg})
+    assert matched.roster_id == 1
+

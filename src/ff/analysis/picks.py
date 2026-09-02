@@ -54,13 +54,13 @@ def pick_ledger(rosters: List[Roster], traded_picks: List[Dict[str, Any]],
     `rounds` is the caller's best guess at the rookie-draft round count; a traded
     pick in a deeper round proves the draft has at least that many, so the ledger
     extends itself rather than silently dropping owned capital."""
-    season_set = set(seasons)
+    season_set = set(str(s) for s in seasons)
     rounds = max([rounds] + [t["round"] for t in traded_picks
-                             if t["season"] in season_set])
+                             if str(t["season"]) in season_set])
 
     current: Dict[Tuple[str, int, int], int] = {}
     for t in traded_picks:  # later rows win: a re-traded pick's last row is current
-        current[(t["season"], t["round"], t["roster_id"])] = t["owner_id"]
+        current[(str(t["season"]), t["round"], t["roster_id"])] = t["owner_id"]
 
     names = {r.roster_id: r.team_name for r in rosters}
     owned: Dict[int, List[FuturePick]] = {r.roster_id: [] for r in rosters}

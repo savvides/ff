@@ -238,11 +238,16 @@ def validate_values(assets: List[Asset], position: Optional[str] = None, market:
         ))
 
     if market in ("dealer", "ktc"):
+        sec_present = any(a.secondary_value is not None for a in assets)
         sec_valid = all(a.secondary_value is not None and a.secondary_value >= 0 for a in assets)
         checks.append(QACheck(
             name="Values Secondary Prices Present",
             passed=sec_valid,
-            message="" if sec_valid else "One or more assets missing secondary value in secondary-only view",
+            is_warning=not sec_present,
+            message="" if sec_valid else (
+                "Secondary market appears offline or unreachable" if not sec_present
+                else "One or more assets missing secondary value in secondary-only view"
+            ),
         ))
     elif market == "both":
         sec_valid = all(a.secondary_value is None or a.secondary_value >= 0 for a in assets)

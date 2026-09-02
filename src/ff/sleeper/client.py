@@ -113,6 +113,8 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
     if isinstance(league, str):
         sc = SleeperClient()
         league = sc.league(league) or {}
+    elif not league:
+        league = {}
 
     positions: List[str] = league.get("roster_positions") or []
     superflex = "SUPER_FLEX" in positions

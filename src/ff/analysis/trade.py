@@ -53,6 +53,10 @@ def evaluate_trade(
     """Evaluate trade given assets to give and assets to receive."""
     give_list = give if give is not None else (give_inputs or [])
     get_list = get if get is not None else (get_inputs or [])
+    if isinstance(give_list, str):
+        give_list = [t.strip() for t in give_list.split(",") if t.strip()]
+    if isinstance(get_list, str):
+        get_list = [t.strip() for t in get_list.split(",") if t.strip()]
     if book is None:
         raise ValueError("ValueBook is required for trade evaluation.")
     evaluation, _ = analyze_trade(
