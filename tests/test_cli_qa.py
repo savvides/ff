@@ -69,13 +69,16 @@ def test_cli_qa_across_all_commands(fake_clients, league, monkeypatch):
 
     commands = [
         ["values", "-p", "WR"],
+        ["values", "--market", "dealer"],
         ["trade", "--give", "Ja'Marr Chase", "--get", "Bijan Robinson"],
+        ["trade", "--give", "Ja'Marr Chase", "--get", "Bijan Robinson", "--market", "dealer"],
         ["picks"],
         ["cleanup"],
         ["waivers"],
         ["lineup", "--week", "1"],
         ["news"],
         ["movers", "--buy"],
+        ["movers", "--arbitrage"],
         ["draft", "--draft-id", "DR1"],
     ]
 

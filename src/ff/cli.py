@@ -96,8 +96,13 @@ def _load() -> Tuple[Config, SleeperClient]:
     return load_config(), SleeperClient()
 
 
-def _book(cfg: Config, include_ktc: bool = True) -> ValueBook:
-    return ValuesClient().fetch(cfg.format, include_ktc=include_ktc)
+def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True) -> ValueBook:
+    client = ValuesClient()
+    should_include = include_secondary and include_ktc
+    try:
+        return client.fetch(cfg.format, include_secondary=should_include)
+    except TypeError:
+        return client.fetch(cfg.format, include_ktc=should_include)
 
 
 def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
@@ -226,7 +231,7 @@ def roster(
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you, "
               "or pass a team name: ff roster \"<team>\".")
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     players_meta = sc.players()
 
@@ -291,7 +296,7 @@ def _pick_roster(rosters: List[Roster], team: Optional[str],
 def power() -> None:
     """League power rankings by total dynasty value."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     valuations = value_all_rosters(rosters, book, sc.players())
     by_id = {r.roster_id: r for r in rosters}
@@ -325,7 +330,7 @@ def picks(
     reconciled with trades), valued like `ff trade`. The half of team value
     that `power` leaves out."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     league = sc.league(cfg.league_id)
 
@@ -398,53 +403,53 @@ def values(
                                             help="QB/RB/WR/TE; omit for overall."),
     limit: int = typer.Option(40, help="How many to list."),
     market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, ktc, or both (default: both)."),
+                               help="Market: fc, dealer, or both (default: both)."),
 ) -> None:
     """Dynasty rankings for your league format."""
     market = market.lower()
-    if market not in ("fc", "ktc", "both"):
-        _fail("--market must be fc, ktc, or both.")
+    if market not in ("fc", "dealer", "ktc", "both"):
+        _fail("--market must be fc, dealer, or both.")
 
     cfg, sc = _load()
-    include_ktc = market != "fc"
-    book = _book(cfg, include_ktc=include_ktc)
+    include_secondary = market != "fc"
+    book = _book(cfg, include_secondary=include_secondary)
 
-    if market == "ktc":
+    if market in ("dealer", "ktc"):
         pool = [a for a in book.assets if not a.is_pick]
         if position:
             pool = [a for a in pool if a.position == position.upper()]
-        assets = sorted(pool, key=lambda a: a.ktc_value or 0, reverse=True)[:limit]
+        assets = sorted(pool, key=lambda a: a.secondary_value or 0, reverse=True)[:limit]
     else:
         assets = book.top(position, limit)
 
-    has_ktc = any(a.ktc_value is not None for a in assets)
-    dual_market = market == "both" and has_ktc
+    has_secondary = any(a.secondary_value is not None for a in assets)
+    dual_market = market == "both" and has_secondary
 
     title = f"dynasty rankings - {cfg.format.label()}" + (f" - {position.upper()}" if position else "")
-    if market == "ktc":
-        title += " - KTC"
+    if market in ("dealer", "ktc"):
+        title += " - Dynasty Dealer"
 
     t = Table(title=title)
     if dual_market:
-        right = ("FC", "KTC", "30d", "age", "#", "posrk")
-        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "KTC", "30d"):
+        right = ("FC", "Dealer", "30d", "age", "#", "posrk")
+        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "Dealer", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
-            ktc_str = f"{a.ktc_value:,}" if a.ktc_value is not None else "-"
+            sec_str = f"{a.secondary_value:,}" if a.secondary_value is not None else "-"
             t.add_row(str(i), a.name, a.position or "-", posrk, a.team or "-",
                       f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
-                      ktc_str,
+                      sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
-    elif market == "ktc":
-        right = ("KTC", "30d", "age", "#", "posrk")
-        for c in ("#", "player", "pos", "posrk", "team", "age", "KTC", "30d"):
+    elif market in ("dealer", "ktc"):
+        right = ("Dealer", "30d", "age", "#", "posrk")
+        for c in ("#", "player", "pos", "posrk", "team", "age", "Dealer", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
-            ktc_str = f"{a.ktc_value:,}" if a.ktc_value is not None else "-"
+            sec_str = f"{a.secondary_value:,}" if a.secondary_value is not None else "-"
             t.add_row(str(i), a.name, a.position or "-", posrk, a.team or "-",
-                      f"{a.age:.0f}" if a.age else "-", ktc_str,
+                      f"{a.age:.0f}" if a.age else "-", sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
     else:
         right = ("value", "30d", "age", "#", "posrk")
@@ -468,16 +473,16 @@ def trade(
     give: str = typer.Option(..., "--give", help="What you send, comma-separated."),
     get: str = typer.Option(..., "--get", help="What you receive, comma-separated."),
     market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, ktc, or both (default: both)."),
+                               help="Market: fc, dealer, or both (default: both)."),
 ) -> None:
     """Analyze a trade. Players and picks both count (e.g. --get '2027 1st')."""
     market = market.lower()
-    if market not in ("fc", "ktc", "both"):
-        _fail("--market must be fc, ktc, or both.")
+    if market not in ("fc", "dealer", "ktc", "both"):
+        _fail("--market must be fc, dealer, or both.")
 
     cfg, sc = _load()
-    include_ktc = market != "fc"
-    book = _book(cfg, include_ktc=include_ktc)
+    include_secondary = market != "fc"
+    book = _book(cfg, include_secondary=include_secondary)
     give_tokens = [t for t in give.split(",") if t.strip()]
     get_tokens = [t for t in get.split(",") if t.strip()]
     # Surface any non-exact (fuzzy/surname) match so a substitution is never silent.
@@ -490,7 +495,7 @@ def trade(
     players_meta = sc.players()
     evaluation, unresolved = analyze_trade(
         get_tokens, give_tokens, book, labels=("You get", "You give"),
-        include_ktc=include_ktc,
+        include_secondary=include_secondary,
         players_meta=players_meta,
     )
 
@@ -498,33 +503,33 @@ def trade(
         lbl = f" [{a.status_label}]" if a.status_label else ""
         return f"{a.name}{lbl} ({val:,})"
 
-    has_ktc = (
-        evaluation.ktc_value_a is not None
-        and evaluation.ktc_value_b is not None
+    has_secondary = (
+        evaluation.secondary_value_a is not None
+        and evaluation.secondary_value_b is not None
     )
-    dual_market = market == "both" and has_ktc
+    dual_market = market == "both" and has_secondary
 
     t = Table(title="trade")
     if dual_market:
-        for c in ("side", "assets", "FC", "KTC"):
-            t.add_column(c, justify="right" if c in ("FC", "KTC") else "left")
+        for c in ("side", "assets", "FC", "Dealer"):
+            t.add_column(c, justify="right" if c in ("FC", "Dealer") else "left")
         t.add_row("[green]You get[/]",
                   ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.value_a:,}[/]",
-                  f"[bold]{evaluation.ktc_value_a:,}[/]")
+                  f"[bold]{evaluation.secondary_value_a:,}[/]")
         t.add_row("[red]You give[/]",
                   ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.value_b:,}[/]",
-                  f"[bold]{evaluation.ktc_value_b:,}[/]")
-    elif market == "ktc" and has_ktc:
-        for c in ("side", "assets", "KTC"):
-            t.add_column(c, justify="right" if c == "KTC" else "left")
+                  f"[bold]{evaluation.secondary_value_b:,}[/]")
+    elif market in ("dealer", "ktc") and has_secondary:
+        for c in ("side", "assets", "Dealer"):
+            t.add_column(c, justify="right" if c == "Dealer" else "left")
         t.add_row("[green]You get[/]",
-                  ", ".join(_fmt_trade_asset(a, a.ktc_value or a.value) for a in evaluation.side_a.assets) or "-",
-                  f"[bold]{evaluation.ktc_value_a:,}[/]")
+                  ", ".join(_fmt_trade_asset(a, a.secondary_value or a.value) for a in evaluation.side_a.assets) or "-",
+                  f"[bold]{evaluation.secondary_value_a:,}[/]")
         t.add_row("[red]You give[/]",
-                  ", ".join(_fmt_trade_asset(a, a.ktc_value or a.value) for a in evaluation.side_b.assets) or "-",
-                  f"[bold]{evaluation.ktc_value_b:,}[/]")
+                  ", ".join(_fmt_trade_asset(a, a.secondary_value or a.value) for a in evaluation.side_b.assets) or "-",
+                  f"[bold]{evaluation.secondary_value_b:,}[/]")
     else:
         for c in ("side", "assets", "value"):
             t.add_column(c, justify="right" if c == "value" else "left")
@@ -546,19 +551,19 @@ def trade(
         else:
             verdict_fc = f"[bold red]you lose[/] by {_signed(net_fc)} ({pct_fc:.0f}%)"
 
-        ktc_net = evaluation.ktc_delta or 0
-        ktc_pct = evaluation.ktc_pct_diff or 0.0
-        if ktc_pct <= 5.0:
-            verdict_ktc = f"[bold yellow]fair[/] - within {ktc_pct:.0f}%"
-        elif ktc_net > 0:
-            verdict_ktc = f"[bold green]you win[/] by {_signed(ktc_net)} ({ktc_pct:.0f}%)"
+        sec_net = evaluation.secondary_delta or 0
+        sec_pct = evaluation.secondary_pct_diff or 0.0
+        if sec_pct <= 5.0:
+            verdict_sec = f"[bold yellow]fair[/] - within {sec_pct:.0f}%"
+        elif sec_net > 0:
+            verdict_sec = f"[bold green]you win[/] by {_signed(sec_net)} ({sec_pct:.0f}%)"
         else:
-            verdict_ktc = f"[bold red]you lose[/] by {_signed(ktc_net)} ({ktc_pct:.0f}%)"
+            verdict_sec = f"[bold red]you lose[/] by {_signed(sec_net)} ({sec_pct:.0f}%)"
 
-        arb_label = evaluation.arbitrage_label()
+        arb_label = evaluation.secondary_arbitrage_label()
         banner_lines = [
-            f"FC:  net {_signed(net_fc)} value to you   |   {verdict_fc}",
-            f"KTC: net {_signed(ktc_net)} value to you   |   {verdict_ktc}",
+            f"FC:     net {_signed(net_fc)} value to you   |   {verdict_fc}",
+            f"Dealer: net {_signed(sec_net)} value to you   |   {verdict_sec}",
         ]
         if arb_label:
             banner_lines.append(f"arbitrage: [bold cyan]{arb_label}[/]")
@@ -567,9 +572,9 @@ def trade(
             title="verdict",
             subtitle=f"[bold cyan]{arb_label}[/]" if arb_label else None,
         ))
-    elif market == "ktc" and has_ktc:
-        net = evaluation.ktc_delta or 0
-        pct = evaluation.ktc_pct_diff or 0.0
+    elif market in ("dealer", "ktc") and has_secondary:
+        net = evaluation.secondary_delta or 0
+        pct = evaluation.secondary_pct_diff or 0.0
         if pct <= 5.0:
             verdict = f"[bold yellow]fair[/] - within {pct:.0f}%"
         elif net > 0:
@@ -577,7 +582,7 @@ def trade(
         else:
             verdict = f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
         console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {verdict}", title="verdict (KTC)"))
+            f"net {_signed(net)} value to you   |   {verdict}", title="verdict (Dealer)"))
     else:
         net = evaluation.delta  # >0 = in your favor
         pct = evaluation.pct_diff
@@ -620,7 +625,7 @@ def waivers(
 ) -> None:
     """Trending adds across Sleeper, joined to dynasty value and your league."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     trending = sc.trending(kind="add", limit=max(limit * 3, 50))
     targets = waiver_targets(trending, book, rosters, sc.players(),
@@ -648,7 +653,7 @@ def news(
 ) -> None:
     """Player health, depth chart roles, injuries, and trending news across Sleeper."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     players_meta = sc.players()
     valuations = value_all_rosters(rosters, book, players_meta)
@@ -728,7 +733,7 @@ def cleanup(
     league = sc.league(cfg.league_id)
     settings = league.get("settings") or {}
     roster_positions = league.get("roster_positions") or []
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     target = _pick_roster(rosters, team, cfg.user_id)
     if target is None:
@@ -804,23 +809,23 @@ def cleanup(
 @app.command()
 @_guard
 def movers(
-    buy: bool = typer.Option(False, "--buy", help="Show buy-low instead of sell-high (or KTC > FC for arbitrage)."),
-    sell: bool = typer.Option(False, "--sell", help="Show sell-high (or FC > KTC for arbitrage)."),
+    buy: bool = typer.Option(False, "--buy", help="Show buy-low instead of sell-high (or Dealer > FC for arbitrage)."),
+    sell: bool = typer.Option(False, "--sell", help="Show sell-high (or FC > Dealer for arbitrage)."),
     limit: int = typer.Option(20, help="How many to show."),
     min_value: int = typer.Option(1000, "--min-value",
                                   help="Floor on both values; filters deep stashes."),
     arbitrage: bool = typer.Option(False, "--arbitrage", "-a",
-                                   help="Scan for market discrepancies between FantasyCalc and KeepTradeCut."),
+                                   help="Scan for market discrepancies between FantasyCalc and Dynasty Dealer."),
 ) -> None:
     """Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage."""
     cfg, sc = _load()
-    book = _book(cfg, include_ktc=arbitrage)
+    book = _book(cfg, include_secondary=arbitrage)
 
     if arbitrage:
         rosters = _league_rosters(cfg, sc)
         market_filter = None
         if buy and not sell:
-            market_filter = "ktc"
+            market_filter = "dealer"
         elif sell and not buy:
             market_filter = "fc"
 
@@ -832,27 +837,27 @@ def movers(
             market=market_filter,
         )
 
-        if market_filter == "ktc":
-            kind = "KTC > FC (buy on FC / hype)"
+        if market_filter in ("dealer", "ktc"):
+            kind = "Dealer > FC (buy on FC / hype)"
         elif market_filter == "fc":
-            kind = "FC > KTC (value veterans / sell on KTC)"
+            kind = "FC > Dealer (value veterans / sell on Dealer)"
         else:
-            kind = "market discrepancies (FC vs KTC)"
+            kind = "market discrepancies (FC vs Dealer)"
 
         t = Table(title=f"arbitrage movers - {kind} - {cfg.format.label()}")
-        right = ("FC", "KTC", "diff", "gap%", "age")
-        for c in ("player", "pos", "owner", "FC", "KTC", "diff", "gap%", "bias"):
+        right = ("FC", "Dealer", "diff", "gap%", "age")
+        for c in ("player", "pos", "owner", "FC", "Dealer", "diff", "gap%", "bias"):
             t.add_column(c, justify="right" if c in right else "left")
         for m in arb_movers:
             a = m.asset
             owner = m.team_name or "-"
-            bias_color = "[cyan]KTC[/]" if m.market_bias == "KTC" else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
+            bias_color = "[cyan]Dealer[/]" if m.market_bias in ("Dealer", "KTC") else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
             t.add_row(
                 a.name,
                 a.position or "-",
                 owner,
                 f"{m.fc_value:,}",
-                f"{m.ktc_value:,}",
+                f"{m.secondary_value:,}",
                 _signed(m.diff),
                 f"{m.pct_diff:.0f}%",
                 bias_color,
@@ -861,7 +866,7 @@ def movers(
         if not arb_movers:
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")
         else:
-            console.print("[dim]diff = KTC - FC. Bias indicates which market prices the player higher.[/]")
+            console.print("[dim]diff = Dealer - FC. Bias indicates which market prices the player higher.[/]")
         qa_rep = run_qa("movers", movers=arb_movers, mode="arbitrage")
         render_qa_footer(qa_rep, console)
         return
@@ -1075,7 +1080,7 @@ def draft(
 
     # your roster by position (a needs glance) - includes what you drafted today.
     # Value it through value_roster so positions/values match `roster`/`power`.
-    book = _book(cfg, include_ktc=False)
+    book = _book(cfg, include_secondary=False)
     have = set(mine.player_ids)
     merged = mine.model_copy(update={
         "player_ids": list(mine.player_ids) + [p for p in drafted_by_me if p not in have]})
@@ -1283,7 +1288,7 @@ def qa_cmd(
     reports.append(run_qa("setup", config=cfg))
 
     # 2. Rosters & Power audit
-    book = _book(cfg, include_ktc=True)
+    book = _book(cfg, include_secondary=True)
     rosters = _league_rosters(cfg, sc)
     players_meta = sc.players()
     valuations = value_all_rosters(rosters, book, players_meta)

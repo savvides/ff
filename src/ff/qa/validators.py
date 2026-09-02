@@ -237,19 +237,19 @@ def validate_values(assets: List[Asset], position: Optional[str] = None, market:
             message="" if pos_match else f"One or more assets do not match filtered position '{pos_upper}'",
         ))
 
-    if market == "ktc":
-        ktc_valid = all(a.ktc_value is not None and a.ktc_value >= 0 for a in assets)
+    if market in ("dealer", "ktc"):
+        sec_valid = all(a.secondary_value is not None and a.secondary_value >= 0 for a in assets)
         checks.append(QACheck(
-            name="Values KTC Prices Present",
-            passed=ktc_valid,
-            message="" if ktc_valid else "One or more assets missing KTC value in KTC-only view",
+            name="Values Secondary Prices Present",
+            passed=sec_valid,
+            message="" if sec_valid else "One or more assets missing secondary value in secondary-only view",
         ))
     elif market == "both":
-        ktc_valid = all(a.ktc_value is None or a.ktc_value >= 0 for a in assets)
+        sec_valid = all(a.secondary_value is None or a.secondary_value >= 0 for a in assets)
         checks.append(QACheck(
             name="Values Dual Market Integrity",
-            passed=ktc_valid,
-            message="" if ktc_valid else "KTC value is negative on one or more assets",
+            passed=sec_valid,
+            message="" if sec_valid else "Secondary value is negative on one or more assets",
         ))
 
     return checks
@@ -302,12 +302,12 @@ def validate_trade(
         message="" if fairness_match else f"is_fair() inconsistent with pct_diff ({evaluation.pct_diff})",
     ))
 
-    if evaluation.ktc_value_a is not None and evaluation.ktc_value_b is not None:
-        ktc_delta_match = evaluation.ktc_delta == (evaluation.ktc_value_a - evaluation.ktc_value_b)
+    if evaluation.secondary_value_a is not None and evaluation.secondary_value_b is not None:
+        sec_delta_match = evaluation.secondary_delta == (evaluation.secondary_value_a - evaluation.secondary_value_b)
         checks.append(QACheck(
-            name="Trade KTC Delta Calculation",
-            passed=ktc_delta_match,
-            message="" if ktc_delta_match else f"ktc_delta ({evaluation.ktc_delta}) != ktc_a ({evaluation.ktc_value_a}) - ktc_b ({evaluation.ktc_value_b})",
+            name="Trade Secondary Delta Calculation",
+            passed=sec_delta_match,
+            message="" if sec_delta_match else f"secondary_delta ({evaluation.secondary_delta}) != secondary_a ({evaluation.secondary_value_a}) - secondary_b ({evaluation.secondary_value_b})",
         ))
 
     return checks
@@ -333,7 +333,7 @@ def validate_movers(movers: Any, mode: str = "gap") -> List[QACheck]:
             message="" if pcts_valid else "Arbitrage pct_diff cannot be negative",
         ))
 
-        biases_valid = all(m.market_bias in {"Dealer", "KTC", "FC", "EVEN"} for m in arb_items)
+        biases_valid = all(m.market_bias in {"Dealer", "FC", "EVEN", "KTC"} for m in arb_items)
         checks.append(QACheck(
             name="Arbitrage Market Bias Valid",
             passed=biases_valid,

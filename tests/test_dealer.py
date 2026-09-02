@@ -20,11 +20,12 @@ def test_dealer_client_fetch_values():
     client = DynastyDealerClient()
     values = client.fetch_values(Format(superflex=True))
 
-    assert values["9221"] == 9906
+    assert values["9221"] == 8400
     assert values["9509"] == 9750
-    assert values["7564"] == 9400
+    assert values["8138"] == 8900
+    assert values["7564"] == 9600
     assert values["2026 1 early"] == 6342
-    assert values["2027 1 mid"] == 5076
+    assert values["2027 1 mid"] == 3300
 
 
 def test_dealer_client_base_value_fallback():

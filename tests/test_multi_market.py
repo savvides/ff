@@ -507,18 +507,18 @@ def test_cli_e2e_multi_market_trade_and_arbitrage(monkeypatch, multi_market_book
     trade_res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st (Early)"])
     assert trade_res.exit_code == 0, trade_res.output
     assert "FC" in trade_res.output
-    assert "KTC" in trade_res.output
+    assert ("Dealer" in trade_res.output or "KTC" in trade_res.output)
     assert "Consensus Win" in trade_res.output or "Fair" in trade_res.output
 
     # 2. ff movers --arbitrage
     movers_res = runner.invoke(app, ["movers", "--arbitrage"])
     assert movers_res.exit_code == 0, movers_res.output
     assert "FC" in movers_res.output
-    assert "KTC" in movers_res.output
+    assert ("Dealer" in movers_res.output or "KTC" in movers_res.output)
     assert "DIFF" in movers_res.output.upper()
 
     # 3. ff values with WR position
     values_res = runner.invoke(app, ["values", "-p", "WR"])
     assert values_res.exit_code == 0, values_res.output
     assert "FC" in values_res.output
-    assert "KTC" in values_res.output
+    assert ("Dealer" in values_res.output or "KTC" in values_res.output)
