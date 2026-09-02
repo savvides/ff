@@ -10,20 +10,24 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 
 from ff.contracts import Asset, Format
 from ff.core.http import get_json
+from ff.values.dealer import DynastyDealerClient
 from ff.values.normalize import normalize_name, normalize_pick
 
-if TYPE_CHECKING:
-    from ff.values.ktc import KtcClient
 
 VALUES_URL = "https://api.fantasycalc.com/values/current"
 VALUES_TTL = 6 * 3600  # values drift slowly; refresh a few times a day
 
 
-def _asset_from_entry(entry: dict, ktc_map: Optional[Dict[str, int]] = None) -> Asset:
+def _asset_from_entry(
+    entry: dict,
+    secondary_map: Optional[Dict[str, int]] = None,
+    dealer_map: Optional[Dict[str, int]] = None,
+    ktc_map: Optional[Dict[str, int]] = None,
+) -> Asset:
     p = entry.get("player", {})
     position = p.get("position")
     is_pick = position == "PICK"
@@ -33,20 +37,21 @@ def _asset_from_entry(entry: dict, ktc_map: Optional[Dict[str, int]] = None) -> 
     else:
         ident = str(p.get("sleeperId") or p.get("id"))
 
-    ktc_val: Optional[int] = None
-    if ktc_map:
+    sec_map = secondary_map if secondary_map is not None else (dealer_map if dealer_map is not None else ktc_map)
+    sec_val: Optional[int] = None
+    if sec_map:
         if is_pick:
             norm_pk = normalize_pick(name)
-            if norm_pk and norm_pk in ktc_map:
-                ktc_val = ktc_map[norm_pk]
-            elif ident in ktc_map:
-                ktc_val = ktc_map[ident]
+            if norm_pk and norm_pk in sec_map:
+                sec_val = sec_map[norm_pk]
+            elif ident in sec_map:
+                sec_val = sec_map[ident]
         else:
             sleeper_id = p.get("sleeperId")
-            if sleeper_id is not None and str(sleeper_id) in ktc_map:
-                ktc_val = ktc_map[str(sleeper_id)]
-            elif ident in ktc_map:
-                ktc_val = ktc_map[ident]
+            if sleeper_id is not None and str(sleeper_id) in sec_map:
+                sec_val = sec_map[str(sleeper_id)]
+            elif ident in sec_map:
+                sec_val = sec_map[ident]
 
     return Asset(
         id=ident,
@@ -56,12 +61,13 @@ def _asset_from_entry(entry: dict, ktc_map: Optional[Dict[str, int]] = None) -> 
         team=p.get("maybeTeam"),
         age=p.get("maybeAge"),
         value=int(entry.get("value", 0) or 0),
-        ktc_value=ktc_val,
+        secondary_value=sec_val,
         overall_rank=entry.get("overallRank"),
         position_rank=entry.get("positionRank"),
         trend_30day=entry.get("trend30Day"),
         redraft_value=int(entry.get("redraftValue", 0) or 0) or None,
     )
+
 
 
 class ValueBook:
@@ -164,17 +170,36 @@ class ValueBook:
 
 
 class ValuesClient:
-    def __init__(self, url: str = VALUES_URL, ktc_client: Optional["KtcClient"] = None) -> None:
-        from ff.values.ktc import KtcClient
+    def __init__(
+        self,
+        url: str = VALUES_URL,
+        dealer_client: Optional[DynastyDealerClient] = None,
+        ktc_client: Optional[DynastyDealerClient] = None,
+    ) -> None:
         self.url = url
-        self.ktc_client = ktc_client or KtcClient()
+        self.dealer_client = dealer_client or ktc_client or DynastyDealerClient()
 
-    def fetch(self, fmt: Format, include_ktc: bool = True) -> ValueBook:
+    @property
+    def ktc_client(self) -> DynastyDealerClient:
+        return self.dealer_client
+
+    @ktc_client.setter
+    def ktc_client(self, client: DynastyDealerClient) -> None:
+        self.dealer_client = client
+
+    def fetch(
+        self,
+        fmt: Format,
+        include_secondary: bool = True,
+        include_ktc: bool = True,
+    ) -> ValueBook:
         data = get_json(self.url, params=fmt.fantasycalc_params(), ttl=VALUES_TTL)
-        ktc_map: Dict[str, int] = {}
-        if include_ktc:
+        secondary_map: Dict[str, int] = {}
+        should_include = include_secondary and include_ktc
+        if should_include:
             try:
-                ktc_map = self.ktc_client.fetch_values(fmt) or {}
+                secondary_map = self.dealer_client.fetch_values(fmt) or {}
             except Exception:
-                ktc_map = {}
-        return ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in data])
+                secondary_map = {}
+        return ValueBook([_asset_from_entry(e, secondary_map=secondary_map) for e in (data if isinstance(data, list) else [])])
+

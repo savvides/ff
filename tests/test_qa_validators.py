@@ -138,15 +138,37 @@ def test_validate_picks_invalid_tier():
 
 
 def test_validate_values_valid():
-    a1 = Asset(id="1", name="Player 1", value=5000, position="QB", ktc_value=5200)
-    a2 = Asset(id="2", name="Player 2", value=4000, position="QB", ktc_value=3900)
+    a1 = Asset(id="1", name="Player 1", value=5000, position="QB", secondary_value=5200)
+    a2 = Asset(id="2", name="Player 2", value=4000, position="QB", secondary_value=3900)
     checks = validate_values([a1, a2], position="QB", market="both")
     assert all(c.passed for c in checks)
 
 
+def test_validate_values_dealer_market():
+    a1 = Asset(id="1", name="Player 1", value=5000, position="QB", secondary_value=5200)
+    a2 = Asset(id="2", name="Player 2", value=4000, position="QB", secondary_value=3900)
+    checks_dealer = validate_values([a1, a2], position="QB", market="dealer")
+    assert all(c.passed for c in checks_dealer)
+
+    checks_ktc = validate_values([a1, a2], position="QB", market="ktc")
+    assert all(c.passed for c in checks_ktc)
+
+
+def test_validate_values_invalid_secondary():
+    a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=-100)
+    checks = validate_values([a1], market="both")
+    failed = [c for c in checks if not c.passed]
+    assert any("Dual Market" in c.name for c in failed)
+
+    a2 = Asset(id="2", name="Player 2", value=5000, secondary_value=None)
+    checks_dealer = validate_values([a2], market="dealer")
+    failed_dealer = [c for c in checks_dealer if not c.passed]
+    assert any("Secondary Prices Present" in c.name for c in failed_dealer)
+
+
 def test_validate_trade_valid():
-    a1 = Asset(id="1", name="Player 1", value=5000, ktc_value=5200)
-    a2 = Asset(id="2", name="Player 2", value=4000, ktc_value=4100)
+    a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=5200)
+    a2 = Asset(id="2", name="Player 2", value=4000, secondary_value=4100)
     eval = TradeEvaluation(
         side_a=TradeSide(assets=[a1]),
         side_b=TradeSide(assets=[a2]),
@@ -155,6 +177,7 @@ def test_validate_trade_valid():
     )
     checks = validate_trade(eval)
     assert all(c.passed for c in checks)
+    assert any("Trade Secondary Delta Calculation" in c.name for c in checks)
 
 
 def test_validate_trade_invalid_assets():
@@ -169,6 +192,35 @@ def test_validate_trade_invalid_assets():
     checks = validate_trade(eval)
     failed = [c for c in checks if not c.passed]
     assert any("Integrity" in c.name for c in failed)
+
+
+def test_validate_movers_arbitrage_valid():
+    a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=5500)
+    mover = ArbitrageMover(
+        asset=a1,
+        fc_value=5000,
+        secondary_value=5500,
+        diff=500,
+        pct_diff=9.09,
+        market_bias="Dealer",
+    )
+    checks = validate_movers([mover], mode="arbitrage")
+    assert all(c.passed for c in checks)
+
+
+def test_validate_movers_arbitrage_invalid_bias():
+    a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=5500)
+    mover = ArbitrageMover(
+        asset=a1,
+        fc_value=5000,
+        secondary_value=5500,
+        diff=500,
+        pct_diff=9.09,
+        market_bias="INVALID_BIAS",
+    )
+    checks = validate_movers([mover], mode="arbitrage")
+    failed = [c for c in checks if not c.passed]
+    assert any("Bias" in c.name for c in failed)
 
 
 def test_validate_lineup_valid():

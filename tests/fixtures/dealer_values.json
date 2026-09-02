@@ -1,0 +1,150 @@
+{
+  "source": "Dynasty Dealer",
+  "total": 18,
+  "players": [
+    {
+      "sleeper_id": "7564",
+      "name": "Ja'Marr Chase",
+      "position": "WR",
+      "team": "CIN",
+      "base_value": 9600,
+      "current_value": 9600
+    },
+    {
+      "sleeper_id": "9221",
+      "name": "Jahmyr Gibbs",
+      "position": "RB",
+      "team": "DET",
+      "base_value": 8000,
+      "current_value": 8400
+    },
+    {
+      "sleeper_id": "4984",
+      "name": "Josh Allen",
+      "position": "QB",
+      "team": "BUF",
+      "base_value": 7000,
+      "current_value": 7200
+    },
+    {
+      "sleeper_id": "8138",
+      "name": "Bijan Robinson",
+      "position": "RB",
+      "team": "ATL",
+      "base_value": 9000,
+      "current_value": 8900
+    },
+    {
+      "sleeper_id": "9509",
+      "name": "Bijan Robinson (Alias)",
+      "position": "RB",
+      "team": "ATL",
+      "base_value": 9800,
+      "current_value": 9750
+    },
+    {
+      "sleeper_id": "5555",
+      "name": "Rome Odunze",
+      "position": "WR",
+      "team": "CHI",
+      "base_value": 4500,
+      "current_value": 4800
+    },
+    {
+      "sleeper_id": "6666",
+      "name": "Brock Bowers",
+      "position": "TE",
+      "team": "LV",
+      "base_value": 6000,
+      "current_value": 6200
+    },
+    {
+      "sleeper_id": "4034",
+      "name": "Christian McCaffrey",
+      "position": "RB",
+      "team": "SF",
+      "base_value": 6500,
+      "current_value": 6500
+    },
+    {
+      "sleeper_id": "pick_2026_1_05",
+      "name": "2026 Pick 1.05",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 3600,
+      "current_value": 3600
+    },
+    {
+      "sleeper_id": "pick_2026_1",
+      "name": "2026 1st",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 4100,
+      "current_value": 4100
+    },
+    {
+      "sleeper_id": "pick_2027_1",
+      "name": "2027 1st",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 3200,
+      "current_value": 3200
+    },
+    {
+      "sleeper_id": "pick_2026_2",
+      "name": "2026 2nd",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 1600,
+      "current_value": 1600
+    },
+    {
+      "sleeper_id": "pick_2027_1_early",
+      "name": "2027 Early 1st",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 4500,
+      "current_value": 4500
+    },
+    {
+      "sleeper_id": "pick_2026_1_early",
+      "name": "2026 Round 1 Early",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 6342,
+      "current_value": 6342
+    },
+    {
+      "sleeper_id": "pick_2027_1_mid",
+      "name": "2027 Round 1 Mid",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 3300,
+      "current_value": 3300
+    },
+    {
+      "sleeper_id": "pick_2027_1_late",
+      "name": "2027 Late 1st",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 2500,
+      "current_value": 2500
+    },
+    {
+      "sleeper_id": "pick_2027_2",
+      "name": "2027 2nd",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 1450,
+      "current_value": 1450
+    },
+    {
+      "sleeper_id": "pick_2028_1",
+      "name": "2028 1st",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 2300,
+      "current_value": 2300
+    }
+  ]
+}

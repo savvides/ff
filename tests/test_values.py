@@ -126,3 +126,89 @@ def test_normalize_helpers():
     assert normalize_pick("2027 1st (Early)") == "2027 1 early"
     assert normalize_pick("2027 Mid 1st") == "2027 1 mid"
     assert normalize_pick("2027 round 2 late") == "2027 2 late"
+
+
+def test_asset_from_entry_with_dealer_map():
+    from ff.values.client import _asset_from_entry
+    player_entry = {
+        "player": {"sleeperId": "9221", "name": "Jahmyr Gibbs", "position": "RB"},
+        "value": 8000,
+    }
+    pick_entry = {
+        "player": {"id": 101, "name": "2027 1st (Early)", "position": "PICK"},
+        "value": 4200,
+    }
+    dealer_map = {
+        "9221": 9906,
+        "2027 1 early": 5000,
+    }
+
+    # Test via dealer_map parameter
+    a_player = _asset_from_entry(player_entry, dealer_map=dealer_map)
+    assert a_player.secondary_value == 9906
+    assert a_player.dealer_value == 9906
+    assert a_player.ktc_value == 9906
+
+    a_pick = _asset_from_entry(pick_entry, dealer_map=dealer_map)
+    assert a_pick.secondary_value == 5000
+    assert a_pick.dealer_value == 5000
+    assert a_pick.ktc_value == 5000
+
+    # Test via secondary_map parameter
+    a_player_sec = _asset_from_entry(player_entry, secondary_map=dealer_map)
+    assert a_player_sec.secondary_value == 9906
+
+    # Test with no map
+    a_player_none = _asset_from_entry(player_entry)
+    assert a_player_none.secondary_value is None
+
+
+def test_values_client_fetch_dynasty_dealer():
+    from unittest.mock import MagicMock, patch
+    from ff.contracts import Format
+    from ff.values.client import ValuesClient
+    from ff.values.dealer import DynastyDealerClient
+
+    mock_dealer = MagicMock(spec=DynastyDealerClient)
+    mock_dealer.fetch_values.return_value = {"9221": 9906}
+
+    fc_data = [
+        {"player": {"sleeperId": "9221", "name": "Jahmyr Gibbs", "position": "RB"}, "value": 8000}
+    ]
+
+    with patch("ff.values.client.get_json", return_value=fc_data):
+        client = ValuesClient(dealer_client=mock_dealer)
+        book = client.fetch(Format(), include_secondary=True)
+        assert mock_dealer.fetch_values.called
+        asset = book.resolve("Jahmyr Gibbs")
+        assert asset is not None
+        assert asset.value == 8000
+        assert asset.secondary_value == 9906
+        assert asset.dealer_value == 9906
+
+        # include_secondary=False
+        mock_dealer.reset_mock()
+        book_no_sec = client.fetch(Format(), include_secondary=False)
+        assert not mock_dealer.fetch_values.called
+        asset_no_sec = book_no_sec.resolve("Jahmyr Gibbs")
+        assert asset_no_sec.secondary_value is None
+
+        # include_ktc=False backward-compat parameter
+        mock_dealer.reset_mock()
+        book_no_ktc = client.fetch(Format(), include_ktc=False)
+        assert not mock_dealer.fetch_values.called
+        asset_no_ktc = book_no_ktc.resolve("Jahmyr Gibbs")
+        assert asset_no_ktc.secondary_value is None
+
+
+def test_values_client_type_hints_resolvable():
+    import typing
+    import ff.values.client as client_module
+
+    hints_asset = typing.get_type_hints(client_module._asset_from_entry)
+    assert hints_asset["return"] is client_module.Asset
+
+    hints_fetch = typing.get_type_hints(client_module.ValuesClient.fetch)
+    assert hints_fetch["return"] is client_module.ValueBook
+
+

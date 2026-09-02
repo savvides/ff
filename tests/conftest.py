@@ -64,32 +64,43 @@ def traded_picks():
 
 
 @pytest.fixture
-def ktc_entries():
-    return load("ktc_values")
+def dealer_entries():
+    return load("dealer_values")
 
 
 @pytest.fixture
-def ktc_map(ktc_entries):
+def dealer_map(dealer_entries):
     m = {}
-    for entry in ktc_entries:
-        raw_id = entry.get("player_id")
-        name = entry.get("name")
-        val = entry.get("value")
-        norm_name = normalize_pick(name) if name else None
-        norm_id = normalize_pick(raw_id) if raw_id else None
-        if norm_name or norm_id:
-            if norm_name:
-                m[norm_name] = val
-            if norm_id:
-                m[norm_id] = val
-        elif raw_id is not None:
-            m[str(raw_id)] = val
+    raw_players = dealer_entries.get("players", []) if isinstance(dealer_entries, dict) else dealer_entries
+    for entry in raw_players:
+        if not isinstance(entry, dict):
+            continue
+        sleeper_id = entry.get("sleeper_id")
+        name = entry.get("name") or ""
+        is_pick = entry.get("position") == "PICK" or str(sleeper_id or "").startswith("pick_")
+        raw_val = entry.get("current_value")
+        if raw_val is None:
+            raw_val = entry.get("base_value", 0)
+        try:
+            val = int(round(float(raw_val))) if raw_val is not None else 0
+        except (ValueError, TypeError):
+            continue
+
+        if is_pick:
+            norm_pk = normalize_pick(str(name)) if name else None
+            if norm_pk:
+                m[norm_pk] = val
+            if sleeper_id:
+                m[str(sleeper_id)] = val
+        elif sleeper_id is not None:
+            m[str(sleeper_id)] = val
     return m
 
 
 @pytest.fixture
-def multi_market_book(fc_entries, ktc_map):
-    return ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in fc_entries])
+def multi_market_book(fc_entries, dealer_map):
+    return ValueBook([_asset_from_entry(e, secondary_map=dealer_map) for e in fc_entries])
+
 
 
 @pytest.fixture
@@ -154,8 +165,8 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
             return []
 
     class FakeValues:
-        def fetch(self, fmt, include_ktc=True):
-            return multi_market_book if include_ktc else book
+        def fetch(self, fmt, include_secondary=True, include_ktc=True):
+            return multi_market_book if (include_secondary and include_ktc) else book
 
     class FakeProjections:
         def week(self, season, week, positions=None):

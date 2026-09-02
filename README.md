@@ -18,7 +18,7 @@ lineup optimizer, waiver targets, injury tracking, and live draft board.
 - [Sleeper API](https://docs.sleeper.com/) — league settings, rosters, matchups, transactions, trending adds, injuries, and player news.
 - Sleeper projections (`api.sleeper.com`) — weekly projected stat lines (RotoWire), scored by your league's own rules for the lineup optimizer.
 - [FantasyCalc API](https://fantasycalc.com/) — dynasty values for players **and draft picks**, tagged with `sleeperId` so they join straight onto your roster.
-- [KeepTradeCut API](https://keeptradecut.com/) via [Dynasty Daddy](https://dynasty-daddy.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
+- [Dynasty Dealer API](https://www.dynastydealer.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
 - Local LLM Runners (`agy`, `gemini`, `claude`, `ollama`) — terminal AI agents executing deterministic Python tools for plain-English Q&A.
 
 ## Architecture
@@ -31,7 +31,7 @@ flowchart TD
         Sleeper["Sleeper API\n(League, Rosters, Picks, News, Trends)"]
         SleeperProj["Sleeper Projections API\n(Weekly Stat Lines)"]
         FantasyCalc["FantasyCalc API\n(Dynasty & Redraft Trade Values)"]
-        KTC["KeepTradeCut via Dynasty Daddy\n(Crowdsourced Secondary Market)"]
+        Dealer["Dynasty Dealer API\n(Secondary Market Values)"]
         LLM["Local LLM CLI\n(agy / gemini / claude / ollama)"]
     end
 
@@ -39,9 +39,13 @@ flowchart TD
         Http["core/http.py\n(Disk-cached & retrying JSON client)"]
         Config["core/config.py\n(.ff/config.json)"]
         SleeperClient["sleeper/client.py\n(Format detection & roster builder)"]
-        ValuesClient["values/client.py & ktc.py\n(ValueBook with ID/Name/Pick lookup)"]
+        ValuesClient["values/client.py & dealer.py\n(ValueBook with ID/Name/Pick lookup)"]
         ProjClient["projections/client.py\n(Raw weekly stat lines)"]
         LLMRunner["services/llm/\n(TerminalRunner & Tool Dispatcher)"]
+    end
+
+    subgraph Contracts["Typed Domain Contracts"]
+        Models["contracts/models.py\n(Domain models: Asset, TradeEvaluation, RosterValuation, Format)"]
     end
 
     subgraph PureAnalysis["Pure Analysis Engine (No I/O)"]
@@ -55,17 +59,24 @@ flowchart TD
         WaiversAnalysis["analysis/waivers.py\n(waiver_targets)"]
     end
 
+    subgraph QALayer["Post-Command Invariant Verification & Telemetry"]
+        QAEngine["qa/engine.py & qa/validators.py\n(Post-command domain invariant verifications & telemetry)"]
+    end
+
     subgraph CLI["Rich Terminal Interface (cli.py)"]
         OutputSetup["ff setup / config"]
         OutputValuation["ff roster / power / picks / values"]
-        OutputTrading["ff trade / movers / waivers"]
-        OutputManagement["ff lineup / cleanup / news"]
+        OutputTrading["ff trade / movers"]
+        OutputManagement["ff lineup / cleanup / news / waivers"]
         OutputDraft["ff draft / ask"]
+        OutputQA["ff qa / version"]
     end
 
     DataSources --> CoreEngine
-    CoreEngine --> PureAnalysis
+    CoreEngine --> Contracts
+    Contracts --> PureAnalysis
     PureAnalysis --> CLI
+    CLI --> QALayer
 ```
 
 ## Quickstart
@@ -75,14 +86,16 @@ make install                 # venv + deps + pre-commit hook
 ./.venv/bin/ff setup <your-sleeper-username>
 ./.venv/bin/ff power
 ./.venv/bin/ff roster
-./.venv/bin/ff values -p WR --market ktc
+./.venv/bin/ff values -p WR --market dealer
 ./.venv/bin/ff lineup                 # optimal start/sit for the current week
 ./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st" --market both
+
 ./.venv/bin/ff movers --arbitrage
-./.venv/bin/ff news --player "Christian McCaffrey"
+./.venv/bin/ff news
 ./.venv/bin/ff cleanup
 ./.venv/bin/ff waivers
 ./.venv/bin/ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
+./.venv/bin/ff qa
 ```
 
 `setup` reads your league's settings from Sleeper and **auto-detects the format**
@@ -116,9 +129,10 @@ flowchart TD
 ```
 
 **Options:**
+- `username`: Your Sleeper username (positional).
 - `--season Y`: Target season year (defaults to active/current season).
 - `--league-id ID`: Skip interactive selection and bind directly to a specific Sleeper league.
-- `-n, --league-index N`: Pick the Nth league non-interactively (0-indexed).
+- `-n, --league-index N`: Pick the Nth league non-interactively (0-indexed from the printed list).
 
 ---
 
@@ -173,6 +187,9 @@ flowchart TD
     Table --> Done(["Done"])
 ```
 
+**Options:**
+- Takes no options (ranks all rosters league-wide).
+
 ---
 
 #### `ff picks [team]`
@@ -192,29 +209,29 @@ flowchart TD
 ```
 
 **Options:**
-- `team`: Team name (omit to view full league grid).
+- `team`: Team name search (omit to view full league draft capital grid).
 - `--years N`: Number of future draft classes to show (default: 2).
-- `--rounds N`: Rookie rounds per draft (overrides league setting).
+- `--rounds N`: Rookie rounds per draft (overrides league setting auto-detection).
 
 ---
 
 ### 3. Market Analysis & Trade Engine
 
 #### `ff values`
-Dynasty rankings calibrated to your league's exact settings, supporting dual-market views (FantasyCalc + KeepTradeCut) and positional filters.
+Dynasty rankings calibrated to your league's exact settings, supporting dual-market views (FantasyCalc + Dynasty Dealer) and positional filters.
 
 ```mermaid
 flowchart TD
-    Start(["ff values [-p POS] [--market both|fc|ktc]"]) --> Fetch["Fetch FantasyCalc values\nOptional: Fetch KTC secondary market"]
-    Fetch --> Merge["Merge KTC values onto Assets by sleeperId"]
+    Start(["ff values [-p POS] [--market both|fc|dealer]"]) --> Fetch["Fetch FantasyCalc values\nOptional: Fetch Dynasty Dealer secondary market"]
+    Fetch --> Merge["Merge Dynasty Dealer values onto Assets by sleeperId"]
     Merge --> Filter["Filter by position (QB/RB/WR/TE)\n& slice top N"]
-    Filter --> Table["Render Dynasty Rankings Table:\nRank | Player | Pos | PosRk | Team | Age | FC | KTC | 30d"]
+    Filter --> Table["Render Dynasty Rankings Table:\nRank | Player | Pos | PosRk | Team | Age | FC | Dealer | 30d"]
     Table --> Done(["Done"])
 ```
 
 **Options:**
-- `-p, --position`: Filter by `QB`, `RB`, `WR`, or `TE`.
-- `-m, --market`: Market source: `fc` (FantasyCalc), `ktc` (KeepTradeCut), or `both` (default: `both`).
+- `-p, --position POS`: Filter by `QB`, `RB`, `WR`, or `TE` (omit for overall).
+- `-m, --market MARKET`: Market source: `both` (default), `fc` (FantasyCalc), or `dealer` (Dynasty Dealer).
 - `--limit N`: How many assets to show (default: 40).
 
 ---
@@ -227,29 +244,29 @@ flowchart TD
     Start(["ff trade --give 'A, B' --get 'C, D'"]) --> Parse["Tokenize comma-separated strings\n(Players and draft picks)"]
     Parse --> Resolve["ValueBook.resolve()\n• Exact sleeperId match\n• Fuzzy name match (with did-you-mean)\n• Pick normalization (e.g. '2027 1st', '2026 early 2nd')"]
     Resolve --> Analyze["analysis.analyze_trade()\n• Sum Side A (Get) & Side B (Give)\n• Compute net value delta & % difference\n• Check fairness (<= 5% difference = Fair)"]
-    Analyze --> DualMarket{"--market both\n& KTC available?"}
-    DualMarket -- "Yes" --> Arb["Compute KTC deltas & detect arbitrage:\n• Consensus Win / Loss\n• FC Arbitrage Win / Loss\n• KTC Arbitrage Win / Loss"]
+    Analyze --> DualMarket{"--market both\n& Dealer available?"}
+    DualMarket -- "Yes" --> Arb["Compute Dealer deltas & detect arbitrage:\n• Consensus Win / Loss\n• FC Arbitrage Win / Loss\n• Dealer Arbitrage Win / Loss"]
     DualMarket -- "No" --> SingleVerdict["Compute single-market verdict"]
     Arb & SingleVerdict --> Swings["analysis.position_deltas()\nCalculate net value gain/loss per position"]
-    Swings --> Output["Render:\n• Asset comparison table (FC & KTC)\n• Verdict banner + Arbitrage label\n• Positional swing summary"]
+    Swings --> Output["Render:\n• Asset comparison table (FC & Dealer)\n• Verdict banner + Arbitrage label\n• Positional swing summary"]
     Output --> Done(["Done"])
 ```
 
 **Options:**
-- `--give`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
-- `--get`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
-- `-m, --market`: Valuation model: `both` (default), `fc`, or `ktc`.
+- `--give ASSETS`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
+- `--get ASSETS`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
+- `-m, --market MARKET`: Valuation model: `both` (default), `fc` (FantasyCalc), or `dealer` (Dynasty Dealer).
 
 ---
 
 #### `ff movers`
-Identifies high-leverage trade targets: buy-low / sell-high candidates (dynasty vs win-now redraft value gaps) and cross-market arbitrage opportunities (FantasyCalc vs KeepTradeCut discrepancies).
+Identifies high-leverage trade targets: buy-low / sell-high candidates (dynasty vs win-now redraft value gaps) and cross-market arbitrage opportunities (FantasyCalc vs Dynasty Dealer discrepancies).
 
 ```mermaid
 flowchart TD
     Start(["ff movers [--buy] [--sell] [--arbitrage]"]) --> CheckMode{"Mode"}
-    CheckMode -- "--arbitrage" --> ArbEngine["analysis.find_arbitrage_movers()\nCompare FC trade values vs KTC hype\nacross all rostered players in league"]
-    ArbEngine --> ArbTable["Render Arbitrage Table:\nPlayer | Owner | FC | KTC | Diff | Gap% | Market Bias"]
+    CheckMode -- "--arbitrage" --> ArbEngine["analysis.find_arbitrage_movers()\nCompare FC trade values vs Dealer market values\nacross all rostered players in league"]
+    ArbEngine --> ArbTable["Render Arbitrage Table:\nPlayer | Owner | FC | Dealer | Diff | Gap% | Market Bias"]
     
     CheckMode -- "Redraft Gap" --> GapEngine["analysis.top_movers()\nCompare Dynasty Value vs Redraft Value\nApply --min-value floor"]
     GapEngine --> GapTable["Render Movers Table:\n• Buy-Low: Dynasty > Redraft (for Contenders)\n• Sell-High: Redraft > Dynasty (for Rebuilders)"]
@@ -257,48 +274,53 @@ flowchart TD
 ```
 
 **Options:**
-- `--buy`: Show buy-low candidates (dynasty value > redraft value; or KTC > FC for arbitrage).
-- `--sell`: Show sell-high candidates (redraft value > dynasty value; or FC > KTC for arbitrage).
-- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and KeepTradeCut.
-- `--min-value N`: Value floor filtering out deep stashes (default: 1000).
+- `--buy`: Show buy-low candidates (dynasty value > redraft value; or Dealer > FC for arbitrage).
+- `--sell`: Show sell-high candidates (redraft value > dynasty value; or FC > Dealer for arbitrage).
+- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and Dynasty Dealer across league rosters.
+- `--min-value N`: Floor on both values; filters out deep stashes (default: 1000).
 - `--limit N`: Max results to display (default: 20).
 
 ---
 
-### 4. In-Season Management & Optimization
+### 4. Roster Management & Gameday
 
 #### `ff lineup [team]`
 Lineup optimizer scoring weekly stat projections against your league's exact rules (including TEP), using an optimal laminar greedy assignment algorithm, and providing actionable START/SIT deltas vs your current Sleeper starters.
 
 ```mermaid
 flowchart TD
-    Start(["ff lineup [team] [--week N]"]) --> Fetch["Fetch weekly raw stat lines (Sleeper Projections)\nFetch league scoring settings & roster slots"]
-    Fetch --> Score["Score stats with league's exact rules\n(PPR, yardage bonuses, TEP for TEs)"]
-    Score --> Assign["analysis.optimal_lineup()\nGreedy laminar assignment on active players:\nFill most-restrictive slots first\n(QB/RB/WR/TE -> FLEX -> SUPER_FLEX)"]
-    Assign --> Compare["Compare optimal lineup vs target.starters on Sleeper"]
-    Compare --> Render["Render:\n• Optimal lineup slots with projected points\n• Total projected points panel\n• START / SIT moves (+ projected gain)"]
-    Render --> Done(["Done"])
+    Start(["ff lineup [team] [--week N] [--season Y]"]) --> LoadConfig["Load .ff/config.json"]
+    LoadConfig --> FetchSettings["Fetch Sleeper league scoring & roster slots\nFetch weekly stat lines (ProjectionsClient)"]
+    FetchSettings --> ScoreStats["Score stats with league rules\n(PPR, yardage bonuses, TEP)"]
+    ScoreStats --> OptimalAssign["analysis.optimal_lineup()\nGreedy laminar assignment:\nFill most-restrictive slots first\n(QB/RB/WR/TE -> FLEX -> SUPER_FLEX)"]
+    OptimalAssign --> CurrentCompare["analysis.projected_points()\nCompare optimal lineup vs current starters on Sleeper"]
+    CurrentCompare --> Render["Render:\n• Optimal lineup slots with projected points\n• Total projected points panel\n• START / SIT recommendations (+ gain)\n• Bench preview"]
+    Render --> QA["qa.run_qa('lineup')\nVerify points sum, unique starters,\nno taxi/IR in lineup"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
 - `team`: Team name search (defaults to your team).
 - `--week N`: Target NFL week (defaults to active/upcoming week).
-- `--season Y`: Target season year.
+- `--season Y`: Target season year (defaults to your league's configured season).
 
 ---
 
 #### `ff cleanup [team]`
-Roster auditor that computes active, taxi, and IR capacity, ranking drop candidates (lowest value first) and highlighting zero-loss taxi stashes to open waiver room.
+Roster auditor that computes active, taxi, and IR capacity, ranking drop candidates (lowest value non-starters first) and highlighting zero-loss taxi stashes to open active room for waiver adds.
 
 ```mermaid
 flowchart TD
-    Start(["ff cleanup [team]"]) --> ReadRules["Read league settings:\ntaxi_slots, reserve_slots, taxi_years, taxi_allow_vets"]
-    ReadRules --> Audit["analysis.audit_roster()\nClassify players: START, BENCH, TAXI, IR"]
+    Start(["ff cleanup [team] [--drops N]"]) --> ReadRules["Read league settings:\ntaxi_slots, reserve_slots, taxi_years, taxi_allow_vets"]
+    ReadRules --> FetchData["Fetch rosters, target team, ValueBook, metadata"]
+    FetchData --> Audit["analysis.audit_roster()\nClassify players: START, BENCH, TAXI, IR"]
     Audit --> CalcCap["Compute Capacity:\n• Active open = Cap - (Start + Bench)\n• Taxi open = Cap - Taxi count\n• IR open = Cap - IR count"]
-    CalcCap --> Drops["Rank Drop Candidates:\nWorst value non-starters first\nFlag if drop frees ACTIVE slot vs TAXI/IR only"]
-    CalcCap --> Taxi["Rank Taxi Candidates:\nBest value taxi-eligible bench players\nFrees active room without dropping player"]
-    Drops & Taxi --> Render["Render:\n• Capacity summary panel\n• 'Make room' actionable advice line\n• Drop candidates table & Taxi stash table"]
-    Render --> Done(["Done"])
+    CalcCap --> MakeRoom["Identify 'Make Room' moves:\nTaxi stashes + zero-value bench drops"]
+    MakeRoom --> Drops["Rank Drop Candidates:\nWorst value non-starters first\nFlag if drop frees ACTIVE slot vs slot only"]
+    MakeRoom --> Taxi["Rank Taxi Candidates:\nBest value taxi-eligible bench players\nFrees active room without dropping player"]
+    Drops & Taxi --> Render["Render:\n• Capacity summary panel\n• 'Make room' actionable callout\n• Drop candidates table & Taxi stash table"]
+    Render --> QA["qa.run_qa('cleanup')\nVerify active open math, no starters in drops,\nbench consistency"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
@@ -317,14 +339,15 @@ flowchart TD
     FetchData --> FilterTeam{"Team argument\nspecified?"}
     FilterTeam -- "Yes" --> PickTeam["Filter valuations to target team"]
     FilterTeam -- "No" --> AllTeams["Evaluate all league rosters"]
-    PickTeam & AllTeams --> ScanInjuries["Scan assets for injury tags & reserve status\n(injury_status != 'Active')"]
+    PickTeam & AllTeams --> ScanInjuries["Scan assets for injury tags & reserve status\n(injury_status != 'Active')\nSort by dynasty value descending"]
     ScanInjuries --> FetchTrending["Fetch Sleeper 24h trending adds & drops\n(sc.trending)"]
-    FetchTrending --> Render["Render:\n• Injured players table (sorted by dynasty value)\n• Sleeper 24h trending adds & drops table"]
-    Render --> Done(["Done"])
+    FetchTrending --> Render["Render:\n• Injured players table (team, depth, injury, status, value)\n• Sleeper 24h trending adds & drops table"]
+    Render --> QA["qa.run_qa('news')\nVerify injured assets & trending integrity"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
-- `team`: Filter injuries to a specific team (defaults to league-wide).
+- `team`: Filter injuries to a specific team (omit for league-wide).
 - `--limit N`: Number of trending adds and drops to display (default: 15).
 
 ---
@@ -335,16 +358,16 @@ Identifies trending free-agent adds across Sleeper, joins them with FantasyCalc 
 ```mermaid
 flowchart TD
     Start(["ff waivers [--limit N] [--all]"]) --> FetchTrend["Fetch trending adds across Sleeper\n(sc.trending)"]
-    FetchTrend --> JoinValues["Join trending player IDs to FantasyCalc values"]
-    JoinValues --> CheckRosters["Check league rosters:\nFlag as Free Agent or Rostered"]
-    CheckRosters --> Filter["analysis.waiver_targets()\nFilter to free agents (unless --all)\nSort by dynasty value"]
-    Filter --> Table["Render Waiver Targets Table:\nPlayer | Pos | Value | Add Count | Status"]
-    Table --> Done(["Done"])
+    FetchTrend --> LoadData["Load ValueBook & league rosters"]
+    LoadData --> TargetAnalysis["analysis.waiver_targets()\n• Match trending adds to ValueBook\n• Check ownership across league rosters\n• Classify as Free Agent or Rostered\n• Filter free agents only (unless --all)\n• Sort by dynasty value"]
+    TargetAnalysis --> Render["Render Waiver Targets Table:\nPlayer | Pos | Value | Adds Count | Status"]
+    Render --> QA["qa.run_qa('waivers')\nVerify target counts & free agent unowned invariant"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
 - `--limit N`: How many waiver targets to show (default: 20).
-- `--all`: Include currently rostered players.
+- `--all`: Include currently rostered players (default: free agents only).
 
 ---
 
@@ -355,20 +378,21 @@ Live draft board scored specifically for YOUR team: tracks draft order (snake, l
 
 ```mermaid
 flowchart TD
-    Start(["ff draft [-p POS] [-r] [--mode contend|rebuild|auto]"]) --> FetchDraft["Fetch active/recent draft\n(sc.draft: slots, order, traded picks)"]
-    FetchDraft --> PickStatus["Resolve owned picks via my_picks()\nShow on-clock status and pick gaps"]
+    Start(["ff draft [-p POS] [-r] [--mode contend|rebuild|auto] [--draft-id ID] [--limit N]"]) --> ResolveDraft["Resolve active or recent draft\n(sc.draft: slots, order, traded picks)"]
+    ResolveDraft --> PickStatus["Resolve owned picks via my_picks()\nShow on-clock status and pick gaps"]
     PickStatus --> Unavailable["Build taken pool:\nLeague rosters + drafted picks"]
     Unavailable --> TeamEval["Evaluate Team Context:\n• Value merged roster (current + drafted today)\n• Detect status: Contend / Rebuild / Balanced\n• Compute 'where you stand' vs league median"]
     TeamEval --> FitEngine["analysis.rank_fits()\n• Anchor on FantasyCalc dynasty value\n• Layer status-weighted positional upgrade tilt\n• Layer win-now vs rebuild horizon tilt\n• Calculate FitScore"]
-    FitEngine --> Render["Render:\n• Live draft status banner\n• Your picks schedule\n• Where you stand table (thin hole flags)\n• Best Available FOR YOU (FitScore vs Market Rank)"]
-    Render --> Done(["Done"])
+    FitEngine --> Render["Render:\n• Live draft status banner\n• Your picks schedule (pick, round, status, when)\n• Where you stand table (thin hole flags)\n• Top recommended pick banner\n• Best Available FOR YOU (FitScore vs Market Rank)"]
+    Render --> QA["qa.run_qa('draft')\nVerify pick ranges, FitScore order,\ntaken pool disjointness"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
-- `-p, --position`: Filter available board to `QB`, `RB`, `WR`, or `TE`.
+- `-p, --position POS`: Filter available board to `QB`, `RB`, `WR`, or `TE`.
 - `-r, --rookies`: Show available rookies only.
-- `--mode`: Competitive horizon: `auto` (reads power rank), `contend`, or `rebuild`.
-- `--draft-id ID`: Manually specify draft ID.
+- `--mode MODE`: Competitive horizon: `auto` (reads power rank), `contend`, or `rebuild` (default: `auto`).
+- `--draft-id ID`: Manually specify or override draft ID.
 - `--limit N`: Number of available players to display (default: 30).
 
 ---
@@ -387,35 +411,29 @@ flowchart TD
     CheckTool -- "analysis tool" --> Dispatch["services.llm.dispatch_tool(tool, kwargs, ctx)\nExecute deterministic Python analysis:\n• analyze_trade\n• optimal_lineup\n• waiver_targets\n• draft_fit\n• get_roster"]
     Dispatch --> SynthLLM["Feed exact calculation result back into LLM\nfor plain-English synthesis"]
     SynthLLM --> FinalOutput["Render formatted markdown explanation in terminal"]
-    PlainMarkdown & Onboard & FinalOutput --> Done(["Done"])
+    PlainMarkdown & Onboard & FinalOutput --> QA["qa.run_qa('ask')\nVerify query presence & tool execution result"]
+    QA --> Done(["Done"])
 ```
 
 **Options:**
 - `query`: Natural language question (e.g. `"Should I trade Gibbs for Bijan?"`, `"Who should I start at FLEX?"`).
-- `--backend`: Override LLM runner: `auto`, `agy`, `gemini`, `claude`, or `ollama`.
+- `--backend BACKEND`: Override LLM backend: `auto`, `agy`, `gemini`, `claude`, or `ollama`.
 
 ---
 
-#### `ff version`
-Prints the installed version of `ff`.
-
-```mermaid
-flowchart TD
-    Start(["ff version"]) --> ReadVersion["Read __version__"]
-    ReadVersion --> Render["Print version string\n(e.g. 'ff 0.1.0')"]
-    Render --> Done(["Done"])
-```
-
----
+### 6. Diagnostics & Utilities
 
 #### `ff qa`
-Runs full-system diagnostic invariant audits across all league domains (setup, rosters, power rankings, future draft picks, market values, roster cleanup capacity, trending waivers, and market arbitrage).
+Runs full-system diagnostic invariant audits across all league domains (setup configuration, roster valuations, power rankings, future draft pick ledger, market value books, roster cleanup capacity, trending waiver wire targets, and market arbitrage).
 
 ```mermaid
 flowchart TD
-    Start(["ff qa [--verbose]"]) --> LoadConfig["Load .ff/config.json"]
-    LoadConfig --> RunAudits["Run Domain Invariant Audits:\n• Setup configuration\n• Roster & Power math\n• Future picks ledger\n• Market values integrity\n• Roster cleanup capacity\n• Trending waivers\n• Arbitrage movers"]
-    RunAudits --> Scorecard["Render QA Health Scorecard:\n• Per-command status, checks passed/failed, latency\n• Overall audit summary badge"]
+    Start(["ff qa [-v, --verbose]"]) --> LoadConfig["Load .ff/config.json"]
+    LoadConfig --> RunAudits["Run Domain Invariant Audits across 7 Subsystems:\n1. Setup configuration (run_qa 'setup')\n2. Roster & Power math (run_qa 'power', 'roster')\n3. Future picks ledger (run_qa 'picks')\n4. Market values integrity (run_qa 'values')\n5. Roster cleanup capacity (run_qa 'cleanup')\n6. Trending waivers (run_qa 'waivers')\n7. Arbitrage movers (run_qa 'movers')"]
+    RunAudits --> VerboseCheck{"-v / --verbose\nflag set?"}
+    VerboseCheck -- "Yes" --> DetailedTables["Render granular check tables per domain\n(render_qa_footer mode='verbose')"]
+    VerboseCheck -- "No" --> Scorecard["Render QA Health Scorecard table\n(render_qa_full_report)"]
+    DetailedTables --> Scorecard
     Scorecard --> Done(["Done"])
 ```
 
@@ -424,14 +442,39 @@ flowchart TD
 
 ---
 
+#### `ff version`
+Prints the installed version of `ff`.
+
+```mermaid
+flowchart TD
+    Start(["ff version"]) --> ReadVersion["Read __version__ from ff package"]
+    ReadVersion --> Render["Print version string\n(e.g. 'ff 0.1.0')"]
+    Render --> Done(["Done"])
+```
+
+**Options:**
+- Takes no options.
+
+---
+
 ## Post-Command QA & Invariant System
 
-`ff` features a built-in automated QA validation engine that validates domain mathematical and logical invariants after every command run. Control telemetry output via the `FF_QA` environment variable:
+`ff` features a built-in automated QA validation engine (`ff.qa`) that executes domain-specific mathematical and logical invariant checks after every command run.
 
-- `FF_QA=0` or unset - Silent mode (default; runs checks and warns on invariant issues).
-- `FF_QA=1` or `FF_QA=summary` - Prints a concise 1-line check verification footer (e.g. `✔ QA: 5 checks passed (0.4ms)`).
-- `FF_QA=verbose` - Renders a detailed Rich table listing every executed check, status, and diagnostic messages.
-- `FF_QA=strict` - Raises `QAInvariantError` and halts execution if any invariant fails.
+### Telemetry & Modes (`FF_QA`)
+
+Control post-command QA telemetry output via the `FF_QA` environment variable:
+
+| Mode | Configuration Values | Output Behavior |
+|---|---|---|
+| **Silent** (default) | `FF_QA=0`, `FF_QA=off`, or unset | Runs invariant checks silently in background; surfaces a subtle warning only if invariant failures occur. |
+| **Summary** | `FF_QA=1`, `FF_QA=summary`, `true`, `on` | Prints a concise 1-line check verification footer (e.g. `✔ QA: 5 checks passed (0.4ms)`). |
+| **Verbose** | `FF_QA=verbose`, `FF_QA=detail` | Renders a detailed Rich inspection table displaying every individual check, pass/warn/fail status, and diagnostic messages. |
+| **Strict** | `FF_QA=strict` | Raises `QAInvariantError` and immediately halts execution if any invariant failure is detected. |
+
+### Standalone Health Check (`ff qa`)
+
+Run `ff qa` anytime to perform an exhaustive, multi-domain invariant audit across setup, rosters, power rankings, future draft picks, market values, cleanup capacity, trending waivers, and market arbitrage. Add `--verbose` (`-v`) for granular check-by-check breakdown tables across every audited domain.
 
 ## Development
 

@@ -108,13 +108,14 @@ def test_sleeper_projections_live_have_stat_lines():
     assert allen and (allen.get("pass_yd") or allen.get("pts_half_ppr"))
 
 
-def test_ktc_live_maps_sleeper_ids():
-    # Dual-market merge depends on Dynasty Daddy returning sleeper ids (or pick
-    # labels) the KTC client understands. If the payload shape drifts, every
+def test_dealer_live_maps_sleeper_ids():
+    # Dual-market merge depends on Dynasty Dealer returning sleeper ids (or pick
+    # labels) the dealer client understands. If the payload shape drifts, every
     # `--market both` number silently goes missing.
-    from ff.values.ktc import KtcClient
-    values = KtcClient().fetch_values()
+    from ff.values.dealer import DynastyDealerClient
+    values = DynastyDealerClient().fetch_values()
     if not values:
-        pytest.skip("KTC/Dynasty Daddy returned no values (offline or shape change)")
-    assert any(k.isdigit() for k in values), "no sleeper-id keys in KTC map"
+        pytest.skip("Dynasty Dealer returned no values (offline or shape change)")
+    assert any(k.isdigit() for k in values), "no sleeper-id keys in Dealer map"
     assert any(v > 0 for v in values.values())
+

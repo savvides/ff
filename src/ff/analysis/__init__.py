@@ -19,9 +19,11 @@ from ff.analysis.picks import pick_ledger, pick_tier, price_pick
 from ff.analysis.roster import value_all_rosters, value_roster
 from ff.analysis.trade import (
     analyze_trade,
+    dealer_position_deltas,
     evaluate_trade,
     ktc_position_deltas,
     position_deltas,
+    secondary_position_deltas,
 )
 from ff.analysis.waivers import waiver_targets
 from ff.contracts import ArbitrageMover
@@ -32,8 +34,11 @@ __all__ = [
     "analyze_trade",
     "evaluate_trade",
     "position_deltas",
+    "secondary_position_deltas",
+    "dealer_position_deltas",
     "ktc_position_deltas",
     "waiver_targets",
+
     "top_movers",
     "value_redraft_gap",
     "find_arbitrage_movers",
