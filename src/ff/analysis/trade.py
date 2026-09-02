@@ -6,7 +6,7 @@ positional breakdown.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ff.contracts import Asset, TradeEvaluation, TradeSide
 from ff.values import ValueBook
@@ -15,11 +15,13 @@ from ff.values import ValueBook
 def _resolve_side(
     tokens: List[str],
     book: ValueBook,
+    include_secondary: bool = True,
     include_ktc: bool = True,
     players_meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Asset], List[str]]:
     assets: List[Asset] = []
     unresolved: List[str] = []
+    should_include = include_secondary and include_ktc
     for tok in tokens:
         tok = tok.strip()
         if not tok:
@@ -29,8 +31,8 @@ def _resolve_side(
             unresolved.append(tok)
         else:
             asset = asset.model_copy()
-            if not include_ktc and asset.ktc_value is not None:
-                asset.ktc_value = None
+            if not should_include and asset.secondary_value is not None:
+                asset.secondary_value = None
             if players_meta and not asset.is_pick:
                 asset.fill_from_meta(players_meta.get(asset.id))
             assets.append(asset)
@@ -44,6 +46,7 @@ def evaluate_trade(
     *,
     give: Optional[List[str]] = None,
     get: Optional[List[str]] = None,
+    include_secondary: bool = True,
     include_ktc: bool = True,
     players_meta: Optional[Dict[str, Any]] = None,
 ) -> TradeEvaluation:
@@ -57,6 +60,7 @@ def evaluate_trade(
         side_b_tokens=give_list,
         book=book,
         labels=("You get", "You give"),
+        include_secondary=include_secondary,
         include_ktc=include_ktc,
         players_meta=players_meta,
     )
@@ -68,6 +72,7 @@ def analyze_trade(
     side_b_tokens: List[str],
     book: ValueBook,
     labels: Tuple[str, str] = ("Side A", "Side B"),
+    include_secondary: bool = True,
     include_ktc: bool = True,
     players_meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TradeEvaluation, List[str]]:
@@ -80,8 +85,12 @@ def analyze_trade(
     never silently dropped - a missing player would otherwise make a trade look
     lopsided.
     """
-    a_assets, a_missing = _resolve_side(side_a_tokens, book, include_ktc=include_ktc, players_meta=players_meta)
-    b_assets, b_missing = _resolve_side(side_b_tokens, book, include_ktc=include_ktc, players_meta=players_meta)
+    a_assets, a_missing = _resolve_side(
+        side_a_tokens, book, include_secondary=include_secondary, include_ktc=include_ktc, players_meta=players_meta
+    )
+    b_assets, b_missing = _resolve_side(
+        side_b_tokens, book, include_secondary=include_secondary, include_ktc=include_ktc, players_meta=players_meta
+    )
     evaluation = TradeEvaluation(
         side_a=TradeSide(assets=a_assets),
         side_b=TradeSide(assets=b_assets),
@@ -103,16 +112,22 @@ def position_deltas(evaluation: TradeEvaluation) -> Dict[str, int]:
     return deltas
 
 
-def ktc_position_deltas(evaluation: TradeEvaluation) -> Dict[str, int]:
-    """Net KTC value gained per position from side A's perspective (A minus B)."""
+def secondary_position_deltas(evaluation: TradeEvaluation) -> Dict[str, int]:
+    """Net secondary market value gained per position from side A's perspective (A minus B)."""
     deltas: Dict[str, int] = {}
     for a in evaluation.side_a.assets:
-        if a.ktc_value is not None:
+        if a.secondary_value is not None:
             pos = a.position or "NA"
-            deltas[pos] = deltas.get(pos, 0) + a.ktc_value
+            deltas[pos] = deltas.get(pos, 0) + a.secondary_value
     for b in evaluation.side_b.assets:
-        if b.ktc_value is not None:
+        if b.secondary_value is not None:
             pos = b.position or "NA"
-            deltas[pos] = deltas.get(pos, 0) - b.ktc_value
+            deltas[pos] = deltas.get(pos, 0) - b.secondary_value
     return deltas
+
+
+# Backward compatibility aliases
+ktc_position_deltas = secondary_position_deltas
+dealer_position_deltas = secondary_position_deltas
+
 

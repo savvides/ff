@@ -319,7 +319,7 @@ def validate_movers(movers: Any, mode: str = "gap") -> List[QACheck]:
 
     if mode == "arbitrage":
         arb_items: List[ArbitrageMover] = movers
-        diffs_valid = all(m.diff == (m.ktc_value - m.fc_value) for m in arb_items)
+        diffs_valid = all(m.diff == (m.secondary_value - m.fc_value) for m in arb_items)
         checks.append(QACheck(
             name="Arbitrage Diff Calculation",
             passed=diffs_valid,
@@ -333,12 +333,13 @@ def validate_movers(movers: Any, mode: str = "gap") -> List[QACheck]:
             message="" if pcts_valid else "Arbitrage pct_diff cannot be negative",
         ))
 
-        biases_valid = all(m.market_bias in {"KTC", "FC", "EVEN"} for m in arb_items)
+        biases_valid = all(m.market_bias in {"Dealer", "KTC", "FC", "EVEN"} for m in arb_items)
         checks.append(QACheck(
             name="Arbitrage Market Bias Valid",
             passed=biases_valid,
             message="" if biases_valid else "Invalid market bias label",
         ))
+
     else:
         gap_items: List[Tuple[Asset, float]] = movers
         assets_valid = all(a.value >= 0 and (a.redraft_value is None or a.redraft_value >= 0) for a, _ in gap_items)

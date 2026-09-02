@@ -50,10 +50,11 @@ def find_arbitrage_movers(
     limit: int = 20,
     market: Optional[str] = None,
 ) -> List[ArbitrageMover]:
-    """Scan and rank assets with market valuation discrepancies between FC and KTC.
+    """Scan and rank assets with market valuation discrepancies between FC and secondary market (Dynasty Dealer).
 
     If rosters is supplied, attaches owning team info to each arbitrage opportunity.
-    market can be 'ktc' (assets where KTC > FC) or 'fc' (assets where FC > KTC).
+    market can be 'dealer' (assets where Dealer > FC) or 'fc' (assets where FC > Dealer).
+    Accepts 'ktc' as a legacy alias for 'dealer'.
     """
     actual_book: Optional[ValueBook] = None
     actual_rosters: Optional[List[Roster]] = None
@@ -79,25 +80,27 @@ def find_arbitrage_movers(
                 owner_map[pid] = (r.roster_id, r.team_name)
 
     scored: List[ArbitrageMover] = []
+    norm_market = market.lower() if market else None
+
     for a in actual_book.assets:
-        if a.ktc_value is None:
+        if a.secondary_value is None:
             continue
         fc_val = a.value
-        ktc_val = a.ktc_value
+        sec_val = a.secondary_value
 
-        if min_value > 0 and max(fc_val, ktc_val) < min_value:
+        if min_value > 0 and max(fc_val, sec_val) < min_value:
             continue
 
-        diff = ktc_val - fc_val
+        diff = sec_val - fc_val
 
-        if market == "ktc" and diff <= 0:
+        if norm_market in ("dealer", "ktc") and diff <= 0:
             continue
-        if market == "fc" and diff >= 0:
+        if norm_market == "fc" and diff >= 0:
             continue
 
-        larger = max(fc_val, ktc_val)
+        larger = max(fc_val, sec_val)
         pct_diff = (abs(diff) / larger * 100.0) if larger > 0 else 0.0
-        diff_pct = ((ktc_val - fc_val) / fc_val * 100.0) if fc_val > 0 else 0.0
+        diff_pct = ((sec_val - fc_val) / fc_val * 100.0) if fc_val > 0 else 0.0
 
         r_info = owner_map.get(a.id)
         roster_id, team_name = r_info if r_info else (None, None)
@@ -105,16 +108,17 @@ def find_arbitrage_movers(
         mover = ArbitrageMover(
             asset=a,
             fc_value=fc_val,
-            ktc_value=ktc_val,
+            secondary_value=sec_val,
             diff=diff,
             pct_diff=pct_diff,
             diff_pct=diff_pct,
             roster_id=roster_id,
             team_name=team_name,
-            market_bias="KTC" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
+            market_bias="Dealer" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
         )
         scored.append(mover)
 
     scored.sort(key=lambda m: (abs(m.diff), m.pct_diff), reverse=True)
     return scored[:limit] if limit > 0 else scored
+
 

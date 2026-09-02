@@ -35,11 +35,11 @@ def test_min_value_floor_excludes_deep_stashes():
 
 def test_find_arbitrage_movers_basic():
     book = ValueBook([
-        Asset(id="1", name="Hype Stud", position="WR", value=4000, ktc_value=6000),  # diff +2000
-        Asset(id="2", name="Old Producer", position="RB", value=5000, ktc_value=3500),  # diff -1500
-        Asset(id="3", name="Consensus Pick", position="QB", value=7000, ktc_value=7000),  # diff 0
-        Asset(id="4", name="No KTC Player", position="TE", value=3000, ktc_value=None),  # no KTC
-        Asset(id="5", name="Deep Stash", position="WR", value=200, ktc_value=300),  # below min_value 1000
+        Asset(id="1", name="Hype Stud", position="WR", value=4000, secondary_value=6000),  # diff +2000
+        Asset(id="2", name="Old Producer", position="RB", value=5000, secondary_value=3500),  # diff -1500
+        Asset(id="3", name="Consensus Pick", position="QB", value=7000, secondary_value=7000),  # diff 0
+        Asset(id="4", name="No Secondary Player", position="TE", value=3000, secondary_value=None),  # no secondary
+        Asset(id="5", name="Deep Stash", position="WR", value=200, secondary_value=300),  # below min_value 1000
     ])
     movers = find_arbitrage_movers(book=book, min_value=1000)
     assert len(movers) == 3
@@ -50,23 +50,28 @@ def test_find_arbitrage_movers_basic():
     assert movers[0].asset.name == "Hype Stud"
     assert movers[0].diff == 2000
     assert movers[0].fc_value == 4000
+    assert movers[0].secondary_value == 6000
+    assert movers[0].dealer_value == 6000
     assert movers[0].ktc_value == 6000
-    assert movers[0].market_bias == "KTC"
+    assert movers[0].market_bias == "Dealer"
 
     assert movers[1].asset.name == "Old Producer"
     assert movers[1].diff == -1500
     assert movers[1].fc_value == 5000
+    assert movers[1].secondary_value == 3500
+    assert movers[1].dealer_value == 3500
     assert movers[1].ktc_value == 3500
     assert movers[1].market_bias == "FC"
 
     assert movers[2].asset.name == "Consensus Pick"
     assert movers[2].diff == 0
+    assert movers[2].market_bias == "EVEN"
 
 
 def test_find_arbitrage_movers_with_rosters():
     book = ValueBook([
-        Asset(id="1", name="Player One", position="WR", value=4000, ktc_value=6000),
-        Asset(id="2", name="Player Two", position="RB", value=5000, ktc_value=3500),
+        Asset(id="1", name="Player One", position="WR", value=4000, secondary_value=6000),
+        Asset(id="2", name="Player Two", position="RB", value=5000, secondary_value=3500),
     ])
     rosters = [
         Roster(roster_id=1, team_name="Team Alpha", player_ids=["1"]),
@@ -84,9 +89,13 @@ def test_find_arbitrage_movers_with_rosters():
 
 def test_find_arbitrage_movers_filter_market():
     book = ValueBook([
-        Asset(id="1", name="Hype Player", position="WR", value=4000, ktc_value=6000),  # KTC > FC
-        Asset(id="2", name="Value Veteran", position="RB", value=5000, ktc_value=3500),  # FC > KTC
+        Asset(id="1", name="Hype Player", position="WR", value=4000, secondary_value=6000),  # Dealer > FC
+        Asset(id="2", name="Value Veteran", position="RB", value=5000, secondary_value=3500),  # FC > Dealer
     ])
+    dealer_movers = find_arbitrage_movers(book=book, market="dealer")
+    assert len(dealer_movers) == 1
+    assert dealer_movers[0].asset.name == "Hype Player"
+
     ktc_movers = find_arbitrage_movers(book=book, market="ktc")
     assert len(ktc_movers) == 1
     assert ktc_movers[0].asset.name == "Hype Player"
@@ -98,7 +107,7 @@ def test_find_arbitrage_movers_filter_market():
 
 def test_find_arbitrage_movers_positional_args_flexibility():
     book = ValueBook([
-        Asset(id="1", name="Player One", position="WR", value=4000, ktc_value=6000),
+        Asset(id="1", name="Player One", position="WR", value=4000, secondary_value=6000),
     ])
     # Call as find_arbitrage_movers(book)
     m1 = find_arbitrage_movers(book)
@@ -106,4 +115,5 @@ def test_find_arbitrage_movers_positional_args_flexibility():
     # Call as find_arbitrage_movers(None, book)
     m2 = find_arbitrage_movers(None, book)
     assert len(m2) == 1
+
 

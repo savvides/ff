@@ -95,7 +95,7 @@ def test_e2e_multi_market_evaluate_trade_helper(multi_market_book):
 
 
 def test_offline_degradation_ktc_network_error():
-    """ValuesClient degrades gracefully when KTC endpoint raises network errors."""
+    """ValuesClient degrades gracefully when secondary endpoint raises network errors."""
     fc_entries = [
         {"player": {"sleeperId": "7564", "name": "Ja'Marr Chase", "position": "WR"}, "value": 9500},
         {"player": {"sleeperId": "8138", "name": "Bijan Robinson", "position": "RB"}, "value": 9000},
@@ -108,7 +108,7 @@ def test_offline_degradation_ktc_network_error():
         requests.exceptions.ReadTimeout("Read timed out"),
     ]:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
-             patch("ff.values.ktc.get_json", side_effect=exception):
+             patch("ff.values.dealer.get_json", side_effect=exception):
             client = ValuesClient()
             book = client.fetch(Format(), include_ktc=True)
 
@@ -125,7 +125,7 @@ def test_offline_degradation_ktc_network_error():
 
 
 def test_offline_degradation_ktc_malformed_payloads():
-    """ValuesClient handles non-standard, malformed, or empty payloads from KTC API."""
+    """ValuesClient handles non-standard, malformed, or empty payloads from secondary API."""
     fc_entries = [
         {"player": {"sleeperId": "7564", "name": "Ja'Marr Chase", "position": "WR"}, "value": 9500},
     ]
@@ -136,13 +136,13 @@ def test_offline_degradation_ktc_malformed_payloads():
         False,
         12345,
         {"status": "error", "message": "Rate limit exceeded"},
-        [{"corrupt_entry": True}],  # Missing ID and name
-        [{"player_id": "7564", "value": "invalid_number"}],  # Non-integer value
+        {"players": [{"corrupt_entry": True}]},  # Missing ID and name
+        {"players": [{"sleeper_id": "7564", "current_value": "invalid_number"}]},  # Non-integer value
     ]
 
     for bad_resp in malformed_responses:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
-             patch("ff.values.ktc.get_json", return_value=bad_resp):
+             patch("ff.values.dealer.get_json", return_value=bad_resp):
             client = ValuesClient()
             book = client.fetch(Format(), include_ktc=True)
             chase = book.resolve("Ja'Marr Chase")
@@ -152,19 +152,20 @@ def test_offline_degradation_ktc_malformed_payloads():
 
 
 def test_include_ktc_false_skips_secondary_market():
-    """When include_ktc=False, KTC is not contacted and values are single-market."""
+    """When include_ktc=False, secondary market is not contacted and values are single-market."""
     fc_entries = [
         {"player": {"sleeperId": "7564", "name": "Ja'Marr Chase", "position": "WR"}, "value": 9500},
     ]
     with patch("ff.values.client.get_json", return_value=fc_entries), \
-         patch("ff.values.ktc.KtcClient.fetch_values") as mock_ktc_fetch:
+         patch("ff.values.dealer.DynastyDealerClient.fetch_values") as mock_dealer_fetch:
         client = ValuesClient()
         book = client.fetch(Format(), include_ktc=False)
-        mock_ktc_fetch.assert_not_called()
+        mock_dealer_fetch.assert_not_called()
         chase = book.resolve("Ja'Marr Chase")
         assert chase is not None
         assert chase.value == 9500
         assert chase.ktc_value is None
+
 
 
 # =============================================================================
@@ -442,15 +443,16 @@ def test_arbitrage_movers_scanner_ranking_and_filters(multi_market_book, rosters
     for i in range(len(all_movers) - 1):
         assert abs(all_movers[i].diff) >= abs(all_movers[i + 1].diff)
 
-    # 2. Filter market='ktc' (assets where KTC > FC)
+    # 2. Filter market='ktc' (assets where secondary > FC)
     ktc_movers = find_arbitrage_movers(rosters, multi_market_book, market="ktc", min_value=1000)
     assert all(m.diff > 0 for m in ktc_movers)
-    assert all(m.market_bias == "KTC" for m in ktc_movers)
+    assert all(m.market_bias in ("Dealer", "KTC") for m in ktc_movers)
 
-    # 3. Filter market='fc' (assets where FC > KTC)
+    # 3. Filter market='fc' (assets where FC > secondary)
     fc_movers = find_arbitrage_movers(rosters, multi_market_book, market="fc", min_value=1000)
     assert all(m.diff < 0 for m in fc_movers)
     assert all(m.market_bias == "FC" for m in fc_movers)
+
 
     # 4. min_value threshold filtering
     high_floor_movers = find_arbitrage_movers(rosters, multi_market_book, min_value=8000)
