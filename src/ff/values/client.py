@@ -174,7 +174,7 @@ class ValuesClient:
         self,
         url: str = VALUES_URL,
         dealer_client: Optional[DynastyDealerClient] = None,
-        ktc_client: Optional[Any] = None,
+        ktc_client: Optional[DynastyDealerClient] = None,
     ) -> None:
         self.url = url
         self.dealer_client = dealer_client or ktc_client or DynastyDealerClient()
