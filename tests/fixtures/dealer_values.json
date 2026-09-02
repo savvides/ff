@@ -1,0 +1,46 @@
+{
+  "source": "Dynasty Dealer",
+  "total": 5,
+  "players": [
+    {
+      "sleeper_id": "9221",
+      "name": "Jahmyr Gibbs",
+      "position": "RB",
+      "team": "DET",
+      "base_value": 10000,
+      "current_value": 9906
+    },
+    {
+      "sleeper_id": "9509",
+      "name": "Bijan Robinson",
+      "position": "RB",
+      "team": "ATL",
+      "base_value": 9800,
+      "current_value": 9750
+    },
+    {
+      "sleeper_id": "7564",
+      "name": "Ja'Marr Chase",
+      "position": "WR",
+      "team": "CIN",
+      "base_value": 9500,
+      "current_value": 9400
+    },
+    {
+      "sleeper_id": "pick_2026_1_early",
+      "name": "2026 Round 1 Early",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 6342,
+      "current_value": 6342
+    },
+    {
+      "sleeper_id": "pick_2027_1_mid",
+      "name": "2027 Round 1 Mid",
+      "position": "PICK",
+      "team": "NFL",
+      "base_value": 5076,
+      "current_value": 5076
+    }
+  ]
+}

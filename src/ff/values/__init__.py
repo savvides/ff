@@ -7,8 +7,9 @@ by player name (fuzzy), and by pick label.
 """
 
 from ff.values.client import ValueBook, ValuesClient
+from ff.values.dealer import DynastyDealerClient
 from ff.values.ktc import KtcClient
 from ff.values.normalize import normalize_name, normalize_pick
 
-__all__ = ["ValuesClient", "ValueBook", "KtcClient", "normalize_name", "normalize_pick"]
+__all__ = ["ValuesClient", "ValueBook", "DynastyDealerClient", "KtcClient", "normalize_name", "normalize_pick"]
 
