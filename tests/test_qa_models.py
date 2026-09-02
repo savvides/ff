@@ -30,7 +30,8 @@ def test_qa_report_from_checks():
     assert report.passed is False
     assert len(report.checks) == 4
     assert report.checks_passed == 2
-    assert report.checks_failed == 2
+    assert report.checks_failed == 1
+    assert report.checks_warned == 1
     assert len(report.errors) == 1
     assert "Starters value > total value" in report.errors[0]
     assert len(report.warnings) == 1

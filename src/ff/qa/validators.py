@@ -94,7 +94,7 @@ def validate_roster(valuation: RosterValuation, target_roster: Optional[Roster] 
     ))
 
     pos_sum = sum(valuation.by_position.values())
-    pos_assets = sum(a.value for a in valuation.assets if a.position)
+    pos_assets = sum(a.value for a in valuation.assets)
     pos_match = pos_sum == pos_assets
     checks.append(QACheck(
         name="Roster Positional Sum Match",
@@ -273,6 +273,14 @@ def validate_trade(
         message="" if (side_a_match and side_b_match) else f"Side values ({evaluation.value_a}, {evaluation.value_b}) != sums ({sum_a}, {sum_b})",
     ))
 
+    all_trade_assets = evaluation.side_a.assets + evaluation.side_b.assets
+    assets_valid = all(bool(a.id) and bool(a.name) and a.value >= 0 for a in all_trade_assets)
+    checks.append(QACheck(
+        name="Trade Assets Integrity",
+        passed=assets_valid,
+        message="" if assets_valid else "One or more trade assets have empty ID/name or negative value",
+    ))
+
     delta_match = evaluation.delta == (evaluation.value_a - evaluation.value_b)
     checks.append(QACheck(
         name="Trade Delta Calculation",
@@ -333,7 +341,7 @@ def validate_movers(movers: Any, mode: str = "gap") -> List[QACheck]:
         ))
     else:
         gap_items: List[Tuple[Asset, float]] = movers
-        assets_valid = all(a.value >= 0 and a.redraft_value >= 0 for a, _ in gap_items)
+        assets_valid = all(a.value >= 0 and (a.redraft_value is None or a.redraft_value >= 0) for a, _ in gap_items)
         checks.append(QACheck(
             name="Movers Asset Values Non-Negative",
             passed=assets_valid,

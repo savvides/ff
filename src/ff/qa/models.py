@@ -23,6 +23,7 @@ class QAReport(BaseModel):
     checks: List[QACheck] = Field(default_factory=list)
     checks_passed: int = 0
     checks_failed: int = 0
+    checks_warned: int = 0
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     duration_ms: float = 0.0
@@ -40,13 +41,15 @@ class QAReport(BaseModel):
         warnings = [f"[{c.name}] {c.message or 'Warning detected'}" for c in checks if not c.passed and c.is_warning]
         passed = len(errors) == 0
         checks_passed = sum(1 for c in checks if c.passed)
-        checks_failed = sum(1 for c in checks if not c.passed)
+        checks_failed = sum(1 for c in checks if not c.passed and not c.is_warning)
+        checks_warned = sum(1 for c in checks if not c.passed and c.is_warning)
         return cls(
             command=command,
             passed=passed,
             checks=checks,
             checks_passed=checks_passed,
             checks_failed=checks_failed,
+            checks_warned=checks_warned,
             errors=errors,
             warnings=warnings,
             duration_ms=round(duration_ms, 2),

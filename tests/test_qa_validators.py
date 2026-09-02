@@ -44,7 +44,7 @@ def test_validate_setup_valid():
         league_id="12345",
         season="2026",
         name="Test Dynasty",
-        format=Format(is_superflex=True, ppr=1.0, num_teams=12, tep=0.5),
+        format=Format(superflex=True, ppr=1.0, num_teams=12, tep=0.5),
         username="alice",
         user_id="u1",
     )
@@ -57,7 +57,7 @@ def test_validate_setup_invalid():
         league_id="",
         season="2026",
         name="Test Dynasty",
-        format=Format(is_superflex=True, ppr=-1.0, num_teams=1, tep=-0.5),
+        format=Format(superflex=True, ppr=-1.0, num_teams=1, tep=-0.5),
         username="",
         user_id="",
     )
@@ -157,8 +157,8 @@ def test_validate_trade_valid():
     assert all(c.passed for c in checks)
 
 
-def test_validate_trade_negative_pct():
-    a1 = Asset(id="1", name="Player 1", value=5000)
+def test_validate_trade_invalid_assets():
+    a1 = Asset(id="", name="Player 1", value=-500)
     a2 = Asset(id="2", name="Player 2", value=4000)
     eval = TradeEvaluation(
         side_a=TradeSide(assets=[a1]),
@@ -166,9 +166,9 @@ def test_validate_trade_negative_pct():
         label_a="You get",
         label_b="You give",
     )
-    # Validate with valid eval
     checks = validate_trade(eval)
-    assert all(c.passed for c in checks)
+    failed = [c for c in checks if not c.passed]
+    assert any("Integrity" in c.name for c in failed)
 
 
 def test_validate_lineup_valid():
@@ -224,11 +224,10 @@ def test_validate_draft_valid():
 
 def test_validate_news_valid():
     item = NewsItem(
-        news_id="n1",
-        player_id="1",
-        published_date="2026-09-01",
-        title="Active in practice",
+        published=1725148800000,
         source="RotoWire",
+        title="Active in practice",
+        description="Participated in team drills today.",
     )
     checks = validate_news(player_news=[item])
     assert all(c.passed for c in checks)
