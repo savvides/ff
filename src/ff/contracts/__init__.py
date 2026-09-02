@@ -24,12 +24,14 @@ from ff.contracts.models import (
     TradeEvaluation,
     TradeSide,
     WaiverTarget,
+    NewsItem,
 )
 
 __all__ = [
     "ArbitrageMover",
     "Asset",
     "Format",
+    "NewsItem",
     "Roster",
     "RosterSlot",
     "RosterAudit",

@@ -51,6 +51,7 @@ from ff.analysis import (
 from ff.contracts import Asset, Roster
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
+from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
@@ -208,6 +209,8 @@ def setup(
         f"config: {path}",
         title="ff setup",
     ))
+    qa_rep = run_qa("setup", config=cfg)
+    render_qa_footer(qa_rep, console)
 
 
 # --- roster --------------------------------------------------------------
@@ -260,6 +263,8 @@ def roster(
     if val.unvalued:
         console.print(f"[dim]{len(val.unvalued)} unvalued (K/DEF/deep bench) not shown.[/]")
     console.print("[dim]value counts rostered players only, not your draft picks.[/]")
+    qa_rep = run_qa("roster", valuation=val, target_roster=target)
+    render_qa_footer(qa_rep, console)
 
 
 def _pick_roster(rosters: List[Roster], team: Optional[str],
@@ -302,6 +307,8 @@ def power() -> None:
     console.print(t)
     console.print("[dim]value = rostered players only; draft picks are not counted, "
                   "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
+    qa_rep = run_qa("power", valuations=valuations, rosters=rosters)
+    render_qa_footer(qa_rep, console)
 
 
 # --- picks ---------------------------------------------------------------
@@ -378,6 +385,8 @@ def picks(
                   "1st is an early one); other rounds use the flat round value; "
                   "0 = FantasyCalc does not price that round. This year's board: "
                   "`ff draft`.[/]")
+    qa_rep = run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=sc.traded_picks(cfg.league_id))
+    render_qa_footer(qa_rep, console)
 
 
 # --- values / rankings ---------------------------------------------------
@@ -447,6 +456,8 @@ def values(
                       f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
                       _signed(a.trend_30day) if a.trend_30day else "-")
     console.print(t)
+    qa_rep = run_qa("values", assets=assets, position=position, market=market)
+    render_qa_footer(qa_rep, console)
 
 
 # --- trade ---------------------------------------------------------------
@@ -595,6 +606,8 @@ def trade(
             if cands:
                 console.print(f"[dim]  did you mean: "
                               f"{', '.join(c.name for c in cands)}?[/]")
+    qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
+    render_qa_footer(qa_rep, console)
 
 
 # --- waivers -------------------------------------------------------------
@@ -621,6 +634,8 @@ def waivers(
         status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
         t.add_row(a.name, a.position or "-", f"{a.value:,}", f"{tgt.add_count:,}", status)
     console.print(t)
+    qa_rep = run_qa("waivers", targets=targets, rosters=rosters)
+    render_qa_footer(qa_rep, console)
 
 
 # --- news / injuries -----------------------------------------------------
@@ -695,6 +710,8 @@ def news(
                     f"{asset.value:,}" if asset else "-",
                 )
         console.print(t_trend)
+    qa_rep = run_qa("news", injured_assets=injured_assets, trending=(adds + drops))
+    render_qa_footer(qa_rep, console)
 
 
 @app.command()
@@ -780,6 +797,8 @@ def cleanup(
     console.print("[dim]Dropping a taxi/IR player frees a taxi/IR slot, not an active one; "
                   "only a bench drop or a taxi stash opens room for a waiver add. "
                   "ff is read-only - make the moves in Sleeper.[/]")
+    qa_rep = run_qa("cleanup", audit=audit)
+    render_qa_footer(qa_rep, console)
 
 
 @app.command()
@@ -843,6 +862,8 @@ def movers(
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")
         else:
             console.print("[dim]diff = KTC - FC. Bias indicates which market prices the player higher.[/]")
+        qa_rep = run_qa("movers", movers=arb_movers, mode="arbitrage")
+        render_qa_footer(qa_rep, console)
         return
 
     rows = top_movers(book, buy=buy, limit=limit, min_value=min_value)
@@ -855,6 +876,8 @@ def movers(
         t.add_row(a.name, a.position or "-", f"{a.age:.0f}" if a.age else "-",
                   f"{a.value:,}", f"{a.redraft_value:,}", f"{pct:+.0f}%")
     console.print(t)
+    qa_rep = run_qa("movers", movers=rows, mode="gap")
+    render_qa_footer(qa_rep, console)
 
 
 @app.command()
@@ -930,6 +953,8 @@ def lineup(
     if lu.bench:
         top_bench = ", ".join(f"{b.name} ({b.points:g})" for b in lu.bench[:5])
         console.print(f"[dim]bench: {top_bench}[/]")
+    qa_rep = run_qa("lineup", lineup=lu, target_roster=target, scoring=scoring)
+    render_qa_footer(qa_rep, console)
 
 
 # --- draft ---------------------------------------------------------------
@@ -1116,6 +1141,8 @@ def draft(
     console.print("[dim]FitScore = market value adjusted for YOUR roster fit + "
                   "win-now/rebuild horizon. mkt# is the raw dynasty-value rank. "
                   "The pick call is yours.[/]")
+    qa_rep = run_qa("draft", my_picks=owned, taken=taken, fits=fits, team_val=val)
+    render_qa_footer(qa_rep, console)
 
 
 @app.command()
@@ -1163,6 +1190,8 @@ def ask(
 
     if not tool_call:
         console.print(Markdown(first_response))
+        qa_rep = run_qa("ask", tool_name=None, result={}, query=query)
+        render_qa_footer(qa_rep, console)
         return
 
     tool_name = tool_call.get("tool")
@@ -1185,6 +1214,8 @@ def ask(
             console.print(f"[red]{e}[/]")
             return
         console.print(f"[bold green]Successfully onboarded Sleeper league[/] [cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!")
+        qa_rep = run_qa("ask", tool_name=tool_name, result={"username": username}, query=query)
+        render_qa_footer(qa_rep, console)
         return
 
     if not cfg:
@@ -1210,6 +1241,8 @@ def ask(
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
         _fail(f"LLM runner failed ({e}).")
     console.print(Markdown(final_response))
+    qa_rep = run_qa("ask", tool_name=tool_name, result=result, query=query)
+    render_qa_footer(qa_rep, console)
 
 
 @config_app.command(name="set-llm")
@@ -1235,6 +1268,74 @@ def set_llm(
     console.print(f"[bold green]Updated LLM backend[/] to [cyan]{backend}[/]"
                   + (f" (model: [cyan]{model}[/])" if model else "")
                   + f"\nconfig: {path}")
+
+
+@app.command(name="qa")
+@_guard
+def qa_cmd(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show granular check details."),
+) -> None:
+    """Run full-system diagnostic invariant audits across all league domains."""
+    cfg, sc = _load()
+    reports: List[Any] = []
+
+    # 1. Setup audit
+    reports.append(run_qa("setup", config=cfg))
+
+    # 2. Rosters & Power audit
+    book = _book(cfg, include_ktc=True)
+    rosters = _league_rosters(cfg, sc)
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
+    reports.append(run_qa("power", valuations=valuations, rosters=rosters))
+
+    my_roster = _pick_roster(rosters, None, cfg.user_id)
+    if my_roster:
+        my_val = next((v for v in valuations if v.roster_id == my_roster.roster_id), valuations[0])
+        reports.append(run_qa("roster", valuation=my_val, target_roster=my_roster))
+
+    # 3. Draft picks ledger audit
+    latest = _active_draft(sc, cfg.league_id)
+    league = sc.league(cfg.league_id) or {}
+    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
+    start = base + 1 if latest else base
+    seasons = [str(start + i) for i in range(2)]
+    rounds_n = int((league.get("settings") or {}).get("draft_rounds") or 4)
+    ranks = {v.roster_id: v.power_rank for v in valuations}
+    traded = sc.traded_picks(cfg.league_id)
+    ledger = pick_ledger(rosters, traded, book, ranks, seasons=seasons, rounds=rounds_n)
+    reports.append(run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded))
+
+    # 4. Values audit
+    top_assets = book.top(limit=20)
+    reports.append(run_qa("values", assets=top_assets, market="both"))
+
+    # 5. Cleanup audit
+    if my_roster:
+        settings = league.get("settings") or {}
+        audit = audit_roster(
+            my_roster, book, players_meta,
+            roster_positions=league.get("roster_positions") or [],
+            taxi_slots=int(settings.get("taxi_slots") or 0),
+            reserve_slots=int(settings.get("reserve_slots") or 0),
+            taxi_allow_vets=bool(settings.get("taxi_allow_vets")),
+            taxi_years=settings.get("taxi_years"),
+        )
+        reports.append(run_qa("cleanup", audit=audit))
+
+    # 6. Waivers audit
+    trending_adds = sc.trending(kind="add", limit=50)
+    targets = waiver_targets(trending_adds, book, rosters, players_meta, limit=20)
+    reports.append(run_qa("waivers", targets=targets, rosters=rosters))
+
+    # 7. Movers / Arbitrage audit
+    arb_movers = find_arbitrage_movers(rosters=rosters, book=book, min_value=1000, limit=20)
+    reports.append(run_qa("movers", movers=arb_movers, mode="arbitrage"))
+
+    if verbose:
+        for r in reports:
+            render_qa_footer(r, console, mode="verbose")
+    render_qa_full_report(reports, console)
 
 
 @app.command()

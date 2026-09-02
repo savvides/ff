@@ -408,6 +408,31 @@ flowchart TD
 
 ---
 
+#### `ff qa`
+Runs full-system diagnostic invariant audits across all league domains (setup, rosters, power rankings, future draft picks, market values, roster cleanup capacity, trending waivers, and market arbitrage).
+
+```mermaid
+flowchart TD
+    Start(["ff qa [--verbose]"]) --> LoadConfig["Load .ff/config.json"]
+    LoadConfig --> RunAudits["Run Domain Invariant Audits:\n• Setup configuration\n• Roster & Power math\n• Future picks ledger\n• Market values integrity\n• Roster cleanup capacity\n• Trending waivers\n• Arbitrage movers"]
+    RunAudits --> Scorecard["Render QA Health Scorecard:\n• Per-command status, checks passed/failed, latency\n• Overall audit summary badge"]
+    Scorecard --> Done(["Done"])
+```
+
+**Options:**
+- `-v, --verbose`: Show granular check-by-check inspection tables for every audited domain.
+
+---
+
+## Post-Command QA & Invariant System
+
+`ff` features a built-in automated QA validation engine that validates domain mathematical and logical invariants after every command run. Control telemetry output via the `FF_QA` environment variable:
+
+- `FF_QA=0` or unset - Silent mode (default; runs checks and warns on invariant issues).
+- `FF_QA=1` or `FF_QA=summary` - Prints a concise 1-line check verification footer (e.g. `✔ QA: 5 checks passed (0.4ms)`).
+- `FF_QA=verbose` - Renders a detailed Rich table listing every executed check, status, and diagnostic messages.
+- `FF_QA=strict` - Raises `QAInvariantError` and halts execution if any invariant fails.
+
 ## Development
 
 ```bash
