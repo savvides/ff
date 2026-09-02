@@ -129,9 +129,10 @@ flowchart TD
 ```
 
 **Options:**
+- `username`: Your Sleeper username (positional).
 - `--season Y`: Target season year (defaults to active/current season).
 - `--league-id ID`: Skip interactive selection and bind directly to a specific Sleeper league.
-- `-n, --league-index N`: Pick the Nth league non-interactively (0-indexed).
+- `-n, --league-index N`: Pick the Nth league non-interactively (0-indexed from the printed list).
 
 ---
 
@@ -186,6 +187,9 @@ flowchart TD
     Table --> Done(["Done"])
 ```
 
+**Options:**
+- Takes no options (ranks all rosters league-wide).
+
 ---
 
 #### `ff picks [team]`
@@ -205,9 +209,9 @@ flowchart TD
 ```
 
 **Options:**
-- `team`: Team name (omit to view full league grid).
+- `team`: Team name search (omit to view full league draft capital grid).
 - `--years N`: Number of future draft classes to show (default: 2).
-- `--rounds N`: Rookie rounds per draft (overrides league setting).
+- `--rounds N`: Rookie rounds per draft (overrides league setting auto-detection).
 
 ---
 
@@ -226,8 +230,8 @@ flowchart TD
 ```
 
 **Options:**
-- `-p, --position`: Filter by `QB`, `RB`, `WR`, or `TE`.
-- `-m, --market`: Market source: `fc` (FantasyCalc), `dealer` (Dynasty Dealer), or `both` (default: `both`).
+- `-p, --position POS`: Filter by `QB`, `RB`, `WR`, or `TE` (omit for overall).
+- `-m, --market MARKET`: Market source: `both` (default), `fc` (FantasyCalc), or `dealer` (Dynasty Dealer).
 - `--limit N`: How many assets to show (default: 40).
 
 ---
@@ -249,9 +253,9 @@ flowchart TD
 ```
 
 **Options:**
-- `--give`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
-- `--get`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
-- `-m, --market`: Valuation model: `both` (default), `fc`, or `dealer`.
+- `--give ASSETS`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
+- `--get ASSETS`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
+- `-m, --market MARKET`: Valuation model: `both` (default), `fc` (FantasyCalc), or `dealer` (Dynasty Dealer).
 
 ---
 
@@ -272,8 +276,8 @@ flowchart TD
 **Options:**
 - `--buy`: Show buy-low candidates (dynasty value > redraft value; or Dealer > FC for arbitrage).
 - `--sell`: Show sell-high candidates (redraft value > dynasty value; or FC > Dealer for arbitrage).
-- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and Dynasty Dealer.
-- `--min-value N`: Value floor filtering out deep stashes (default: 1000).
+- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and Dynasty Dealer across league rosters.
+- `--min-value N`: Floor on both values; filters out deep stashes (default: 1000).
 - `--limit N`: Max results to display (default: 20).
 
 ---
