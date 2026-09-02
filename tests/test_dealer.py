@@ -100,5 +100,7 @@ def test_dealer_client_custom_config():
 
 
 def test_dealer_export_in_values_package():
-    from ff.values import DynastyDealerClient as ExportedClient
+    from ff.values import DynastyDealerClient as ExportedClient, KtcClient as ExportedKtcClient
     assert ExportedClient is DynastyDealerClient
+    assert ExportedKtcClient is DynastyDealerClient
+

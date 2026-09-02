@@ -238,21 +238,10 @@ def test_unmapped_draft_picks_in_value_book():
 # =============================================================================
 
 
-def test_pick_tier_resolution_with_dual_market(fc_entries, ktc_entries):
-    """Canonical pick normalization matches tiered entries across FC and KTC."""
-    ktc_map = {}
-    for entry in ktc_entries:
-        raw_id = entry.get("player_id")
-        name = entry.get("name")
-        val = entry.get("value")
-        norm_name = normalize_pick(name) if name else None
-        norm_id = normalize_pick(raw_id) if raw_id else None
-        if norm_name:
-            ktc_map[norm_name] = val
-        if norm_id:
-            ktc_map[norm_id] = val
+def test_pick_tier_resolution_with_dual_market(fc_entries, dealer_map):
+    """Canonical pick normalization matches tiered entries across FC and secondary market."""
+    book = ValueBook([_asset_from_entry(e, secondary_map=dealer_map) for e in fc_entries])
 
-    book = ValueBook([_asset_from_entry(e, ktc_map=ktc_map) for e in fc_entries])
 
     # 2027 1st (Early) -> "2027 1 early"
     early_pick = book.resolve("2027 1st (Early)")

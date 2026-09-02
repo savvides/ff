@@ -18,7 +18,7 @@ lineup optimizer, waiver targets, injury tracking, and live draft board.
 - [Sleeper API](https://docs.sleeper.com/) — league settings, rosters, matchups, transactions, trending adds, injuries, and player news.
 - Sleeper projections (`api.sleeper.com`) — weekly projected stat lines (RotoWire), scored by your league's own rules for the lineup optimizer.
 - [FantasyCalc API](https://fantasycalc.com/) — dynasty values for players **and draft picks**, tagged with `sleeperId` so they join straight onto your roster.
-- [KeepTradeCut API](https://keeptradecut.com/) via [Dynasty Daddy](https://dynasty-daddy.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
+- [Dynasty Dealer API](https://www.dynastydealer.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
 - Local LLM Runners (`agy`, `gemini`, `claude`, `ollama`) — terminal AI agents executing deterministic Python tools for plain-English Q&A.
 
 ## Architecture
@@ -31,7 +31,7 @@ flowchart TD
         Sleeper["Sleeper API\n(League, Rosters, Picks, News, Trends)"]
         SleeperProj["Sleeper Projections API\n(Weekly Stat Lines)"]
         FantasyCalc["FantasyCalc API\n(Dynasty & Redraft Trade Values)"]
-        KTC["KeepTradeCut via Dynasty Daddy\n(Crowdsourced Secondary Market)"]
+        Dealer["Dynasty Dealer API\n(Secondary Market Values)"]
         LLM["Local LLM CLI\n(agy / gemini / claude / ollama)"]
     end
 
@@ -39,7 +39,7 @@ flowchart TD
         Http["core/http.py\n(Disk-cached & retrying JSON client)"]
         Config["core/config.py\n(.ff/config.json)"]
         SleeperClient["sleeper/client.py\n(Format detection & roster builder)"]
-        ValuesClient["values/client.py & ktc.py\n(ValueBook with ID/Name/Pick lookup)"]
+        ValuesClient["values/client.py & dealer.py\n(ValueBook with ID/Name/Pick lookup)"]
         ProjClient["projections/client.py\n(Raw weekly stat lines)"]
         LLMRunner["services/llm/\n(TerminalRunner & Tool Dispatcher)"]
     end
@@ -75,9 +75,10 @@ make install                 # venv + deps + pre-commit hook
 ./.venv/bin/ff setup <your-sleeper-username>
 ./.venv/bin/ff power
 ./.venv/bin/ff roster
-./.venv/bin/ff values -p WR --market ktc
+./.venv/bin/ff values -p WR --market dealer
 ./.venv/bin/ff lineup                 # optimal start/sit for the current week
 ./.venv/bin/ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st" --market both
+
 ./.venv/bin/ff movers --arbitrage
 ./.venv/bin/ff news --player "Christian McCaffrey"
 ./.venv/bin/ff cleanup
@@ -201,20 +202,20 @@ flowchart TD
 ### 3. Market Analysis & Trade Engine
 
 #### `ff values`
-Dynasty rankings calibrated to your league's exact settings, supporting dual-market views (FantasyCalc + KeepTradeCut) and positional filters.
+Dynasty rankings calibrated to your league's exact settings, supporting dual-market views (FantasyCalc + Dynasty Dealer) and positional filters.
 
 ```mermaid
 flowchart TD
-    Start(["ff values [-p POS] [--market both|fc|ktc]"]) --> Fetch["Fetch FantasyCalc values\nOptional: Fetch KTC secondary market"]
-    Fetch --> Merge["Merge KTC values onto Assets by sleeperId"]
+    Start(["ff values [-p POS] [--market both|fc|dealer]"]) --> Fetch["Fetch FantasyCalc values\nOptional: Fetch Dynasty Dealer secondary market"]
+    Fetch --> Merge["Merge Dynasty Dealer values onto Assets by sleeperId"]
     Merge --> Filter["Filter by position (QB/RB/WR/TE)\n& slice top N"]
-    Filter --> Table["Render Dynasty Rankings Table:\nRank | Player | Pos | PosRk | Team | Age | FC | KTC | 30d"]
+    Filter --> Table["Render Dynasty Rankings Table:\nRank | Player | Pos | PosRk | Team | Age | FC | Dealer | 30d"]
     Table --> Done(["Done"])
 ```
 
 **Options:**
 - `-p, --position`: Filter by `QB`, `RB`, `WR`, or `TE`.
-- `-m, --market`: Market source: `fc` (FantasyCalc), `ktc` (KeepTradeCut), or `both` (default: `both`).
+- `-m, --market`: Market source: `fc` (FantasyCalc), `dealer` (Dynasty Dealer), or `both` (default: `both`).
 - `--limit N`: How many assets to show (default: 40).
 
 ---
@@ -227,29 +228,29 @@ flowchart TD
     Start(["ff trade --give 'A, B' --get 'C, D'"]) --> Parse["Tokenize comma-separated strings\n(Players and draft picks)"]
     Parse --> Resolve["ValueBook.resolve()\n• Exact sleeperId match\n• Fuzzy name match (with did-you-mean)\n• Pick normalization (e.g. '2027 1st', '2026 early 2nd')"]
     Resolve --> Analyze["analysis.analyze_trade()\n• Sum Side A (Get) & Side B (Give)\n• Compute net value delta & % difference\n• Check fairness (<= 5% difference = Fair)"]
-    Analyze --> DualMarket{"--market both\n& KTC available?"}
-    DualMarket -- "Yes" --> Arb["Compute KTC deltas & detect arbitrage:\n• Consensus Win / Loss\n• FC Arbitrage Win / Loss\n• KTC Arbitrage Win / Loss"]
+    Analyze --> DualMarket{"--market both\n& Dealer available?"}
+    DualMarket -- "Yes" --> Arb["Compute Dealer deltas & detect arbitrage:\n• Consensus Win / Loss\n• FC Arbitrage Win / Loss\n• Dealer Arbitrage Win / Loss"]
     DualMarket -- "No" --> SingleVerdict["Compute single-market verdict"]
     Arb & SingleVerdict --> Swings["analysis.position_deltas()\nCalculate net value gain/loss per position"]
-    Swings --> Output["Render:\n• Asset comparison table (FC & KTC)\n• Verdict banner + Arbitrage label\n• Positional swing summary"]
+    Swings --> Output["Render:\n• Asset comparison table (FC & Dealer)\n• Verdict banner + Arbitrage label\n• Positional swing summary"]
     Output --> Done(["Done"])
 ```
 
 **Options:**
 - `--give`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
 - `--get`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
-- `-m, --market`: Valuation model: `both` (default), `fc`, or `ktc`.
+- `-m, --market`: Valuation model: `both` (default), `fc`, or `dealer`.
 
 ---
 
 #### `ff movers`
-Identifies high-leverage trade targets: buy-low / sell-high candidates (dynasty vs win-now redraft value gaps) and cross-market arbitrage opportunities (FantasyCalc vs KeepTradeCut discrepancies).
+Identifies high-leverage trade targets: buy-low / sell-high candidates (dynasty vs win-now redraft value gaps) and cross-market arbitrage opportunities (FantasyCalc vs Dynasty Dealer discrepancies).
 
 ```mermaid
 flowchart TD
     Start(["ff movers [--buy] [--sell] [--arbitrage]"]) --> CheckMode{"Mode"}
-    CheckMode -- "--arbitrage" --> ArbEngine["analysis.find_arbitrage_movers()\nCompare FC trade values vs KTC hype\nacross all rostered players in league"]
-    ArbEngine --> ArbTable["Render Arbitrage Table:\nPlayer | Owner | FC | KTC | Diff | Gap% | Market Bias"]
+    CheckMode -- "--arbitrage" --> ArbEngine["analysis.find_arbitrage_movers()\nCompare FC trade values vs Dealer market values\nacross all rostered players in league"]
+    ArbEngine --> ArbTable["Render Arbitrage Table:\nPlayer | Owner | FC | Dealer | Diff | Gap% | Market Bias"]
     
     CheckMode -- "Redraft Gap" --> GapEngine["analysis.top_movers()\nCompare Dynasty Value vs Redraft Value\nApply --min-value floor"]
     GapEngine --> GapTable["Render Movers Table:\n• Buy-Low: Dynasty > Redraft (for Contenders)\n• Sell-High: Redraft > Dynasty (for Rebuilders)"]
@@ -257,9 +258,9 @@ flowchart TD
 ```
 
 **Options:**
-- `--buy`: Show buy-low candidates (dynasty value > redraft value; or KTC > FC for arbitrage).
-- `--sell`: Show sell-high candidates (redraft value > dynasty value; or FC > KTC for arbitrage).
-- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and KeepTradeCut.
+- `--buy`: Show buy-low candidates (dynasty value > redraft value; or Dealer > FC for arbitrage).
+- `--sell`: Show sell-high candidates (redraft value > dynasty value; or FC > Dealer for arbitrage).
+- `-a, --arbitrage`: Scan for pricing inefficiencies between FantasyCalc and Dynasty Dealer.
 - `--min-value N`: Value floor filtering out deep stashes (default: 1000).
 - `--limit N`: Max results to display (default: 20).
 

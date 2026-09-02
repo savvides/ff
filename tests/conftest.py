@@ -98,18 +98,9 @@ def dealer_map(dealer_entries):
 
 
 @pytest.fixture
-def ktc_entries():
-    return load("ktc_values")
-
-
-@pytest.fixture
-def ktc_map(dealer_map):
-    return dealer_map
-
-
-@pytest.fixture
 def multi_market_book(fc_entries, dealer_map):
     return ValueBook([_asset_from_entry(e, secondary_map=dealer_map) for e in fc_entries])
+
 
 
 @pytest.fixture
