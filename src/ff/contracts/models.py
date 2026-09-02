@@ -6,6 +6,7 @@ players and draft picks, because in dynasty a trade is a basket of both.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -493,3 +494,38 @@ class DraftFit(BaseModel):
     horizon_tilt: float = 0.0
     standing_tilt: float = 0.0
     why: str = ""
+
+
+class NewsItem(BaseModel):
+    """One headline from Sleeper's per-player news feed.
+
+    The feed is undocumented and its `metadata` block varies by source (a real
+    10-item sample carried `url` on 6 and `analysis` on 7), so every field but
+    the title/description pair is optional and parsing never raises.
+    """
+
+    published: Optional[int] = None  # epoch MILLISECONDS, as Sleeper sends it
+    source: str = "?"
+    title: str = "(untitled)"
+    description: str = ""
+    analysis: Optional[str] = None
+    url: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "NewsItem":
+        meta = payload.get("metadata") or {}
+        return cls(
+            published=payload.get("published"),
+            source=payload.get("source") or "?",
+            title=(meta.get("title") or "").strip() or "(untitled)",
+            description=(meta.get("description") or "").strip(),
+            analysis=(meta.get("analysis") or "").strip() or None,
+            url=(meta.get("url") or "").strip() or None,
+        )
+
+    @property
+    def published_date(self) -> str:
+        """YYYY-MM-DD, or '-' when the feed omitted a timestamp."""
+        if not self.published:
+            return "-"
+        return datetime.fromtimestamp(self.published / 1000).strftime("%Y-%m-%d")
