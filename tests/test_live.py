@@ -108,14 +108,16 @@ def test_sleeper_projections_live_have_stat_lines():
     assert allen and (allen.get("pass_yd") or allen.get("pts_half_ppr"))
 
 
-def test_dealer_live_maps_sleeper_ids():
-    # Dual-market merge depends on Dynasty Dealer returning sleeper ids (or pick
-    # labels) the dealer client understands. If the payload shape drifts, every
-    # `--market both` number silently goes missing.
-    from ff.values.dealer import DynastyDealerClient
-    values = DynastyDealerClient().fetch_values()
+def test_ktc_live_maps_values():
+    # Dual-market merge depends on KeepTradeCut returning values for players and picks.
+    # If the page structure drifts, secondary market values silently go missing.
+    from ff.values.ktc import KtcClient
+    values = KtcClient().fetch_values(Format(superflex=True))
     if not values:
-        pytest.skip("Dynasty Dealer returned no values (offline or shape change)")
-    assert any(k.isdigit() for k in values), "no sleeper-id keys in Dealer map"
+        pytest.skip("KTC returned no values (offline or shape change)")
+    assert any(" " in k for k in values), "no player/pick name keys in KTC map"
     assert any(v > 0 for v in values.values())
+    assert "jahmyr gibbs" in values
+    assert values["jahmyr gibbs"] > 0
+    assert any(k.startswith("202") for k in values)
 

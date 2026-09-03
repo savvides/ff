@@ -197,9 +197,9 @@ def test_cli_trade_dual_market_output(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st"])
     assert result.exit_code == 0, result.output
-    # Must have both FC and Dealer columns
+    # Must have both FC and KTC columns
     assert "FC" in result.output
-    assert "Dealer" in result.output
+    assert ("KTC" in result.output or "Dealer" in result.output)
     # Must display dual-market verdict banner and arbitrage classification
     assert "Consensus Win" in result.output
 
@@ -209,17 +209,17 @@ def test_cli_trade_market_flag(fake_clients, league):
     # --market fc should only show single market
     res_fc = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "fc"])
     assert res_fc.exit_code == 0, res_fc.output
-    assert "Dealer" not in res_fc.output
+    assert "Dealer" not in res_fc.output and "KTC" not in res_fc.output
 
-    # --market dealer should show Dealer evaluation
+    # --market dealer should show secondary evaluation
     res_dealer = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "dealer"])
     assert res_dealer.exit_code == 0, res_dealer.output
-    assert "Dealer" in res_dealer.output
+    assert ("KTC" in res_dealer.output or "Dealer" in res_dealer.output)
 
-    # --market ktc should show Dealer evaluation as alias
+    # --market ktc should show secondary evaluation
     res_ktc = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "ktc"])
     assert res_ktc.exit_code == 0, res_ktc.output
-    assert "Dealer" in res_ktc.output
+    assert ("KTC" in res_ktc.output or "Dealer" in res_ktc.output)
 
     # Invalid market
     res_inv = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--market", "invalid"])
@@ -229,26 +229,26 @@ def test_cli_trade_market_flag(fake_clients, league):
 
 def test_cli_values_market_flag(fake_clients, league):
     _write_config(league)
-    # Default (both) shows FC and Dealer columns
+    # Default (both) shows FC and KTC columns
     res_both = runner.invoke(app, ["values", "-p", "WR"])
     assert res_both.exit_code == 0, res_both.output
     assert "FC" in res_both.output
-    assert "Dealer" in res_both.output
+    assert ("KTC" in res_both.output or "Dealer" in res_both.output)
 
     # --market fc
     res_fc = runner.invoke(app, ["values", "-p", "WR", "--market", "fc"])
     assert res_fc.exit_code == 0, res_fc.output
-    assert "Dealer" not in res_fc.output
+    assert "Dealer" not in res_fc.output and "KTC" not in res_fc.output
 
     # --market dealer
     res_dealer = runner.invoke(app, ["values", "-p", "WR", "--market", "dealer"])
     assert res_dealer.exit_code == 0, res_dealer.output
-    assert "Dealer" in res_dealer.output
+    assert ("KTC" in res_dealer.output or "Dealer" in res_dealer.output)
 
     # --market ktc (alias)
     res_ktc = runner.invoke(app, ["values", "-p", "WR", "--market", "ktc"])
     assert res_ktc.exit_code == 0, res_ktc.output
-    assert "Dealer" in res_ktc.output
+    assert ("KTC" in res_ktc.output or "Dealer" in res_ktc.output)
 
     # Invalid market
     res_inv = runner.invoke(app, ["values", "--market", "bad"])
@@ -331,7 +331,7 @@ def test_cli_trade_dealer_positional_swings(fake_clients, league):
     res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "dealer"])
     assert res.exit_code == 0, res.output
     assert "positional swing" in res.output
-    assert "Dealer" in res.output
+    assert ("KTC" in res.output or "Dealer" in res.output)
 
 
 def test_cli_lineup_handles_unsupported_slots(fake_clients, league, monkeypatch):

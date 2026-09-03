@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ff.values import ValueBook
-from ff.values.client import _asset_from_entry, normalize_pick
+from ff.values.client import _asset_from_entry, normalize_name, normalize_pick
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -64,23 +64,29 @@ def traded_picks():
 
 
 @pytest.fixture
-def dealer_entries():
-    return load("dealer_values")
+def ktc_entries():
+    return load("ktc_values")
 
 
 @pytest.fixture
-def dealer_map(dealer_entries):
+def dealer_entries(ktc_entries):
+    return ktc_entries
+
+
+@pytest.fixture
+def ktc_map(ktc_entries):
     m = {}
-    raw_players = dealer_entries.get("players", []) if isinstance(dealer_entries, dict) else dealer_entries
+    raw_players = ktc_entries.get("players", []) if isinstance(ktc_entries, dict) else ktc_entries
     for entry in raw_players:
         if not isinstance(entry, dict):
             continue
         sleeper_id = entry.get("sleeper_id")
-        name = entry.get("name") or ""
-        is_pick = entry.get("position") == "PICK" or str(sleeper_id or "").startswith("pick_")
-        raw_val = entry.get("current_value")
+        name = entry.get("playerName") or entry.get("name") or ""
+        is_pick = entry.get("position") in ("PICK", "RDP") or str(sleeper_id or "").startswith("pick_")
+        val_data = entry.get("superflexValues")
+        raw_val = val_data.get("value") if isinstance(val_data, dict) else None
         if raw_val is None:
-            raw_val = entry.get("base_value", 0)
+            raw_val = entry.get("current_value") or entry.get("value") or entry.get("base_value", 0)
         try:
             val = int(round(float(raw_val))) if raw_val is not None else 0
         except (ValueError, TypeError):
@@ -92,14 +98,23 @@ def dealer_map(dealer_entries):
                 m[norm_pk] = val
             if sleeper_id:
                 m[str(sleeper_id)] = val
-        elif sleeper_id is not None:
-            m[str(sleeper_id)] = val
+        else:
+            norm = normalize_name(str(name)) if name else None
+            if norm:
+                m[norm] = val
+            if sleeper_id is not None:
+                m[str(sleeper_id)] = val
     return m
 
 
 @pytest.fixture
-def multi_market_book(fc_entries, dealer_map):
-    return ValueBook([_asset_from_entry(e, secondary_map=dealer_map) for e in fc_entries])
+def dealer_map(ktc_map):
+    return ktc_map
+
+
+@pytest.fixture
+def multi_market_book(fc_entries, ktc_map):
+    return ValueBook([_asset_from_entry(e, secondary_map=ktc_map) for e in fc_entries])
 
 
 
