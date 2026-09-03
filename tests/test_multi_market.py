@@ -29,7 +29,7 @@ from ff.cli import app
 from ff.contracts import Asset, Format, FuturePick, Roster, TradeEvaluation, TradeSide
 from ff.core.config import Config, save_config
 from ff.sleeper import build_rosters, detect_format
-from ff.values import ValueBook, ValuesClient
+from ff.values import KtcClient, ValueBook, ValuesClient
 from ff.values.client import _asset_from_entry, normalize_pick
 
 
@@ -108,7 +108,7 @@ def test_offline_degradation_ktc_network_error():
         requests.exceptions.ReadTimeout("Read timed out"),
     ]:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
-             patch("ff.values.dealer.get_json", side_effect=exception):
+             patch("ff.values.ktc.KtcClient.fetch_values", side_effect=exception):
             client = ValuesClient()
             book = client.fetch(Format(), include_ktc=True)
 
@@ -132,17 +132,14 @@ def test_offline_degradation_ktc_malformed_payloads():
 
     malformed_responses = [
         "Internal Server Error (raw text)",
-        None,
-        False,
-        12345,
-        {"status": "error", "message": "Rate limit exceeded"},
-        {"players": [{"corrupt_entry": True}]},  # Missing ID and name
-        {"players": [{"sleeper_id": "7564", "current_value": "invalid_number"}]},  # Non-integer value
+        "",
+        "corrupt payload",
+        "var playersArray = not_valid_json;",
     ]
 
     for bad_resp in malformed_responses:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
-             patch("ff.values.dealer.get_json", return_value=bad_resp):
+             patch.object(KtcClient, "_fetch_text", return_value=bad_resp):
             client = ValuesClient()
             book = client.fetch(Format(), include_ktc=True)
             chase = book.resolve("Ja'Marr Chase")
@@ -157,10 +154,10 @@ def test_include_ktc_false_skips_secondary_market():
         {"player": {"sleeperId": "7564", "name": "Ja'Marr Chase", "position": "WR"}, "value": 9500},
     ]
     with patch("ff.values.client.get_json", return_value=fc_entries), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values") as mock_dealer_fetch:
+         patch("ff.values.ktc.KtcClient.fetch_values") as mock_ktc_fetch:
         client = ValuesClient()
         book = client.fetch(Format(), include_ktc=False)
-        mock_dealer_fetch.assert_not_called()
+        mock_ktc_fetch.assert_not_called()
         chase = book.resolve("Ja'Marr Chase")
         assert chase is not None
         assert chase.value == 9500

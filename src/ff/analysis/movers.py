@@ -114,7 +114,7 @@ def find_arbitrage_movers(
             diff_pct=diff_pct,
             roster_id=roster_id,
             team_name=team_name,
-            market_bias="Dealer" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
+            market_bias="KTC" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
         )
         scored.append(mover)
 

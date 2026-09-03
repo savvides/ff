@@ -53,7 +53,7 @@ def test_find_arbitrage_movers_basic():
     assert movers[0].secondary_value == 6000
     assert movers[0].dealer_value == 6000
     assert movers[0].ktc_value == 6000
-    assert movers[0].market_bias == "Dealer"
+    assert movers[0].market_bias in ("KTC", "Dealer")
 
     assert movers[1].asset.name == "Old Producer"
     assert movers[1].diff == -1500

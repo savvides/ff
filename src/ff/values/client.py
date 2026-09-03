@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from ff.contracts import Asset, Format
 from ff.core.http import get_json
-from ff.values.dealer import DynastyDealerClient
+from ff.values.ktc import KtcClient
 from ff.values.normalize import normalize_name, normalize_pick
 
 
@@ -48,8 +48,11 @@ def _asset_from_entry(
                 sec_val = sec_map[ident]
         else:
             sleeper_id = p.get("sleeperId")
+            norm_name = normalize_name(name)
             if sleeper_id is not None and str(sleeper_id) in sec_map:
                 sec_val = sec_map[str(sleeper_id)]
+            elif norm_name in sec_map:
+                sec_val = sec_map[norm_name]
             elif ident in sec_map:
                 sec_val = sec_map[ident]
 
@@ -173,19 +176,19 @@ class ValuesClient:
     def __init__(
         self,
         url: str = VALUES_URL,
-        dealer_client: Optional[DynastyDealerClient] = None,
-        ktc_client: Optional[DynastyDealerClient] = None,
+        ktc_client: Optional[KtcClient] = None,
+        dealer_client: Optional[KtcClient] = None,
     ) -> None:
         self.url = url
-        self.dealer_client = dealer_client or ktc_client or DynastyDealerClient()
+        self.ktc_client = ktc_client or dealer_client or KtcClient()
 
     @property
-    def ktc_client(self) -> DynastyDealerClient:
-        return self.dealer_client
+    def dealer_client(self) -> KtcClient:
+        return self.ktc_client
 
-    @ktc_client.setter
-    def ktc_client(self, client: DynastyDealerClient) -> None:
-        self.dealer_client = client
+    @dealer_client.setter
+    def dealer_client(self, client: KtcClient) -> None:
+        self.ktc_client = client
 
     def fetch(
         self,
@@ -198,7 +201,7 @@ class ValuesClient:
         should_include = include_secondary and include_ktc
         if should_include:
             try:
-                secondary_map = self.dealer_client.fetch_values(fmt) or {}
+                secondary_map = self.ktc_client.fetch_values(fmt) or {}
             except Exception:
                 secondary_map = {}
         return ValueBook([_asset_from_entry(e, secondary_map=secondary_map) for e in (data if isinstance(data, list) else [])])

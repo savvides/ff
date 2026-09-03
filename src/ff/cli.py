@@ -459,12 +459,12 @@ def values(
                                             help="QB/RB/WR/TE; omit for overall."),
     limit: int = typer.Option(40, help="How many to list."),
     market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, dealer, or both (default: both)."),
+                               help="Market: fc, ktc, or both (default: both)."),
 ) -> None:
     """Dynasty rankings for your league format."""
     market = market.lower()
     if market not in ("fc", "dealer", "ktc", "both"):
-        _fail("--market must be fc, dealer, or both.")
+        _fail("--market must be fc, ktc, or both.")
 
     cfg, sc = _load()
     include_secondary = market != "fc"
@@ -483,12 +483,12 @@ def values(
 
     title = f"dynasty rankings - {cfg.format.label()}" + (f" - {position.upper()}" if position else "")
     if market in ("dealer", "ktc"):
-        title += " - Dynasty Dealer"
+        title += " - KeepTradeCut"
 
     t = Table(title=title)
     if dual_market:
-        right = ("FC", "Dealer", "30d", "age", "#", "posrk")
-        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "Dealer", "30d"):
+        right = ("FC", "KTC", "30d", "age", "#", "posrk")
+        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "KTC", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
@@ -498,8 +498,8 @@ def values(
                       sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
     elif market in ("dealer", "ktc"):
-        right = ("Dealer", "30d", "age", "#", "posrk")
-        for c in ("#", "player", "pos", "posrk", "team", "age", "Dealer", "30d"):
+        right = ("KTC", "30d", "age", "#", "posrk")
+        for c in ("#", "player", "pos", "posrk", "team", "age", "KTC", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
@@ -529,12 +529,12 @@ def trade(
     give: str = typer.Option(..., "--give", help="What you send, comma-separated."),
     get: str = typer.Option(..., "--get", help="What you receive, comma-separated."),
     market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, dealer, or both (default: both)."),
+                               help="Market: fc, ktc, or both (default: both)."),
 ) -> None:
     """Analyze a trade. Players and picks both count (e.g. --get '2027 1st')."""
     market = market.lower()
     if market not in ("fc", "dealer", "ktc", "both"):
-        _fail("--market must be fc, dealer, or both.")
+        _fail("--market must be fc, ktc, or both.")
 
     cfg, sc = _load()
     include_secondary = market != "fc"
@@ -568,8 +568,8 @@ def trade(
 
     t = Table(title="trade")
     if dual_market:
-        for c in ("side", "assets", "FC", "Dealer"):
-            t.add_column(c, justify="right" if c in ("FC", "Dealer") else "left")
+        for c in ("side", "assets", "FC", "KTC"):
+            t.add_column(c, justify="right" if c in ("FC", "KTC") else "left")
         t.add_row("[green]You get[/]",
                   ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.value_a:,}[/]",
@@ -579,8 +579,8 @@ def trade(
                   f"[bold]{evaluation.value_b:,}[/]",
                   f"[bold]{evaluation.secondary_value_b:,}[/]")
     elif market in ("dealer", "ktc") and has_secondary:
-        for c in ("side", "assets", "Dealer"):
-            t.add_column(c, justify="right" if c == "Dealer" else "left")
+        for c in ("side", "assets", "KTC"):
+            t.add_column(c, justify="right" if c == "KTC" else "left")
         t.add_row("[green]You get[/]",
                   ", ".join(_fmt_trade_asset(a, a.secondary_value) for a in evaluation.side_a.assets) or "-",
                   f"[bold]{evaluation.secondary_value_a:,}[/]")
@@ -620,7 +620,7 @@ def trade(
         arb_label = evaluation.secondary_arbitrage_label()
         banner_lines = [
             f"FC:     net {_signed(net_fc)} value to you   |   {verdict_fc}",
-            f"Dealer: net {_signed(sec_net)} value to you   |   {verdict_sec}",
+            f"KTC:    net {_signed(sec_net)} value to you   |   {verdict_sec}",
         ]
         if arb_label:
             banner_lines.append(f"arbitrage: [bold cyan]{arb_label}[/]")
@@ -639,7 +639,7 @@ def trade(
         else:
             verdict = f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
         console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {verdict}", title="verdict (Dealer)"))
+            f"net {_signed(net)} value to you   |   {verdict}", title="verdict (KTC)"))
     else:
         net = evaluation.delta  # >0 = in your favor
         pct = evaluation.pct_diff
@@ -875,7 +875,7 @@ def movers(
     min_value: int = typer.Option(1000, "--min-value",
                                   help="Floor on both values; filters deep stashes."),
     arbitrage: bool = typer.Option(False, "--arbitrage", "-a",
-                                   help="Scan for market discrepancies between FantasyCalc and Dynasty Dealer."),
+                                   help="Scan for market discrepancies between FantasyCalc and KeepTradeCut."),
 ) -> None:
     """Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage."""
     cfg, sc = _load()
@@ -885,7 +885,7 @@ def movers(
         rosters = _league_rosters(cfg, sc)
         market_filter = None
         if buy and not sell:
-            market_filter = "dealer"
+            market_filter = "ktc"
         elif sell and not buy:
             market_filter = "fc"
 
@@ -898,20 +898,20 @@ def movers(
         )
 
         if market_filter in ("dealer", "ktc"):
-            kind = "Dealer > FC (buy on FC / hype)"
+            kind = "KTC > FC (buy on FC / hype)"
         elif market_filter == "fc":
-            kind = "FC > Dealer (value veterans / sell on Dealer)"
+            kind = "FC > KTC (value veterans / sell on KTC)"
         else:
-            kind = "market discrepancies (FC vs Dealer)"
+            kind = "market discrepancies (FC vs KTC)"
 
         t = Table(title=f"arbitrage movers - {kind} - {cfg.format.label()}")
-        right = ("FC", "Dealer", "diff", "gap%", "age")
-        for c in ("player", "pos", "owner", "FC", "Dealer", "diff", "gap%", "bias"):
+        right = ("FC", "KTC", "diff", "gap%", "age")
+        for c in ("player", "pos", "owner", "FC", "KTC", "diff", "gap%", "bias"):
             t.add_column(c, justify="right" if c in right else "left")
         for m in arb_movers:
             a = m.asset
             owner = m.team_name or "-"
-            bias_color = "[cyan]Dealer[/]" if m.market_bias in ("Dealer", "KTC") else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
+            bias_color = "[cyan]KTC[/]" if m.market_bias in ("Dealer", "KTC") else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
             t.add_row(
                 a.name,
                 a.position or "-",
@@ -926,7 +926,7 @@ def movers(
         if not arb_movers:
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")
         else:
-            console.print("[dim]diff = Dealer - FC. Bias indicates which market prices the player higher.[/]")
+            console.print("[dim]diff = KTC - FC. Bias indicates which market prices the player higher.[/]")
         qa_rep = run_qa("movers", movers=arb_movers, mode="arbitrage")
         render_qa_footer(qa_rep, console)
         return

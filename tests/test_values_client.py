@@ -12,7 +12,7 @@ def test_values_client_merges_secondary_values():
     dealer_map = {"123": 1800}
 
     with patch("ff.values.client.get_json", return_value=fc_entry), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values", return_value=dealer_map):
+         patch("ff.values.ktc.KtcClient.fetch_values", return_value=dealer_map):
         client = ValuesClient()
         book = client.fetch(Format(), include_secondary=True)
         asset = book.resolve("Test Player")
@@ -36,7 +36,7 @@ def test_values_client_merges_secondary_picks():
     }
 
     with patch("ff.values.client.get_json", return_value=fc_entries), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values", return_value=dealer_map):
+         patch("ff.values.ktc.KtcClient.fetch_values", return_value=dealer_map):
         client = ValuesClient()
         book = client.fetch(Format(), include_secondary=True)
 
@@ -67,7 +67,7 @@ def test_values_client_include_secondary_false():
     dealer_map = {"123": 1800}
 
     with patch("ff.values.client.get_json", return_value=fc_entry), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values", return_value=dealer_map) as mock_dealer:
+         patch("ff.values.ktc.KtcClient.fetch_values", return_value=dealer_map) as mock_dealer:
         client = ValuesClient()
         book = client.fetch(Format(), include_secondary=False)
         mock_dealer.assert_not_called()
@@ -81,7 +81,7 @@ def test_values_client_dealer_offline_fallback():
     fc_entry = [{"player": {"sleeperId": "123", "name": "Test Player", "position": "WR"}, "value": 1500}]
 
     with patch("ff.values.client.get_json", return_value=fc_entry), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values", side_effect=requests.RequestException("Dealer offline")):
+         patch("ff.values.ktc.KtcClient.fetch_values", side_effect=requests.RequestException("Dealer offline")):
         client = ValuesClient()
         book = client.fetch(Format(), include_secondary=True)
         asset = book.resolve("Test Player")
@@ -95,7 +95,7 @@ def test_values_client_unmapped_dealer_asset():
     dealer_map = {"123": 1800}
 
     with patch("ff.values.client.get_json", return_value=fc_entry), \
-         patch("ff.values.dealer.DynastyDealerClient.fetch_values", return_value=dealer_map):
+         patch("ff.values.ktc.KtcClient.fetch_values", return_value=dealer_map):
         client = ValuesClient()
         book = client.fetch(Format(), include_secondary=True)
         asset = book.resolve("Deep Stash")

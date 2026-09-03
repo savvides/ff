@@ -1,0 +1,262 @@
+[
+  {
+    "playerName": "Ja'Marr Chase",
+    "position": "WR",
+    "team": "CIN",
+    "playerID": 1001,
+    "sleeper_id": "7564",
+    "superflexValues": {
+      "value": 9600,
+      "rank": 1
+    },
+    "oneQBValues": {
+      "value": 9500,
+      "rank": 1
+    }
+  },
+  {
+    "playerName": "Jahmyr Gibbs",
+    "position": "RB",
+    "team": "DET",
+    "playerID": 1415,
+    "sleeper_id": "9221",
+    "superflexValues": {
+      "value": 8400,
+      "rank": 2
+    },
+    "oneQBValues": {
+      "value": 8000,
+      "rank": 2
+    }
+  },
+  {
+    "playerName": "Josh Allen",
+    "position": "QB",
+    "team": "BUF",
+    "playerID": 1002,
+    "sleeper_id": "4984",
+    "superflexValues": {
+      "value": 7200,
+      "rank": 5
+    },
+    "oneQBValues": {
+      "value": 6500,
+      "rank": 5
+    }
+  },
+  {
+    "playerName": "Bijan Robinson",
+    "position": "RB",
+    "team": "ATL",
+    "playerID": 1003,
+    "sleeper_id": "8138",
+    "superflexValues": {
+      "value": 8900,
+      "rank": 3
+    },
+    "oneQBValues": {
+      "value": 9000,
+      "rank": 3
+    }
+  },
+  {
+    "playerName": "Bijan Robinson (Alias)",
+    "position": "RB",
+    "team": "ATL",
+    "playerID": 1004,
+    "sleeper_id": "9509",
+    "superflexValues": {
+      "value": 9750,
+      "rank": 4
+    },
+    "oneQBValues": {
+      "value": 9800,
+      "rank": 4
+    }
+  },
+  {
+    "playerName": "Rome Odunze",
+    "position": "WR",
+    "team": "CHI",
+    "playerID": 1005,
+    "sleeper_id": "5555",
+    "superflexValues": {
+      "value": 4800,
+      "rank": 20
+    },
+    "oneQBValues": {
+      "value": 4500,
+      "rank": 20
+    }
+  },
+  {
+    "playerName": "Brock Bowers",
+    "position": "TE",
+    "team": "LV",
+    "playerID": 1006,
+    "sleeper_id": "6666",
+    "superflexValues": {
+      "value": 6200,
+      "rank": 10
+    },
+    "oneQBValues": {
+      "value": 6000,
+      "rank": 10
+    }
+  },
+  {
+    "playerName": "Christian McCaffrey",
+    "position": "RB",
+    "team": "SF",
+    "playerID": 1007,
+    "sleeper_id": "4034",
+    "superflexValues": {
+      "value": 6500,
+      "rank": 15
+    },
+    "oneQBValues": {
+      "value": 6500,
+      "rank": 15
+    }
+  },
+  {
+    "playerName": "2026 Pick 1.05",
+    "position": "RDP",
+    "playerID": 2001,
+    "sleeper_id": "pick_2026_1_05",
+    "superflexValues": {
+      "value": 3600,
+      "rank": 25
+    },
+    "oneQBValues": {
+      "value": 3500,
+      "rank": 25
+    }
+  },
+  {
+    "playerName": "2026 1st",
+    "position": "RDP",
+    "playerID": 2002,
+    "sleeper_id": "pick_2026_1",
+    "superflexValues": {
+      "value": 4100,
+      "rank": 18
+    },
+    "oneQBValues": {
+      "value": 4000,
+      "rank": 18
+    }
+  },
+  {
+    "playerName": "2027 1st",
+    "position": "RDP",
+    "playerID": 2003,
+    "sleeper_id": "pick_2027_1",
+    "superflexValues": {
+      "value": 3200,
+      "rank": 30
+    },
+    "oneQBValues": {
+      "value": 3000,
+      "rank": 30
+    }
+  },
+  {
+    "playerName": "2026 2nd",
+    "position": "RDP",
+    "playerID": 2004,
+    "sleeper_id": "pick_2026_2",
+    "superflexValues": {
+      "value": 1600,
+      "rank": 60
+    },
+    "oneQBValues": {
+      "value": 1500,
+      "rank": 60
+    }
+  },
+  {
+    "playerName": "2027 Early 1st",
+    "position": "RDP",
+    "playerID": 2005,
+    "sleeper_id": "pick_2027_1_early",
+    "superflexValues": {
+      "value": 4500,
+      "rank": 22
+    },
+    "oneQBValues": {
+      "value": 4200,
+      "rank": 22
+    }
+  },
+  {
+    "playerName": "2026 Round 1 Early",
+    "position": "RDP",
+    "playerID": 2006,
+    "sleeper_id": "pick_2026_1_early",
+    "superflexValues": {
+      "value": 6342,
+      "rank": 12
+    },
+    "oneQBValues": {
+      "value": 6105,
+      "rank": 12
+    }
+  },
+  {
+    "playerName": "2027 Round 1 Mid",
+    "position": "RDP",
+    "playerID": 2007,
+    "sleeper_id": "pick_2027_1_mid",
+    "superflexValues": {
+      "value": 3300,
+      "rank": 28
+    },
+    "oneQBValues": {
+      "value": 3100,
+      "rank": 28
+    }
+  },
+  {
+    "playerName": "2027 Late 1st",
+    "position": "RDP",
+    "playerID": 2008,
+    "sleeper_id": "pick_2027_1_late",
+    "superflexValues": {
+      "value": 2500,
+      "rank": 40
+    },
+    "oneQBValues": {
+      "value": 2400,
+      "rank": 40
+    }
+  },
+  {
+    "playerName": "2027 2nd",
+    "position": "RDP",
+    "playerID": 2009,
+    "sleeper_id": "pick_2027_2",
+    "superflexValues": {
+      "value": 1450,
+      "rank": 65
+    },
+    "oneQBValues": {
+      "value": 1400,
+      "rank": 65
+    }
+  },
+  {
+    "playerName": "2028 1st",
+    "position": "RDP",
+    "playerID": 2010,
+    "sleeper_id": "pick_2028_1",
+    "superflexValues": {
+      "value": 2300,
+      "rank": 45
+    },
+    "oneQBValues": {
+      "value": 2200,
+      "rank": 45
+    }
+  }
+]
