@@ -143,6 +143,10 @@ class KtcClient:
                 norm_pk = normalize_pick(name) if name else None
                 if norm_pk:
                     values[norm_pk] = val
+                    if norm_pk.endswith(" mid"):
+                        base_pk = norm_pk[:-4].strip()
+                        if base_pk not in values:
+                            values[base_pk] = val
                 if sleeper_id:
                     values[str(sleeper_id)] = val
             else:

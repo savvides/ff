@@ -81,6 +81,9 @@ class DynastyDealerClient(KtcClient):
                 norm_pk = normalize_pick(str(name)) if name else None
                 if norm_pk:
                     values[norm_pk] = val
+                    if norm_pk.endswith(" mid"):
+                        base_pk = norm_pk[:-4].strip()
+                        values.setdefault(base_pk, val)
                 if sleeper_id:
                     values[str(sleeper_id)] = val
             else:

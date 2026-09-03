@@ -81,6 +81,7 @@ def test_ktc_client_fetch_values_html_superflex():
     # Pick normalization
     assert values["2026 1 early"] == 6342
     assert values["2027 1 mid"] == 3300
+    assert values["2027 1"] == 3300
 
     # Nickname alias (Kenneth -> Kenny)
     assert values["kenneth gainwell"] == 3000
