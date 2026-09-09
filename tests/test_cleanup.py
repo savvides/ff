@@ -4,6 +4,8 @@ Self-contained inline data (plus the shared `book` fixture for values) so it doe
 not perturb the pinned totals other fixtures assert on.
 """
 
+from __future__ import annotations
+
 from ff.analysis import audit_roster, taxi_eligible
 from ff.contracts import Roster
 
@@ -148,3 +150,96 @@ def test_no_taxi_candidates_when_taxi_full(book):
     a = _audit(book, taxi_slots=1)  # 1 slot, already filled by taxi1
     assert a.taxi_open == 0
     assert a.taxi_candidates == []
+
+
+def test_audit_roster_depth_chart_contingent_drop():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="milroe", name="Jalen Milroe", position="QB", value=466),
+        Asset(id="daniels", name="Jalon Daniels", position="QB", value=491),
+        Asset(id="mcgowan", name="Seth McGowan", position="RB", value=704),
+        Asset(id="tyreek", name="Tyreek Hill", position="WR", value=708),
+    ])
+
+    roster = Roster(
+        roster_id=1,
+        team_name="Test Team",
+        player_ids=["milroe", "daniels", "mcgowan", "tyreek"],
+        starters=[],
+    )
+
+    players_meta = {
+        "milroe": {"position": "QB", "team": "SEA", "depth_chart_order": 3, "years_exp": 1, "age": 23},
+        "daniels": {"position": "QB", "team": "TB", "depth_chart_order": 2, "years_exp": 0, "age": 23},
+        "mcgowan": {"position": "RB", "team": "IND", "depth_chart_order": 2, "years_exp": 0, "age": 24},
+        "tyreek": {"position": "WR", "team": None, "depth_chart_order": None, "years_exp": 10, "age": 31},
+    }
+
+    audit = audit_roster(
+        roster,
+        book,
+        players_meta,
+        is_superflex=True,
+        drop_limit=4,
+    )
+
+    # Milroe (QB3) and Tyreek (FA) should be prioritized for cuts ahead of Daniels (QB2) and McGowan (RB2)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    assert drop_pids[0] == "milroe"
+    assert drop_pids[1] == "tyreek"
+    assert drop_pids[2] == "daniels"
+    assert drop_pids[3] == "mcgowan"
+
+
+def test_audit_roster_high_value_rookies_protected():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="high_qb3", name="Ty Simpson", position="QB", value=1500),
+        Asset(id="low_qb2", name="Jalon Daniels", position="QB", value=491),
+    ])
+    roster = Roster(
+        roster_id=1,
+        team_name="Test Team",
+        player_ids=["high_qb3", "low_qb2"],
+        starters=[],
+    )
+    players_meta = {
+        "high_qb3": {"position": "QB", "team": "TEN", "depth_chart_order": 3, "years_exp": 0, "age": 22},
+        "low_qb2": {"position": "QB", "team": "TB", "depth_chart_order": 2, "years_exp": 0, "age": 23},
+    }
+    audit = audit_roster(roster, book, players_meta, is_superflex=True, drop_limit=2)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    # high_qb3 has value >= 1000, so penalty is 0. low_qb2 (value 491) is dropped first.
+    assert drop_pids[0] == "low_qb2"
+    assert drop_pids[1] == "high_qb3"
+
+
+def test_audit_roster_contingent_drop_non_superflex():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="qb3", name="Jalen Milroe", position="QB", value=466),
+        Asset(id="rb4", name="Deep RB", position="RB", value=466),
+    ])
+    roster = Roster(
+        roster_id=1,
+        team_name="Test Team",
+        player_ids=["qb3", "rb4"],
+        starters=[],
+    )
+    players_meta = {
+        "qb3": {"position": "QB", "team": "SEA", "depth_chart_order": 3, "years_exp": 1, "age": 23},
+        "rb4": {"position": "RB", "team": "DET", "depth_chart_order": 4, "years_exp": 1, "age": 23},
+    }
+    # In 1QB (is_superflex=False), QB3 gets penalty 0, while RB4 gets penalty 1
+    audit = audit_roster(roster, book, players_meta, is_superflex=False, drop_limit=2)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    assert drop_pids[0] == "rb4"
+    assert drop_pids[1] == "qb3"
+
+

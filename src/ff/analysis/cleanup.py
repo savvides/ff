@@ -47,6 +47,24 @@ def taxi_eligible(
 
 
 
+def _contingent_drop_penalty(s: RosterSlot, is_superflex: bool) -> int:
+    """Returns 1 for buried or unsigned players below 1000 value, 0 otherwise."""
+    if s.value >= 1000:
+        return 0
+    if not s.team or s.team in ("FA", "None"):
+        return 1
+    order = s.depth_chart_order or 99
+    if s.position == "QB" and is_superflex and order >= 3:
+        return 1
+    if s.position == "RB" and order >= 4:
+        return 1
+    if s.position == "WR" and order >= 5:
+        return 1
+    if s.position == "TE" and order >= 4:
+        return 1
+    return 0
+
+
 def audit_roster(
     roster: Roster,
     book: ValueBook,
@@ -57,6 +75,7 @@ def audit_roster(
     reserve_slots: int = 0,
     taxi_allow_vets: bool = False,
     taxi_years: Optional[int] = None,
+    is_superflex: bool = True,
     drop_limit: int = 8,
 ) -> RosterAudit:
     """Categorize every player, compute capacity, and rank drop / taxi moves."""
@@ -83,10 +102,14 @@ def audit_roster(
         else:
             cat = "BENCH"
         years_exp = m.get("years_exp")
+        team = m.get("team")
+        depth_chart_order = m.get("depth_chart_order")
         slots.append(RosterSlot(
             player_id=pid,
             name=valued.name if valued else player_name(pid, players_meta),
             position=(valued.position if valued else m.get("position")),
+            team=team,
+            depth_chart_order=depth_chart_order,
             age=(valued.age if valued and valued.age is not None else m.get("age")),
             years_exp=years_exp,
             value=valued.value if valued else 0,
@@ -106,10 +129,12 @@ def audit_roster(
     )
 
     # Drop candidates: never a current starter (you do not cut a starter to add a
-    # free agent). Worst-first = lowest value, then oldest, then most experienced
-    # (least rebuild upside). Tie-break by name keeps the order stable.
+    # free agent). Worst-first = contingent drop penalty (buried depth/unsigned FAs first),
+    # then lowest value, then oldest, then most experienced (least rebuild upside).
+    # Tie-break by name keeps the order stable.
     non_starters = [s for s in slots if s.slot != "START"]
     non_starters.sort(key=lambda s: (
+        -_contingent_drop_penalty(s, is_superflex),
         s.value,
         -(s.age or 0),
         -(s.years_exp if s.years_exp is not None else -1),

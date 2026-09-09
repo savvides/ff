@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Waiver targets: trending joined to value + roster availability."""
 
 from ff.analysis import waiver_targets
@@ -15,9 +17,15 @@ def test_free_agents_only_and_sorted(book, trending, rosters_raw, users_raw, pla
     assert targets[0].asset.name == "Rome Odunze"
     assert targets[0].asset.value == 4500
     assert targets[0].add_count == 4200
+    assert targets[0].team == "CHI"
+    assert targets[0].depth_chart_order == 1
+    assert targets[0].depth_role == "WR1"
     # unvalued free agent still appears, named from players_meta, value 0
     assert targets[-1].asset.name == "Deep Stash"
     assert targets[-1].asset.value == 0
+    assert targets[-1].team == "CHI"
+    assert targets[-1].depth_chart_order == 4
+    assert targets[-1].depth_role == "WR4"
 
 
 def test_include_rostered(book, trending, rosters_raw, users_raw, players_meta):
@@ -28,3 +36,7 @@ def test_include_rostered(book, trending, rosters_raw, users_raw, players_meta):
     assert "7564" in ids
     rostered = next(t for t in targets if t.asset.id == "7564")
     assert rostered.is_rostered is True
+    assert rostered.team == "CIN"
+    assert rostered.depth_chart_order == 1
+    assert rostered.depth_role == "WR1"
+

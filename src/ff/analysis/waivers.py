@@ -38,8 +38,17 @@ def waiver_targets(
                 name = player_name(pid, players_meta)
                 pos = m.get("position")
             asset = Asset(id=pid, name=name, position=pos, value=0)
+        meta = (players_meta or {}).get(pid, {})
+        if meta:
+            asset.fill_from_meta(meta)
         targets.append(
-            WaiverTarget(asset=asset, add_count=count, is_rostered=pid in rostered)
+            WaiverTarget(
+                asset=asset,
+                add_count=count,
+                is_rostered=pid in rostered,
+                team=meta.get("team"),
+                depth_chart_order=meta.get("depth_chart_order"),
+            )
         )
 
     if free_agents_only:
