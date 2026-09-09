@@ -118,6 +118,8 @@ class Asset(BaseModel):
                 setattr(self, field, meta.get(field))
         if not self.team and meta.get("team"):
             self.team = meta.get("team")
+        if self.depth_chart_order is None and meta.get("depth_chart_order"):
+            self.depth_chart_order = meta.get("depth_chart_order")
         if self.age is None and meta.get("age"):
             self.age = meta.get("age")
 
@@ -146,6 +148,17 @@ class Asset(BaseModel):
         if self.is_pick or not self.position or self.depth_chart_order is None:
             return ""
         return f"{self.position}{self.depth_chart_order}"
+
+    @property
+    def depth_role(self) -> str:
+        """Format depth chart role (e.g. 'QB1', 'QB2', 'RB2', 'WR4', 'FA', or '-')."""
+        if self.is_pick:
+            return "PICK"
+        if not self.team or self.team in ("FA", "None"):
+            return "FA"
+        if self.depth_chart_order and self.position:
+            return f"{self.position}{self.depth_chart_order}"
+        return self.position or "-"
 
     @property
     def status_label(self) -> str:
@@ -247,12 +260,23 @@ class RosterSlot(BaseModel):
     player_id: str
     name: str
     position: Optional[str] = None
+    team: Optional[str] = None
+    depth_chart_order: Optional[int] = None
     age: Optional[float] = None
     years_exp: Optional[int] = None
     value: int = 0
     trend_30day: Optional[int] = None
     slot: str = "BENCH"  # START | BENCH | TAXI | IR
     taxi_eligible: bool = False
+
+    @property
+    def depth_role(self) -> str:
+        """Format depth chart role (e.g. 'QB1', 'QB2', 'RB2', 'WR4', 'FA', or '-')."""
+        if not self.team or self.team in ("FA", "None"):
+            return "FA"
+        if self.depth_chart_order and self.position:
+            return f"{self.position}{self.depth_chart_order}"
+        return self.position or "-"
 
     @property
     def is_active(self) -> bool:
@@ -545,6 +569,24 @@ class WaiverTarget(BaseModel):
     asset: Asset
     add_count: int = 0  # how many Sleeper users added in the trending window
     is_rostered: bool = False  # taken somewhere in *this* league?
+    team: Optional[str] = None
+    depth_chart_order: Optional[int] = None
+
+    @property
+    def depth_role(self) -> str:
+        """Format depth chart role (e.g. 'QB1', 'QB2', 'RB2', 'WR4', 'FA', or '-')."""
+        team = self.team or (self.asset.team if self.asset else None)
+        if not team or team in ("FA", "None"):
+            return "FA"
+        order = (
+            self.depth_chart_order
+            if self.depth_chart_order is not None
+            else (self.asset.depth_chart_order if self.asset else None)
+        )
+        pos = self.asset.position if self.asset else None
+        if order and pos:
+            return f"{pos}{order}"
+        return pos or "-"
 
 
 class LineupSlot(BaseModel):
