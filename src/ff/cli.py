@@ -310,12 +310,11 @@ def roster(
     console.print(pos_table)
 
     t = Table(title=f"top {top} assets")
-    for c in ("player", "pos", "age", "value", "ovr", "30d"):
+    for c in ("player", "pos", "role", "age", "value", "ovr", "30d"):
         t.add_column(c, justify="right" if c in ("value", "ovr", "30d", "age") else "left")
     for a in val.assets[:top]:
         name_cell = f"{a.name} [bold red]{a.injury_tag}[/]" if a.injury_tag else a.name
-        pos_cell = a.depth_tag if a.depth_tag else (a.position or "-")
-        t.add_row(name_cell, pos_cell,
+        t.add_row(name_cell, a.position or "-", a.depth_role,
                   f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
                   str(a.overall_rank or "-"),
                   _signed(a.trend_30day) if a.trend_30day else "-")
@@ -692,12 +691,12 @@ def waivers(
                              limit=limit, free_agents_only=not include_rostered)
 
     t = Table(title="waiver targets - trending adds by dynasty value")
-    for c in ("player", "pos", "value", "adds", "status"):
+    for c in ("player", "pos", "role", "value", "adds", "status"):
         t.add_column(c, justify="right" if c in ("value", "adds") else "left")
     for tgt in targets:
         a = tgt.asset
         status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
-        t.add_row(a.name, a.position or "-", f"{a.value:,}", f"{tgt.add_count:,}", status)
+        t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}", status)
     console.print(t)
     qa_rep = run_qa("waivers", targets=targets, rosters=rosters)
     render_qa_footer(qa_rep, console)
@@ -807,6 +806,7 @@ def cleanup(
         reserve_slots=int(settings.get("reserve_slots") or 0),
         taxi_allow_vets=bool(settings.get("taxi_allow_vets")),
         taxi_years=settings.get("taxi_years"),
+        is_superflex=bool(cfg.format.superflex),
         drop_limit=drops,
     )
 
@@ -836,24 +836,33 @@ def cleanup(
 
     dt = Table(title="drop candidates - worst value first")
     right = ("age", "exp", "value", "30d")
-    for c in ("player", "pos", "age", "exp", "value", "30d", "where", "frees"):
+    for c in ("player", "pos", "team", "role", "age", "exp", "value", "30d", "where", "frees"):
         dt.add_column(c, justify="right" if c in right else "left")
     for s in audit.drop_candidates:
         frees = "[green]active slot[/]" if s.is_active else f"[dim]{s.slot.lower()} slot only[/]"
-        dt.add_row(s.name, s.position or "-",
-                   f"{s.age:.0f}" if s.age else "-",
-                   str(s.years_exp) if s.years_exp is not None else "-",
-                   f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-",
-                   s.slot, frees)
+        dt.add_row(
+            s.name, s.position or "-",
+            s.team or "FA",
+            s.depth_role,
+            f"{s.age:.0f}" if s.age else "-",
+            str(s.years_exp) if s.years_exp is not None else "-",
+            f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-",
+            s.slot, frees
+        )
     console.print(dt)
 
     if audit.taxi_candidates:
         tt = Table(title="stash on taxi - frees an active slot, keeps the player")
-        for c in ("player", "pos", "age", "value", "30d"):
+        for c in ("player", "pos", "team", "role", "age", "value", "30d"):
             tt.add_column(c, justify="right" if c in ("age", "value", "30d") else "left")
         for s in audit.taxi_candidates:
-            tt.add_row(s.name, s.position or "-", f"{s.age:.0f}" if s.age else "-",
-                       f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-")
+            tt.add_row(
+                s.name, s.position or "-",
+                s.team or "FA",
+                s.depth_role,
+                f"{s.age:.0f}" if s.age else "-",
+                f"{s.value:,}", _signed(s.trend_30day) if s.trend_30day else "-",
+            )
         console.print(tt)
     elif audit.taxi_open > 0:
         console.print(f"[dim]{audit.taxi_open} taxi slot(s) open, but no taxi-eligible "
