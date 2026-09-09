@@ -13,6 +13,7 @@ from ff.contracts import (
     NewsItem,
     Roster,
     RosterAudit,
+    RosterSlot,
     RosterValuation,
     TeamPicks,
     TradeEvaluation,
@@ -449,6 +450,38 @@ def validate_cleanup(audit: RosterAudit) -> List[QACheck]:
         name="Cleanup Taxi Candidates Are Bench",
         passed=taxi_are_bench,
         message="" if taxi_are_bench else "Taxi stash candidate is not an active bench player",
+    ))
+
+    slots_to_check = list(audit.slots)
+    seen_ids = {s.player_id for s in slots_to_check}
+    for s in (audit.drop_candidates + audit.taxi_candidates):
+        if s.player_id not in seen_ids:
+            slots_to_check.append(s)
+            seen_ids.add(s.player_id)
+
+    def _is_valid_depth_role(s: RosterSlot) -> bool:
+        if not (s.position and s.team):
+            return True
+        role = s.depth_role
+        if not role or not isinstance(role, str):
+            return False
+        if s.team in ("FA", "None"):
+            expected = "FA"
+        elif s.depth_chart_order and s.position:
+            expected = f"{s.position}{s.depth_chart_order}"
+        else:
+            expected = s.position
+        return role == expected
+
+    invalid_roles = [
+        f"{s.name or s.player_id}: role='{s.depth_role}'"
+        for s in slots_to_check
+        if not _is_valid_depth_role(s)
+    ]
+    checks.append(QACheck(
+        name="Cleanup Depth Role Formatting Valid",
+        passed=len(invalid_roles) == 0,
+        message="" if not invalid_roles else f"Invalid depth_role for slots: {', '.join(invalid_roles)}",
     ))
 
     return checks
