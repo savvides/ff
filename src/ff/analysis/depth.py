@@ -16,29 +16,34 @@ from typing import Any, Dict, Optional, Set
 
 
 def precompute_qb2_promotions(players_meta: Optional[Dict[str, Any]]) -> Set[str]:
-    """Find QB3s on NFL teams where no QB2 exists (e.g. post-cutdown 2-QB depth charts)."""
+    """Find QB3s on NFL teams where no active QB2 exists (post-cutdown gaps or QB2 ruled Out/IR)."""
     if not players_meta:
         return set()
-    by_team_qbs: Dict[str, list[tuple[int, str]]] = {}
+    by_team_qbs: Dict[str, list[tuple[int, str, bool]]] = {}
     for pid, info in players_meta.items():
         team = info.get("team")
         pos = info.get("position")
         order = info.get("depth_chart_order")
         status = info.get("status")
+        inj = info.get("injury_status")
         if (
             team
-            and team not in ("FA", "None")
+            and team not in ("FA", "None", "")
             and pos == "QB"
             and order is not None
-            and status != "Injured Reserve"
         ):
-            by_team_qbs.setdefault(team, []).append((int(order), str(pid)))
+            is_inactive = (
+                status in ("Injured Reserve", "Out", "PUP", "DNR")
+                or inj in ("Out", "IR", "PUP")
+            )
+            by_team_qbs.setdefault(team, []).append((int(order), str(pid), is_inactive))
     promoted: Set[str] = set()
     for team, qbs in by_team_qbs.items():
-        orders = {order for order, _ in qbs}
-        if 1 in orders and 2 not in orders and 3 in orders:
-            for order, pid in qbs:
-                if order == 3:
+        has_qb1 = any(order == 1 for order, _, _ in qbs)
+        has_active_qb2 = any(order == 2 and not is_inactive for order, _, is_inactive in qbs)
+        if has_qb1 and not has_active_qb2:
+            for order, pid, is_inactive in qbs:
+                if order == 3 and not is_inactive:
                     promoted.add(pid)
     return promoted
 

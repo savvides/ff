@@ -84,6 +84,18 @@ def test_precompute_qb2_promotions():
     assert "milroe" not in promoted
 
 
+def test_precompute_qb2_promotions_when_qb2_injured():
+    meta = {
+        # Seattle: Lock (1, Active), Darnold (2, Out), Milroe (3, Active)
+        "lock": {"team": "SEA", "position": "QB", "depth_chart_order": 1, "status": "Active"},
+        "darnold": {"team": "SEA", "position": "QB", "depth_chart_order": 2, "status": "Active", "injury_status": "Out"},
+        "milroe": {"team": "SEA", "position": "QB", "depth_chart_order": 3, "status": "Active"},
+    }
+    promoted = precompute_qb2_promotions(meta)
+    assert "milroe" in promoted
+
+
+
 def test_waivers_ranking_by_opportunity_score():
     # Book with an RB2 (moderate value 350) vs WR5 (higher nominal value 500)
     book = ValueBook([
