@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-import requests
-
 from ff.contracts import Format
 from ff.core.http import get_json
 from ff.values.ktc import (

@@ -169,11 +169,12 @@ def build_rosters(rosters: List[Dict[str, Any]],
         settings = r.get("settings") or {}
         pts = float(settings.get("fpts", 0) or 0)
         pts += float(settings.get("fpts_decimal", 0) or 0) / 100.0
+        owner_id = str(r.get("owner_id") or "")
         out.append(
             Roster(
                 roster_id=r["roster_id"],
                 owner_id=r.get("owner_id"),
-                team_name=names.get(r.get("owner_id"), f"Team {r['roster_id']}"),
+                team_name=names.get(owner_id, f"Team {r['roster_id']}"),
                 player_ids=[p for p in (r.get("players") or []) if p],
                 starters=[p for p in (r.get("starters") or []) if p and p != "0"],
                 taxi=[p for p in (r.get("taxi") or []) if p and p != "0"],

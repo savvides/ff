@@ -91,6 +91,9 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
     if tool_name not in ALLOWED_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}")
 
+    res: Any = None
+    value_book: Any = ctx.get("value_book")
+
     if tool_name == "setup_league":
         username = kwargs.get("username", "")
         onboard_fn = ctx.get("onboard_user")

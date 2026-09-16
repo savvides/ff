@@ -121,4 +121,4 @@ TOOL_SCHEMAS = [
     }
 ]
 
-ALLOWED_TOOLS = [t["name"] for t in TOOL_SCHEMAS]
+ALLOWED_TOOLS: list[str] = [str(t["name"]) for t in TOOL_SCHEMAS]

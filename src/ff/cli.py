@@ -19,7 +19,7 @@ import json
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple
 
 import requests
 import typer
@@ -35,7 +35,6 @@ from ff.analysis import (
     audit_roster,
     available,
     detect_status,
-    evaluate_trade,
     find_arbitrage_movers,
     my_picks,
     optimal_lineup,
@@ -68,7 +67,7 @@ console = Console()
 
 # --- shared plumbing -----------------------------------------------------
 
-def _fail(msg: str) -> None:
+def _fail(msg: str) -> NoReturn:
     console.print(f"[bold red]error[/] {msg}")
     raise typer.Exit(1)
 
@@ -87,7 +86,7 @@ def _guard(fn: Callable) -> Callable:
         except (ValidationError, json.JSONDecodeError):
             _fail("config is corrupt or out of date. Run `ff setup <sleeper-username>` to rebuild it.")
 
-    wrapper.__signature__ = inspect.signature(fn)  # keep Typer's option parsing
+    wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]  # keep Typer's option parsing
     return wrapper
 
 
@@ -209,24 +208,25 @@ def setup(
 ) -> None:
     """Find your dynasty league, auto-detect its format, and save it."""
     sc = SleeperClient()
-    season = season or sc.state().get("season")
+    season_val = str(season or sc.state().get("season") or "")
 
     # Always resolve the user so user_id is saved even when --league-id is given;
     # otherwise `ff roster` cannot tell which team is yours.
     user = sc.user(username)
-    user_id = user.get("user_id") if user else None
-    if not user_id:
+    raw_uid = user.get("user_id") if user else None
+    if not raw_uid:
         _fail(f"no Sleeper user named '{username}'.")
+    user_id = str(raw_uid)
 
     if not league_id:
-        leagues = sc.user_leagues(user_id, season)
+        leagues = sc.user_leagues(user_id, season_val)
         if not leagues:  # offseason: this season's leagues may not exist yet
             prev = sc.state().get("previous_season")
             if prev:
-                season = prev
-                leagues = sc.user_leagues(user_id, season)
+                season_val = str(prev)
+                leagues = sc.user_leagues(user_id, season_val)
         if not leagues:
-            _fail(f"no leagues for '{username}' in {season}.")
+            _fail(f"no leagues for '{username}' in {season_val}.")
         if len(leagues) == 1:
             chosen = leagues[0]
         elif league_index is not None:
@@ -234,7 +234,7 @@ def setup(
                 _fail(f"--league-index {league_index} out of range (0-{len(leagues) - 1}).")
             chosen = leagues[league_index]
         else:
-            console.print(f"[bold]{username}[/] is in {len(leagues)} leagues for {season}:")
+            console.print(f"[bold]{username}[/] is in {len(leagues)} leagues for {season_val}:")
             for i, lg in enumerate(leagues):
                 console.print(f"  [cyan]{i}[/]  {lg.get('name')}  "
                               f"({lg.get('total_rosters')} teams)  [dim]id={lg.get('league_id')}[/]")
@@ -253,7 +253,7 @@ def setup(
     fmt = detect_format(league)
     cfg = Config(
         league_id=league_id,
-        season=str(season),
+        season=int(season_val),
         name=league.get("name", ""),
         league_name=league.get("name", ""),
         format=fmt,
@@ -303,7 +303,8 @@ def roster(
     console.print(Panel.fit(header, title="roster"))
 
     pos_table = Table(title="by position", show_edge=False)
-    pos_table.add_column("pos"); pos_table.add_column("value", justify="right")
+    pos_table.add_column("pos")
+    pos_table.add_column("value", justify="right")
     for pos, v in sorted(val.by_position.items(), key=lambda x: x[1], reverse=True):
         if v:
             pos_table.add_row(pos, f"{v:,}")
@@ -486,7 +487,7 @@ def values(
 
     t = Table(title=title)
     if dual_market:
-        right = ("FC", "KTC", "30d", "age", "#", "posrk")
+        right: Set[str] = {"FC", "KTC", "30d", "age", "#", "posrk"}
         for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "KTC", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
@@ -497,7 +498,7 @@ def values(
                       sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
     elif market in ("dealer", "ktc"):
-        right = ("KTC", "30d", "age", "#", "posrk")
+        right = {"KTC", "30d", "age", "#", "posrk"}
         for c in ("#", "player", "pos", "posrk", "team", "age", "KTC", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
@@ -507,7 +508,7 @@ def values(
                       f"{a.age:.0f}" if a.age else "-", sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
     else:
-        right = ("value", "30d", "age", "#", "posrk")
+        right = {"value", "30d", "age", "#", "posrk"}
         for c in ("#", "player", "pos", "posrk", "team", "age", "value", "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
@@ -769,7 +770,7 @@ def news(
             t_trend.add_column(c, justify="right" if c in ("count", "value") else "left")
         for label, items in (("[green]+ ADD[/]", adds), ("[red]- DROP[/]", drops)):
             for item in items:
-                pid = item.get("player_id")
+                pid = str(item.get("player_id") or "")
                 meta = (players_meta or {}).get(pid, {})
                 asset = book.value_for_sleeper_id(pid)
                 t_trend.add_row(
@@ -921,9 +922,9 @@ def movers(
             kind = "market discrepancies (FC vs KTC)"
 
         t = Table(title=f"arbitrage movers - {kind} - {cfg.format.label()}")
-        right = ("FC", "KTC", "diff", "gap%", "age")
+        right_arb: Set[str] = {"FC", "KTC", "diff", "gap%", "age"}
         for c in ("player", "pos", "owner", "FC", "KTC", "diff", "gap%", "bias"):
-            t.add_column(c, justify="right" if c in right else "left")
+            t.add_column(c, justify="right" if c in right_arb else "left")
         for m in arb_movers:
             a = m.asset
             owner = m.team_name or "-"
@@ -950,7 +951,7 @@ def movers(
     rows = top_movers(book, buy=buy, limit=limit, min_value=min_value)
     kind = "buy-low (dynasty > win-now)" if buy else "sell-high (win-now > dynasty)"
     t = Table(title=f"movers - {kind} - {cfg.format.label()}")
-    right = ("dynasty", "redraft", "gap%", "age")
+    right: Set[str] = {"dynasty", "redraft", "gap%", "age"}
     for c in ("player", "pos", "age", "dynasty", "redraft", "gap%"):
         t.add_column(c, justify="right" if c in right else "left")
     for a, pct in rows:
@@ -982,7 +983,7 @@ def lineup(
         _fail("could not find that team. Try `ff power` to list teams.")
 
     state = sc.state() or {}
-    season = season or cfg.season
+    season = season or str(cfg.season)
     week = week or state.get("display_week") or state.get("week") or 1
     if week < 1:
         week = 1
@@ -1120,7 +1121,7 @@ def draft(
     made = len(picks)
     on_clock = made + 1
 
-    status = d.get("status")
+    status = str(d.get("status") or "")
     rnd_now = (on_clock - 1) // teams + 1 if teams else 0
     head_status = {"drafting": "[green]drafting[/]", "complete": "[dim]complete[/]"}.get(
         status, status or "?")
