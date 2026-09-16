@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import List, Optional
+from typing import List
 
 SUPPORTED_BACKENDS = ["agy", "gemini", "claude", "ollama"]
 RUN_TIMEOUT = 120  # seconds; a hung local model must not block the CLI forever

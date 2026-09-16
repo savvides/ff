@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ff.analysis.depth import opportunity_score, precompute_qb2_promotions
 from ff.contracts import Roster, RosterAudit, RosterSlot
 from ff.sleeper import player_name
 from ff.values import ValueBook
@@ -44,10 +45,6 @@ def taxi_eligible(
     if taxi_years is not None:
         return years_exp <= taxi_years
     return years_exp == 0
-
-
-
-from ff.analysis.depth import opportunity_score, precompute_qb2_promotions
 
 
 def audit_roster(

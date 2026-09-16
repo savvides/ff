@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from ff.contracts import Asset, Format
 from ff.core.http import get_json

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from ff.analysis.depth import (
     depth_chart_multiplier,
     opportunity_score,
     precompute_qb2_promotions,
 )
 from ff.analysis.waivers import waiver_targets
-from ff.contracts import Asset, Roster
+from ff.contracts import Asset
 from ff.values import ValueBook
 
 

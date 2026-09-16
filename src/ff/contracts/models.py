@@ -412,7 +412,8 @@ class TradeEvaluation(BaseModel):
         if self.secondary_value_a is None or self.secondary_value_b is None:
             return None
         larger = max(self.secondary_value_a, self.secondary_value_b)
-        return 0.0 if larger == 0 else abs(self.secondary_delta) / larger * 100.0
+        delta = self.secondary_value_a - self.secondary_value_b
+        return 0.0 if larger == 0 else abs(delta) / larger * 100.0
 
     @property
     def ktc_value_a(self) -> Optional[int]:
