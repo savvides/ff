@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ff.analysis.depth import opportunity_score, precompute_qb2_promotions
+from ff.analysis.depth import (
+    opportunity_score,
+    precompute_qb2_promotions,
+    precompute_starter_injuries,
+)
 from ff.contracts import Roster, RosterAudit, RosterSlot
 from ff.sleeper import player_name
 from ff.values import ValueBook
@@ -69,6 +73,7 @@ def audit_roster(
     taxi_set = set(roster.taxi)
     reserve_set = set(roster.reserve)
     qb2_promoted = precompute_qb2_promotions(players_meta)
+    starter_injuries = precompute_starter_injuries(players_meta)
 
     slots: List[RosterSlot] = []
     for pid in roster.player_ids:
@@ -89,8 +94,20 @@ def audit_roster(
         depth_chart_order = 2 if str(pid) in qb2_promoted else m.get("depth_chart_order")
         pos = valued.position if valued else m.get("position")
         val = valued.value if valued else 0
+        starter_inj = (
+            starter_injuries.get((team, pos))
+            if team and pos and depth_chart_order == 2
+            else None
+        )
         opp_score = opportunity_score(
-            val, pos, depth_chart_order, team, is_superflex=is_superflex
+            val,
+            pos,
+            depth_chart_order,
+            team,
+            is_superflex=is_superflex,
+            injury_status=m.get("injury_status"),
+            status=m.get("status"),
+            starter_injury=starter_inj,
         )
         slots.append(RosterSlot(
             player_id=pid,

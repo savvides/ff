@@ -112,16 +112,76 @@ def depth_chart_multiplier(
     return 0.10
 
 
+def precompute_starter_injuries(
+    players_meta: Optional[Dict[str, Any]],
+) -> Dict[tuple[str, str], str]:
+    """Find injuries to starters (depth_chart_order == 1) by (team, position)."""
+    if not players_meta:
+        return {}
+    injuries: Dict[tuple[str, str], str] = {}
+    for pid, info in players_meta.items():
+        team = info.get("team")
+        pos = info.get("position")
+        order = info.get("depth_chart_order")
+        injury = info.get("injury_status")
+        status = info.get("status")
+        if team and team not in ("FA", "None", "") and pos and order == 1:
+            if injury:
+                injuries[(team, pos)] = str(injury)
+            elif status in ("Injured Reserve", "Out", "PUP", "DNR"):
+                injuries[(team, pos)] = str(status)
+    return injuries
+
+
 def opportunity_score(
     value: int,
     position: Optional[str],
     depth_chart_order: Optional[int],
     team: Optional[str],
     is_superflex: bool = True,
+    injury_status: Optional[str] = None,
+    status: Optional[str] = None,
+    starter_injury: Optional[str] = None,
 ) -> int:
-    """Composite heuristic: dynasty value x depth chart multiplier."""
+    """Composite heuristic: dynasty value x depth chart opportunity x news/health factor."""
+    pos = (position or "").upper()
     mult = depth_chart_multiplier(
         position, depth_chart_order, team, is_superflex=is_superflex
     )
+
+    # Starter injury boost for direct backups / handcuffs (order == 2)
+    if depth_chart_order == 2 and starter_injury:
+        sinj = starter_injury.lower()
+        if any(w in sinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
+            mult = min(1.0, mult + 0.25)
+        elif "doubtful" in sinj:
+            mult = min(1.0, mult + 0.15)
+        elif "questionable" in sinj:
+            mult = min(1.0, mult + 0.10)
+
+    # Base value with positional scarcity protection
     base = value if value > 0 else 50
-    return round(base * mult)
+    if (
+        is_superflex
+        and pos == "QB"
+        and depth_chart_order == 2
+        and team
+        and team not in ("FA", "None", "")
+    ):
+        base = max(base, 400)
+
+    # Player health/injury discount
+    pinj = (
+        injury_status
+        or (status if status in ("Injured Reserve", "Out", "PUP", "DNR") else "")
+    ).lower()
+    if any(w in pinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
+        health_factor = 0.50
+    elif "doubtful" in pinj:
+        health_factor = 0.70
+    elif "questionable" in pinj:
+        health_factor = 0.85
+    else:
+        health_factor = 1.0
+
+    return round(base * mult * health_factor)

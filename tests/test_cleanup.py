@@ -243,3 +243,35 @@ def test_audit_roster_contingent_drop_non_superflex():
     assert drop_pids[1] == "qb3"
 
 
+def test_audit_roster_qb2_protected_over_injured_wr():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="daniels", name="Jalon Daniels", position="QB", value=224),
+        Asset(id="horton", name="Tory Horton", position="WR", value=531),
+        Asset(id="zavion", name="Zavion Thomas", position="WR", value=770),
+    ])
+    roster = Roster(
+        roster_id=1,
+        team_name="Test Team",
+        player_ids=["daniels", "horton", "zavion"],
+        starters=[],
+    )
+    players_meta = {
+        # Jalon Daniels: healthy QB2 in Superflex -> opportunity score 300 (floor 400 * 0.75)
+        "daniels": {"position": "QB", "team": "TB", "depth_chart_order": 2, "years_exp": 0, "age": 23.9, "status": "Active"},
+        # Tory Horton: WR4 with Questionable injury -> 531 * 0.40 * 0.85 = 181
+        "horton": {"position": "WR", "team": "SEA", "depth_chart_order": 4, "years_exp": 1, "age": 23.8, "injury_status": "Questionable"},
+        # Zavion Thomas: WR5 healthy -> 770 * 0.15 = 116
+        "zavion": {"position": "WR", "team": "CHI", "depth_chart_order": 5, "years_exp": 0, "age": 22.6, "status": "Active"},
+    }
+    audit = audit_roster(roster, book, players_meta, is_superflex=True, drop_limit=3)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    # Drop order: lowest opportunity score first.
+    # Zavion (116) then Horton (181) then Daniels (300).
+    # Daniels (QB2) is protected and NOT dropped before injured WR4 or deep WR5!
+    assert drop_pids[0] == "zavion"
+    assert drop_pids[1] == "horton"
+    assert drop_pids[2] == "daniels"
+

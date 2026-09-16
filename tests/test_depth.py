@@ -104,3 +104,69 @@ def test_waivers_ranking_by_opportunity_score():
     assert targets[0].opportunity_score == 280
     assert targets[1].asset.name == "Buried WR"
     assert targets[1].opportunity_score == 75
+
+
+def test_superflex_qb2_scarcity_floor():
+    # Low-valued QB2 in Superflex (e.g. Jalon Daniels value=224 on TB)
+    # should NOT score lower than a buried WR4 (value=531 * 0.40 = 212).
+    # Superflex QB2 carries a 400 minimum base floor (400 * 0.75 = 300).
+    qb2_score = opportunity_score(224, "QB", 2, "TB", is_superflex=True)
+    wr4_score = opportunity_score(531, "WR", 4, "SEA", is_superflex=True)
+    assert qb2_score >= 300
+    assert qb2_score > wr4_score
+
+    # In 1QB, QB2 does not get the Superflex floor
+    qb2_1qb = opportunity_score(224, "QB", 2, "TB", is_superflex=False)
+    assert qb2_1qb < wr4_score
+
+
+def test_player_injury_news_discount():
+    # Healthy WR4 (531 * 0.40 = 212)
+    healthy = opportunity_score(531, "WR", 4, "SEA")
+    assert healthy == 212
+
+    # Questionable WR4 (531 * 0.40 * 0.85 = 180.54 -> 181)
+    questionable = opportunity_score(531, "WR", 4, "SEA", injury_status="Questionable")
+    assert questionable == 181
+
+    # Out / IR WR4 (212 * 0.50 = 106)
+    out = opportunity_score(531, "WR", 4, "SEA", injury_status="Out")
+    assert out == 106
+
+    ir = opportunity_score(531, "WR", 4, "SEA", status="Injured Reserve")
+    assert ir == 106
+
+
+def test_starter_injury_news_boost():
+    # Healthy backup QB (500 base * 0.75 = 375)
+    baseline = opportunity_score(500, "QB", 2, "ATL", is_superflex=True)
+
+    # When starter is Questionable (e.g. Tua Tagovailoa on ATL), backup gets +0.10 boost
+    with_q_starter = opportunity_score(
+        500, "QB", 2, "ATL", is_superflex=True, starter_injury="Questionable"
+    )
+    assert with_q_starter > baseline
+    assert with_q_starter == round(500 * (0.75 + 0.10))
+
+    # When starter is Out, backup gets +0.25 boost (reaching 1.0 starter opportunity)
+    with_out_starter = opportunity_score(
+        500, "QB", 2, "ATL", is_superflex=True, starter_injury="Out"
+    )
+    assert with_out_starter == 500  # 500 * 1.0
+
+
+def test_precompute_starter_injuries():
+    from ff.analysis.depth import precompute_starter_injuries
+
+    meta = {
+        # Tua is QB1 in ATL and Questionable
+        "tua": {"team": "ATL", "position": "QB", "depth_chart_order": 1, "injury_status": "Questionable"},
+        # Baker is QB1 in TB and Healthy
+        "baker": {"team": "TB", "position": "QB", "depth_chart_order": 1, "status": "Active"},
+        # CMC is RB1 in SF and IR
+        "cmc": {"team": "SF", "position": "RB", "depth_chart_order": 1, "status": "Injured Reserve"},
+    }
+    injuries = precompute_starter_injuries(meta)
+    assert injuries.get(("ATL", "QB")) == "Questionable"
+    assert ("TB", "QB") not in injuries
+    assert injuries.get(("SF", "RB")) == "Injured Reserve"
