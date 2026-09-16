@@ -268,6 +268,7 @@ class RosterSlot(BaseModel):
     trend_30day: Optional[int] = None
     slot: str = "BENCH"  # START | BENCH | TAXI | IR
     taxi_eligible: bool = False
+    opportunity_score: Optional[int] = None
 
     @property
     def depth_role(self) -> str:
@@ -571,6 +572,7 @@ class WaiverTarget(BaseModel):
     is_rostered: bool = False  # taken somewhere in *this* league?
     team: Optional[str] = None
     depth_chart_order: Optional[int] = None
+    opportunity_score: Optional[int] = None
 
     @property
     def depth_role(self) -> str:

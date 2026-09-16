@@ -687,8 +687,15 @@ def waivers(
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     trending = sc.trending(kind="add", limit=max(limit * 3, 50))
-    targets = waiver_targets(trending, book, rosters, sc.players(),
-                             limit=limit, free_agents_only=not include_rostered)
+    targets = waiver_targets(
+        trending,
+        book,
+        rosters,
+        sc.players(),
+        limit=limit,
+        free_agents_only=not include_rostered,
+        is_superflex=bool(cfg.format.superflex),
+    )
 
     t = Table(title="waiver targets - trending adds by dynasty value")
     for c in ("player", "pos", "role", "value", "adds", "status"):
