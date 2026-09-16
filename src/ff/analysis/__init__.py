@@ -10,6 +10,7 @@ from ff.analysis.depth import (
     depth_chart_multiplier,
     opportunity_score,
     precompute_qb2_promotions,
+    precompute_starter_injuries,
 )
 from ff.analysis.draft import available, my_picks, pick_number
 from ff.analysis.fit import detect_status, positional_standing, rank_fits
@@ -66,5 +67,6 @@ __all__ = [
     "depth_chart_multiplier",
     "opportunity_score",
     "precompute_qb2_promotions",
+    "precompute_starter_injuries",
 ]
 

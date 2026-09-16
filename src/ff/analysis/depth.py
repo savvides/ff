@@ -16,29 +16,34 @@ from typing import Any, Dict, Optional, Set
 
 
 def precompute_qb2_promotions(players_meta: Optional[Dict[str, Any]]) -> Set[str]:
-    """Find QB3s on NFL teams where no QB2 exists (e.g. post-cutdown 2-QB depth charts)."""
+    """Find QB3s on NFL teams where no active QB2 exists (post-cutdown gaps or QB2 ruled Out/IR)."""
     if not players_meta:
         return set()
-    by_team_qbs: Dict[str, list[tuple[int, str]]] = {}
+    by_team_qbs: Dict[str, list[tuple[int, str, bool]]] = {}
     for pid, info in players_meta.items():
         team = info.get("team")
         pos = info.get("position")
         order = info.get("depth_chart_order")
         status = info.get("status")
+        inj = info.get("injury_status")
         if (
             team
-            and team not in ("FA", "None")
+            and team not in ("FA", "None", "")
             and pos == "QB"
             and order is not None
-            and status != "Injured Reserve"
         ):
-            by_team_qbs.setdefault(team, []).append((int(order), str(pid)))
+            is_inactive = (
+                status in ("Injured Reserve", "Out", "PUP", "DNR")
+                or inj in ("Out", "IR", "PUP")
+            )
+            by_team_qbs.setdefault(team, []).append((int(order), str(pid), is_inactive))
     promoted: Set[str] = set()
     for team, qbs in by_team_qbs.items():
-        orders = {order for order, _ in qbs}
-        if 1 in orders and 2 not in orders and 3 in orders:
-            for order, pid in qbs:
-                if order == 3:
+        has_qb1 = any(order == 1 for order, _, _ in qbs)
+        has_active_qb2 = any(order == 2 and not is_inactive for order, _, is_inactive in qbs)
+        if has_qb1 and not has_active_qb2:
+            for order, pid, is_inactive in qbs:
+                if order == 3 and not is_inactive:
                     promoted.add(pid)
     return promoted
 
@@ -112,16 +117,76 @@ def depth_chart_multiplier(
     return 0.10
 
 
+def precompute_starter_injuries(
+    players_meta: Optional[Dict[str, Any]],
+) -> Dict[tuple[str, str], str]:
+    """Find injuries to starters (depth_chart_order == 1) by (team, position)."""
+    if not players_meta:
+        return {}
+    injuries: Dict[tuple[str, str], str] = {}
+    for pid, info in players_meta.items():
+        team = info.get("team")
+        pos = info.get("position")
+        order = info.get("depth_chart_order")
+        injury = info.get("injury_status")
+        status = info.get("status")
+        if team and team not in ("FA", "None", "") and pos and order == 1:
+            if injury:
+                injuries[(team, pos)] = str(injury)
+            elif status in ("Injured Reserve", "Out", "PUP", "DNR"):
+                injuries[(team, pos)] = str(status)
+    return injuries
+
+
 def opportunity_score(
     value: int,
     position: Optional[str],
     depth_chart_order: Optional[int],
     team: Optional[str],
     is_superflex: bool = True,
+    injury_status: Optional[str] = None,
+    status: Optional[str] = None,
+    starter_injury: Optional[str] = None,
 ) -> int:
-    """Composite heuristic: dynasty value x depth chart multiplier."""
+    """Composite heuristic: dynasty value x depth chart opportunity x news/health factor."""
+    pos = (position or "").upper()
     mult = depth_chart_multiplier(
         position, depth_chart_order, team, is_superflex=is_superflex
     )
+
+    # Starter injury boost for direct backups / handcuffs (order == 2)
+    if depth_chart_order == 2 and starter_injury:
+        sinj = starter_injury.lower()
+        if any(w in sinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
+            mult = min(1.0, mult + 0.25)
+        elif "doubtful" in sinj:
+            mult = min(1.0, mult + 0.15)
+        elif "questionable" in sinj:
+            mult = min(1.0, mult + 0.10)
+
+    # Base value with positional scarcity protection
     base = value if value > 0 else 50
-    return round(base * mult)
+    if (
+        is_superflex
+        and pos == "QB"
+        and depth_chart_order == 2
+        and team
+        and team not in ("FA", "None", "")
+    ):
+        base = max(base, 400)
+
+    # Player health/injury discount
+    pinj = (
+        injury_status
+        or (status if status in ("Injured Reserve", "Out", "PUP", "DNR") else "")
+    ).lower()
+    if any(w in pinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
+        health_factor = 0.50
+    elif "doubtful" in pinj:
+        health_factor = 0.70
+    elif "questionable" in pinj:
+        health_factor = 0.85
+    else:
+        health_factor = 1.0
+
+    return round(base * mult * health_factor)
