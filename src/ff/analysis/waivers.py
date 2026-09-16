@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ff.analysis.depth import opportunity_score, precompute_qb2_promotions
 from ff.contracts import Asset, Roster, WaiverTarget
 from ff.sleeper import player_name
 from ff.values import ValueBook
@@ -21,8 +22,10 @@ def waiver_targets(
     players_meta: Optional[Dict[str, Any]] = None,
     limit: int = 25,
     free_agents_only: bool = True,
+    is_superflex: bool = True,
 ) -> List[WaiverTarget]:
     rostered = {pid for r in rosters for pid in r.player_ids}
+    qb2_promoted = precompute_qb2_promotions(players_meta)
 
     targets: List[WaiverTarget] = []
     for entry in trending:
@@ -41,20 +44,33 @@ def waiver_targets(
         meta = (players_meta or {}).get(pid, {})
         if meta:
             asset.fill_from_meta(meta)
+        team = meta.get("team")
+        order = 2 if str(pid) in qb2_promoted else meta.get("depth_chart_order")
+        opp_score = opportunity_score(
+            asset.value, asset.position, order, team, is_superflex=is_superflex
+        )
         targets.append(
             WaiverTarget(
                 asset=asset,
                 add_count=count,
                 is_rostered=pid in rostered,
-                team=meta.get("team"),
-                depth_chart_order=meta.get("depth_chart_order"),
+                team=team,
+                depth_chart_order=order,
+                opportunity_score=opp_score,
             )
         )
 
     if free_agents_only:
         targets = [t for t in targets if not t.is_rostered]
 
-    # Most valuable first, then hottest; value is what separates a real dynasty
-    # add from a one-week-streamer add.
-    targets.sort(key=lambda t: (t.asset.value, t.add_count), reverse=True)
+    # Highest opportunity score first (dynasty value x depth chart), with raw value
+    # and add_count breaking ties.
+    targets.sort(
+        key=lambda t: (
+            t.opportunity_score if t.opportunity_score is not None else t.asset.value,
+            t.asset.value,
+            t.add_count,
+        ),
+        reverse=True,
+    )
     return targets[:limit]

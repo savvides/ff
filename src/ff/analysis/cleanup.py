@@ -47,22 +47,7 @@ def taxi_eligible(
 
 
 
-def _contingent_drop_penalty(s: RosterSlot, is_superflex: bool) -> int:
-    """Returns 1 for buried or unsigned players below 1000 value, 0 otherwise."""
-    if s.value >= 1000:
-        return 0
-    if not s.team or s.team in ("FA", "None"):
-        return 1
-    order = s.depth_chart_order or 99
-    if s.position == "QB" and is_superflex and order >= 3:
-        return 1
-    if s.position == "RB" and order >= 4:
-        return 1
-    if s.position == "WR" and order >= 5:
-        return 1
-    if s.position == "TE" and order >= 4:
-        return 1
-    return 0
+from ff.analysis.depth import opportunity_score, precompute_qb2_promotions
 
 
 def audit_roster(
@@ -86,6 +71,7 @@ def audit_roster(
     starter_set = set(roster.starters)
     taxi_set = set(roster.taxi)
     reserve_set = set(roster.reserve)
+    qb2_promoted = precompute_qb2_promotions(players_meta)
 
     slots: List[RosterSlot] = []
     for pid in roster.player_ids:
@@ -103,16 +89,22 @@ def audit_roster(
             cat = "BENCH"
         years_exp = m.get("years_exp")
         team = m.get("team")
-        depth_chart_order = m.get("depth_chart_order")
+        depth_chart_order = 2 if str(pid) in qb2_promoted else m.get("depth_chart_order")
+        pos = valued.position if valued else m.get("position")
+        val = valued.value if valued else 0
+        opp_score = opportunity_score(
+            val, pos, depth_chart_order, team, is_superflex=is_superflex
+        )
         slots.append(RosterSlot(
             player_id=pid,
             name=valued.name if valued else player_name(pid, players_meta),
-            position=(valued.position if valued else m.get("position")),
+            position=pos,
             team=team,
             depth_chart_order=depth_chart_order,
             age=(valued.age if valued and valued.age is not None else m.get("age")),
             years_exp=years_exp,
-            value=valued.value if valued else 0,
+            value=val,
+            opportunity_score=opp_score,
             trend_30day=valued.trend_30day if valued else None,
             slot=cat,
             taxi_eligible=taxi_eligible(
@@ -129,13 +121,12 @@ def audit_roster(
     )
 
     # Drop candidates: never a current starter (you do not cut a starter to add a
-    # free agent). Worst-first = contingent drop penalty (buried depth/unsigned FAs first),
-    # then lowest value, then oldest, then most experienced (least rebuild upside).
+    # free agent). Worst-first = lowest opportunity score (dynasty value x depth chart),
+    # then oldest, then most experienced (least rebuild upside).
     # Tie-break by name keeps the order stable.
     non_starters = [s for s in slots if s.slot != "START"]
     non_starters.sort(key=lambda s: (
-        -_contingent_drop_penalty(s, is_superflex),
-        s.value,
+        s.opportunity_score if s.opportunity_score is not None else s.value,
         -(s.age or 0),
         -(s.years_exp if s.years_exp is not None else -1),
         s.name,
