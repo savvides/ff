@@ -152,6 +152,99 @@ def test_no_taxi_candidates_when_taxi_full(book):
     assert a.taxi_candidates == []
 
 
+def test_audit_roster_basic(book):
+    from ff.contracts import Roster
+
+    roster = Roster(
+        roster_id=1,
+        team_name="Basic Team",
+        player_ids=["4984"],
+        starters=["4984"],
+    )
+
+    audit = audit_roster(roster, book)
+    assert audit.team_name == "Basic Team"
+    assert len(audit.slots) == 1
+    assert audit.slots[0].player_id == "4984"
+    assert audit.slots[0].slot == "START"
+
+
+def test_audit_roster_defaults_and_kwargs(book):
+    from ff.contracts import Asset, Roster
+
+    # A roster with players needing different slots
+    roster = Roster(
+        roster_id=1,
+        team_name="Kwarg Team",
+        player_ids=["start1", "bench1", "taxi1", "ir1"],
+        starters=["start1"],
+        taxi=["taxi1"],
+        reserve=["ir1"]
+    )
+
+    players_meta = {
+        "start1": {"position": "QB", "years_exp": 3, "team": "SEA", "depth_chart_order": 1},
+        "bench1": {"position": "WR", "years_exp": 0, "team": "DET", "depth_chart_order": 3},
+        "taxi1": {"position": "TE", "years_exp": 1, "team": "LV", "depth_chart_order": 2},
+        "ir1": {"position": "RB", "years_exp": 5, "team": "KC", "depth_chart_order": 1, "injury_status": "Out"}
+    }
+
+    from ff.values.client import ValueBook
+    # Provide some custom book values
+    book = ValueBook([
+        Asset(id="start1", name="Starter One", position="QB", value=1000),
+        Asset(id="bench1", name="Bench Rookie", position="WR", value=500),
+        Asset(id="taxi1", name="Taxi Player", position="TE", value=300),
+        Asset(id="ir1", name="IR Vet", position="RB", value=100),
+    ])
+
+    audit = audit_roster(
+        roster,
+        book,
+        players_meta,
+        roster_positions=["QB", "WR", "TE", "RB", "BN", "BN", "BN", "TAXI", "IR"],
+        taxi_slots=2,
+        reserve_slots=2,
+        taxi_allow_vets=True,  # affects taxi eligibility
+        taxi_years=0,
+        is_superflex=False,    # affects depth chart penalty
+        drop_limit=2           # limits drop candidates length
+    )
+
+    # Check categorization limits
+    assert audit.starter_cap == 4
+    assert audit.bench_cap == 3
+    assert audit.taxi_cap == 2
+    assert audit.ir_cap == 2
+
+    # Check open slots
+    assert audit.taxi_open == 1  # 2 slots, 1 filled
+    assert audit.ir_open == 1    # 2 slots, 1 filled
+
+    # Verify drops (should exclude starter, limited to 2)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    assert len(drop_pids) == 2
+    assert "start1" not in drop_pids
+    # Lowest opp score / value first: ir1 (100), then taxi1 (300)
+    assert drop_pids[0] == "ir1"
+    assert drop_pids[1] == "taxi1"
+
+    # Verify taxi candidates
+    # With allow_vets=True, all bench players are eligible
+    taxi_cands = [s.player_id for s in audit.taxi_candidates]
+    assert "bench1" in taxi_cands
+
+
+def test_audit_roster_empty_meta_and_book(book):
+    from ff.contracts import Roster
+
+    roster = Roster(roster_id=1, team_name="Empty", player_ids=["123"], starters=[])
+    audit = audit_roster(roster, book, players_meta=None)
+
+    assert audit.slots[0].player_id == "123"
+    assert audit.slots[0].value == 0
+
+
 def test_audit_roster_depth_chart_contingent_drop():
     from ff.contracts import Asset, Roster
     from ff.values import ValueBook
