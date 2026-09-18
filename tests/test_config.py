@@ -1,6 +1,24 @@
+import os
 from pathlib import Path
 
-from ff.core.config import Config, load_config, save_config
+import pytest
+
+from ff.core.config import Config, home, load_config, save_config
+
+
+def test_home_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FF_HOME", raising=False)
+    assert home() == Path.cwd() / ".ff"
+
+
+def test_home_custom_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FF_HOME", "/tmp/custom_ff_home")
+    assert home() == Path("/tmp/custom_ff_home")
+
+
+def test_home_expanduser(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FF_HOME", "~/custom_ff_home")
+    assert home() == Path("~/custom_ff_home").expanduser()
 
 
 def test_llm_config_defaults(tmp_path: Path) -> None:
