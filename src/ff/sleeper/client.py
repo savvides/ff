@@ -7,6 +7,7 @@ our `Format` so FantasyCalc gets queried correctly.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Format, Roster
@@ -85,6 +86,7 @@ class SleeperClient:
 
 # --- pure helpers & module wrappers ------------------------------------
 
+@functools.lru_cache(maxsize=None)
 def get_user(username_or_id: str) -> Dict[str, Any]:
     sc = SleeperClient()
     user = sc.user(username_or_id)
@@ -93,6 +95,7 @@ def get_user(username_or_id: str) -> Dict[str, Any]:
     return user
 
 
+@functools.lru_cache(maxsize=None)
 def get_user_leagues(user_id: str, season: Optional[str] = None) -> List[Dict[str, Any]]:
     sc = SleeperClient()
     s = season or sc.state().get("season", "2026")
