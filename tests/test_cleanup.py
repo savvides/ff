@@ -6,6 +6,8 @@ not perturb the pinned totals other fixtures assert on.
 
 from __future__ import annotations
 
+import pytest
+
 from ff.analysis import audit_roster, taxi_eligible
 from ff.contracts import Roster
 
@@ -48,23 +50,33 @@ def _audit(book, **kw):
 
 # --- taxi eligibility ----------------------------------------------------
 
-def test_taxi_eligible_allow_vets_lets_anyone_stash():
-    assert taxi_eligible(9, allow_vets=True, taxi_years=0) is True
-    assert taxi_eligible(None, allow_vets=True, taxi_years=None) is True
+@pytest.mark.parametrize(
+    "years_exp, allow_vets, taxi_years, expected",
+    [
+        # allow_vets=True overrides everything
+        (9, True, 0, True),
+        (None, True, None, True),
+        (0, True, None, True),
+        (2, True, 2, True),
 
+        # allow_vets=False, unknown experience is ineligible
+        (None, False, None, False),
+        (None, False, 0, False),
+        (None, False, 2, False),
 
-def test_taxi_eligible_rookies_only_when_no_vets():
-    assert taxi_eligible(0, allow_vets=False, taxi_years=None) is True
-    assert taxi_eligible(1, allow_vets=False, taxi_years=None) is False
+        # allow_vets=False, taxi_years=None means rookies only (years_exp == 0)
+        (0, False, None, True),
+        (1, False, None, False),
 
-
-def test_taxi_eligible_within_year_window():
-    assert taxi_eligible(2, allow_vets=False, taxi_years=2) is True
-    assert taxi_eligible(3, allow_vets=False, taxi_years=2) is False
-
-
-def test_taxi_eligible_unknown_experience_is_ineligible():
-    assert taxi_eligible(None, allow_vets=False, taxi_years=None) is False
+        # allow_vets=False, taxi_years specified
+        (0, False, 0, True),
+        (1, False, 0, False),
+        (2, False, 2, True),
+        (3, False, 2, False),
+    ],
+)
+def test_taxi_eligible(years_exp, allow_vets, taxi_years, expected):
+    assert taxi_eligible(years_exp, allow_vets=allow_vets, taxi_years=taxi_years) is expected
 
 
 # --- capacity + categorization ------------------------------------------
