@@ -12,3 +12,12 @@ def test_llm_config_defaults(tmp_path: Path) -> None:
     save_config(cfg, path=cfg_file)
     loaded = load_config(path=cfg_file)
     assert loaded.llm_backend == "gemini"
+
+def test_cache_dir(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FF_HOME", str(tmp_path))
+    from ff.core.config import cache_dir
+
+    d = cache_dir()
+    assert d == tmp_path / "cache"
+    assert d.exists()
+    assert d.is_dir()
