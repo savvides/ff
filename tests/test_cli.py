@@ -360,9 +360,9 @@ def test_cli_lazy_context(fake_clients, league):
     ctx = _LazyContext(cfg, sc)
     assert "config" in ctx
     # rosters should not be in keys until accessed
-    assert "rosters" not in dict.keys(ctx)
+    assert "rosters" not in ctx
     rosters = ctx["rosters"]
     assert len(rosters) > 0
-    assert "rosters" in dict.keys(ctx)
+    assert "rosters" in ctx
 
 
