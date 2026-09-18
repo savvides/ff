@@ -212,3 +212,35 @@ def test_values_client_type_hints_resolvable():
     assert hints_fetch["return"] is client_module.ValueBook
 
 
+
+def test_normalize_pick_comprehensive():
+    # Slot picks
+    assert normalize_pick("2026 pick 1.05") == "2026 pick 1.05"
+    assert normalize_pick("2026 1.05") == "2026 pick 1.05"
+    assert normalize_pick("2026 1.5") == "2026 pick 1.05"
+    assert normalize_pick("2026 pick 2.11") == "2026 pick 2.11"
+
+    # Round picks
+    assert normalize_pick("2027 1") == "2027 1"
+    assert normalize_pick("2027 1st") == "2027 1"
+    assert normalize_pick("2027 first") == "2027 1"
+    assert normalize_pick("2027 round 1") == "2027 1"
+    assert normalize_pick("2027 r1") == "2027 1"
+    assert normalize_pick("2027 3rd") == "2027 3"
+    assert normalize_pick("2027 round 4") == "2027 4"
+    assert normalize_pick("2027 4th") == "2027 4"
+
+    # Tiered picks
+    assert normalize_pick("2027 1 early") == "2027 1 early"
+    assert normalize_pick("2027 early 1st") == "2027 1 early"
+    assert normalize_pick("2027 1st (early)") == "2027 1 early"
+    assert normalize_pick("2027 Mid 1st") == "2027 1 mid"
+    assert normalize_pick("2027 Late 1st") == "2027 1 late"
+    assert normalize_pick("2027 2nd (Mid)") == "2027 2 mid"
+
+    # Invalid or non-pick strings
+    assert normalize_pick("Josh Allen") is None
+    assert normalize_pick("1st round pick") is None # No year
+    assert normalize_pick("2027") is None # Just a year
+    assert normalize_pick("2027 random text") is None # Year but no round
+    assert normalize_pick("not a pick") is None
