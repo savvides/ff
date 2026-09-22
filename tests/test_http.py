@@ -89,3 +89,74 @@ def test_non_json_body_raises():
                   content_type="text/html")
     with pytest.raises(ValueError):
         get_json(URL, use_cache=False)
+
+
+@responses.activate
+def test_get_json_retries_on_5xx_and_succeeds():
+    responses.add(responses.GET, URL, status=500)
+    responses.add(responses.GET, URL, status=502)
+    responses.add(responses.GET, URL, status=503)
+    responses.add(responses.GET, URL, json={"v": 1}, status=200)
+
+    assert get_json(URL, use_cache=False) == {"v": 1}
+    assert len(responses.calls) == 4
+
+
+@responses.activate
+def test_get_json_retries_on_429_and_succeeds():
+    responses.add(responses.GET, URL, status=429)
+    responses.add(responses.GET, URL, json={"v": 2}, status=200)
+
+    assert get_json(URL, use_cache=False) == {"v": 2}
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_get_json_raises_retry_error_after_max_retries():
+    import requests
+    # default total=4 retries + 1 initial = 5 calls
+    for _ in range(5):
+        responses.add(responses.GET, URL, status=500)
+
+    with pytest.raises(requests.exceptions.RetryError):
+        get_json(URL, use_cache=False)
+
+    assert len(responses.calls) == 5
+
+
+@responses.activate
+def test_ttl_zero_forces_live_fetch():
+    responses.add(responses.GET, URL, json={"v": 1}, status=200)
+    responses.add(responses.GET, URL, json={"v": 2}, status=200)
+
+    assert get_json(URL, ttl=100) == {"v": 1}
+    assert len(responses.calls) == 1
+
+    # ttl=0 forces live fetch despite cache existing and being fresh
+    assert get_json(URL, ttl=0) == {"v": 2}
+    assert len(responses.calls) == 2
+
+
+def test_timeout_parameter_passed_to_requests(monkeypatch):
+    import requests
+
+    class MockResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"v": 1}
+
+    called = False
+
+    def mock_get(*args, **kwargs):
+        nonlocal called
+        called = True
+        assert kwargs.get("timeout") == 5
+        return MockResponse()
+
+    monkeypatch.setattr(requests.Session, "get", mock_get)
+
+    get_json(URL, use_cache=False, timeout=5)
+    assert called
+
