@@ -66,6 +66,7 @@ def test_supported_journeys(configured, operation, arguments, expected):
         assert body["state"] == "test question"
         assert "player_ids" not in str(body)
         assert "userA" not in str(body)
+        assert "Dynasty Warriors" not in str(body) and "Gridiron Kings" not in str(body)
 
 
 @pytest.mark.parametrize("stage", ["operation", "team", "scope"])
@@ -84,7 +85,7 @@ def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
 @pytest.mark.parametrize("operation, arguments", [
     ("trade", {}), ("ambiguous", {}),
     ("get_lineup", {"team": "mine", "scope": "unsupported"}),
-    ("get_picks", {"team": "unknown"}),
+    ("get_picks", {"team": "named"}),
 ])
 @responses.activate
 def test_abstains_without_dispatch(configured, monkeypatch, operation, arguments):

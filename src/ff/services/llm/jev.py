@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 import requests
@@ -31,6 +32,7 @@ DEFERRED = {
     "ambiguous": "Please ask one specific question, such as 'Show my roster' or 'Top five available running backs'.",
 }
 LOW_CONFIDENCE = "Jev could not interpret this confidently. Please name one operation and make the team or filters explicit."
+TEAM_HINT = "Your team is unknown or ambiguous. Specify an exact team name or run `ff setup <username>`."
 
 
 class JevError(RuntimeError):
@@ -113,6 +115,21 @@ def choice(instructions: str, criteria: Dict[str, str]) -> Dict[str, Any]:
     return {"type": "choice", "instructions": instructions, "criteria": criteria}
 
 
+def _named_teams(query: str, rosters: List[Roster]) -> List[Roster]:
+    """Rosters the question names literally, by full team name or "roster/team N".
+
+    League members choose team names, so names never reach Jev; a name can only
+    select a team by appearing in the user's own words."""
+    text = " ".join(query.casefold().split())
+    numbers = set(re.findall(r"\b(?:roster|team)\s*#?\s*(\d+)\b", text))
+
+    def mentioned(name: str) -> bool:
+        name = " ".join(name.casefold().split())
+        return name not in ("", "unknown") and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text) is not None
+
+    return [r for r in rosters if str(r.roster_id) in numbers or mentioned(r.team_name)]
+
+
 def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Roster]],
               user_id: Optional[str]) -> Route:
     if not query.strip():
@@ -143,17 +160,12 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         {"supported": "Entire request fits", "unsupported": "Any unsupported detail",
          "ambiguous": "Cannot tell what was requested"},
     )}
-    rosters: List[Roster] = []
     if operation in TEAM_TOOLS:
-        rosters = get_rosters()
-        teams = {f"roster_{r.roster_id}": f"Team {r.team_name}, roster number {r.roster_id}" for r in rosters}
-        criteria = {**teams, "mine": "My/our team, or no team specified",
-                    "unknown": "Named team is absent or ambiguous"}
-        if operation == "get_picks":
-            criteria["league"] = "Explicitly all teams / whole league"
-        if len(criteria) > 255:
-            raise Clarification("Too many team choices for this pilot. Use the direct command.")
-        questions["team"] = choice("Which team does the user request? Match only the supplied team names or roster numbers. Never guess an unknown or ambiguous team.", criteria)
+        questions["team"] = choice("Which team does the user request?", {
+            "mine": "The user's own team, referred to only as my, our, me or I, or no team mentioned",
+            "named": "A team given by its team name or roster number, including the user's own team",
+            "league": "All teams or the whole league",
+        })
     if operation in ("get_waivers", "get_dynasty_values"):
         questions["position"] = choice("Which single position filter is requested?", {
             "QB": "Quarterbacks", "RB": "Running backs", "WR": "Wide receivers", "TE": "Tight ends",
@@ -167,24 +179,25 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         )
     answered = client.choose(query, questions)
     answers = {name: a.choice for name, a in answered.items()}
+    command = {"get_roster_cleanup": "cleanup", "get_power_rankings": "power", "get_dynasty_values": "values"}.get(operation, operation.removeprefix("get_"))
+    unsupported = f"This request has an unsupported or unclear detail. Use `ff {command} --help`, or ask a simpler question."
     for name, value in answers.items():
-        if value in ("unsupported", "unknown", "ambiguous"):
-            command = {"get_roster_cleanup": "cleanup", "get_power_rankings": "power", "get_dynasty_values": "values"}.get(operation, operation.removeprefix("get_"))
-            raise Clarification(f"This request has an unsupported or unclear detail. Use `ff {command} --help`, or ask a simpler question.", name)
+        if value in ("unsupported", "ambiguous"):
+            raise Clarification(unsupported, name)
+    kwargs: Dict[str, Any] = {}
+    team = answers.get("team")
+    if team == "league" and operation != "get_picks":
+        raise Clarification(unsupported, "team")
+    if team in ("mine", "named"):
+        rosters = get_rosters()
+        # "mine" is identity, never a name: a leaguemate cannot rename their way into it.
+        matches = [r for r in rosters if user_id and r.owner_id == user_id] if team == "mine" else _named_teams(query, rosters)
+        if len(matches) != 1:
+            raise Clarification(TEAM_HINT, "team")
+        kwargs["team"] = str(matches[0].roster_id)
     for name, a in answered.items():
         if a.confidence < CONFIDENCE_FLOOR:
             raise Clarification(LOW_CONFIDENCE, name, a.confidence)
-    kwargs: Dict[str, Any] = {}
-    if "team" in answers:
-        selected = answers["team"]
-        if selected != "league":
-            if selected == "mine":
-                matches = [r for r in rosters if user_id and r.owner_id == user_id]
-            else:
-                matches = [r for r in rosters if f"roster_{r.roster_id}" == selected]
-            if len(matches) != 1:
-                raise Clarification("Your team is unknown or ambiguous. Specify an exact team name or run `ff setup <username>`.")
-            kwargs["team"] = str(matches[0].roster_id)
     if "position" in answers and answers["position"] != "all":
         kwargs["position"] = answers["position"]
     if "limit" in answers:
