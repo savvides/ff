@@ -25,11 +25,16 @@ def configured(fake_clients, monkeypatch):
     return terminal
 
 
+# A fully in-scope answer to every question; tests override only what they probe.
+SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none",
+        "team": "mine", "position": "all", "limit": "none"}
+
+
 def serve(operation, arguments, low_stage=None):
     def callback(request):
         body = json.loads(request.body)
         questions = body["questions"]
-        selected = {"operation": operation} if "operation" in questions else {"scope": "supported", **arguments}
+        selected = {**SAFE, **arguments, "operation": operation}
         answers = {
             name: {"type": "choice", "choice": selected[name],
                    "confidence": 0.1 if name == low_stage else 0.95,
@@ -41,7 +46,7 @@ def serve(operation, arguments, low_stage=None):
 
 
 @pytest.mark.parametrize("operation, arguments, expected", [
-    ("get_roster", {"team": "mine", "limit": "default"}, "dynasty value"),
+    ("get_roster", {"team": "mine", "limit": "none"}, "dynasty value"),
     ("get_power_rankings", {}, "League power rankings"),
     ("get_dynasty_values", {"position": "RB", "limit": "1"}, "Dynasty player values"),
     ("get_waivers", {"position": "RB", "limit": "5"}, "Trending free agents"),
@@ -59,7 +64,7 @@ def test_supported_journeys(configured, operation, arguments, expected):
     assert expected in result.output
     assert result.output.count("QA:") == 1
     configured.assert_not_called()
-    assert len(responses.calls) == 2
+    assert len(responses.calls) == 1
     # Never send roster contents or valuation data to the model.
     for call in responses.calls:
         body = json.loads(call.request.body)
@@ -69,7 +74,7 @@ def test_supported_journeys(configured, operation, arguments, expected):
         assert "Dynasty Warriors" not in str(body) and "Gridiron Kings" not in str(body)
 
 
-@pytest.mark.parametrize("stage", ["operation", "team", "scope"])
+@pytest.mark.parametrize("stage", ["operation", "team", "time"])
 @responses.activate
 def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
     serve("get_lineup", {"team": "mine"}, low_stage=stage)
@@ -79,12 +84,12 @@ def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
     assert result.exit_code == 3
     assert "confidently" in result.output
     dispatch.assert_not_called()
-    assert len(responses.calls) == (1 if stage == "operation" else 2)
+    assert len(responses.calls) == 1
 
 
 @pytest.mark.parametrize("operation, arguments", [
     ("trade", {}), ("ambiguous", {}),
-    ("get_lineup", {"team": "mine", "scope": "unsupported"}),
+    ("get_lineup", {"team": "mine", "time": "other"}),
     ("get_picks", {"team": "named"}),
 ])
 @responses.activate
@@ -186,7 +191,7 @@ def test_empty_waivers(configured, monkeypatch):
     sleeper = cli.SleeperClient()
     sleeper.trending = lambda **kwargs: []
     monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
-    serve("get_waivers", {"position": "all", "limit": "default"})
+    serve("get_waivers", {"position": "all", "limit": "none"})
     result = runner.invoke(app, ["ask", "waivers", "--backend", "jev"])
     assert result.exit_code == 0, result.output
     assert "no results" in result.output
