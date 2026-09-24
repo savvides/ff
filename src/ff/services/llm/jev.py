@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import requests
 from pydantic import BaseModel, Field, ValidationError
@@ -186,6 +186,25 @@ def _named_teams(query: str, rosters: List[Roster]) -> List[Roster]:
     return [r for r in rosters if str(r.roster_id) in numbers or mentioned(r.team_name)]
 
 
+def _confidence(answer: ChoiceAnswer, outcomes: Dict[str, Any]) -> float:
+    """Jev's confidence in the chosen argument, not merely the chosen option.
+
+    Options that resolve to the same argument (your own team named and "mine";
+    no count and the default count) pool their probability, and confidence is
+    recomputed over the n distinct arguments with TypeSafe's published Choice
+    formula, (n * peak - 1) / (n - 1). With nothing to pool, Jev's own
+    confidence stands."""
+    def argument(option: str) -> Tuple[bool, Any]:
+        return (True, outcomes[option]) if option in outcomes else (False, option)
+
+    mass: Dict[Tuple[bool, Any], float] = {}
+    for option, p in answer.probabilities.items():
+        mass[argument(option)] = mass.get(argument(option), 0.0) + p
+    if len(mass) == len(answer.probabilities):
+        return answer.confidence
+    return (len(mass) * mass[argument(answer.choice)] - 1) / (len(mass) - 1)
+
+
 def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Roster]],
               user_id: Optional[str]) -> Route:
     if not query.strip():
@@ -204,24 +223,29 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         if answers[name].choice == "other":
             raise Clarification(unsupported, name)
     kwargs: Dict[str, Any] = {}
+    outcomes: Dict[str, Dict[str, Any]] = {}  # per question: option -> the argument it resolves to
     team = answers["team"].choice if "team" in used else None
     if team == "league" and operation != "get_picks":
         raise Clarification(unsupported, "team")
     if team in ("mine", "named"):
         rosters = get_rosters()
         # "mine" is identity, never a name: a leaguemate cannot rename their way into it.
-        matches = [r for r in rosters if user_id and r.owner_id == user_id] if team == "mine" else _named_teams(query, rosters)
-        if len(matches) != 1:
+        found = {"mine": [r for r in rosters if user_id and r.owner_id == user_id],
+                 "named": _named_teams(query, rosters)}
+        if len(found[team]) != 1:
             raise Clarification(TEAM_HINT, "team")
-        kwargs["team"] = str(matches[0].roster_id)
+        kwargs["team"] = str(found[team][0].roster_id)
+        outcomes["team"] = {option: str(m[0].roster_id) for option, m in found.items() if len(m) == 1}
     if "position" in used and answers["position"].choice != "all":
         kwargs["position"] = answers["position"].choice
     if "limit" in used:
-        limit = answers["limit"].choice
-        kwargs["limit"] = LIMITS[operation] if limit == "none" else int(limit)
+        limits = {**{str(i): i for i in range(1, 51)}, "none": LIMITS[operation]}
+        kwargs["limit"] = limits[answers["limit"].choice]
+        outcomes["limit"] = limits
     for name in used:
-        if answers[name].confidence < CONFIDENCE_FLOOR:
-            raise Clarification(LOW_CONFIDENCE, name, answers[name].confidence)
+        confidence = _confidence(answers[name], outcomes.get(name, {}))
+        if confidence < CONFIDENCE_FLOOR:
+            raise Clarification(LOW_CONFIDENCE, name, confidence)
     if operation == "get_waivers":
         kwargs["free_agents_only"] = True
     return Route(tool=operation, kwargs=kwargs)

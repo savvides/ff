@@ -112,9 +112,10 @@ SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none",
 
 
 class ScriptedClient:
-    def __init__(self, operation, answers=None, confidence=None):
+    def __init__(self, operation, answers=None, confidence=None, probabilities=None):
         self.result = {**SAFE, **(answers or {}), "operation": operation}
         self.confidence = confidence or {}
+        self.probabilities = probabilities or {}
         self.questions = []
 
     def choose(self, state, questions):
@@ -123,8 +124,14 @@ class ScriptedClient:
         for name, value in self.result.items():
             assert value in questions[name]["criteria"]
         return {name: ChoiceAnswer(type="choice", choice=value, confidence=self.confidence.get(name, 0.95),
-                                   probabilities={k: float(k == value) for k in questions[name]["criteria"]})
+                                   probabilities=self._probabilities(name, value, questions[name]["criteria"]))
                 for name, value in self.result.items()}
+
+    def _probabilities(self, name, value, criteria):
+        # Like the API: every option gets a probability.
+        if name not in self.probabilities:
+            return {k: float(k == value) for k in criteria}
+        return {k: self.probabilities[name].get(k, 0.0) for k in criteria}
 
 
 def rosters():
@@ -141,6 +148,36 @@ def test_confidence_floor(stage, confidence, accepted):
         with pytest.raises(Clarification, match="confidently") as error:
             interpret("question", client, rosters, "me")
         assert (error.value.question, error.value.confidence) == (stage, confidence)
+
+
+@pytest.mark.parametrize("query, probabilities, routed", [
+    # Naming your own team and saying "my team" are one interpretation: 2 * 0.95 - 1 = 0.90.
+    ("Show the Alpha roster", {"mine": 0.55, "named": 0.40, "league": 0.05}, True),
+    # Pooled, but still split against another argument: 2 * 0.55 - 1 = 0.10.
+    ("Show the Alpha roster", {"mine": 0.45, "named": 0.10, "league": 0.45}, False),
+    # "named" means Beta here, a different team, so nothing pools.
+    ("Show the Beta roster", {"mine": 0.55, "named": 0.40, "league": 0.05}, False),
+])
+def test_equivalent_team_options_share_confidence(query, probabilities, routed):
+    client = ScriptedClient("get_picks", confidence={"team": 0.325}, probabilities={"team": probabilities})
+    if routed:
+        assert interpret(query, client, rosters, "me").kwargs == {"team": "1"}
+    else:
+        with pytest.raises(Clarification, match="confidently") as error:
+            interpret(query, client, rosters, "me")
+        assert error.value.question == "team"
+
+
+@pytest.mark.parametrize("operation, routed", [("get_roster", True), ("get_dynasty_values", False)])
+def test_default_count_and_its_number_share_confidence(operation, routed):
+    # Roster's default is 15, so "none" and "15" agree; values' default is 40, so they do not.
+    client = ScriptedClient(operation, confidence={"limit": 0.2},
+                            probabilities={"limit": {"none": 0.5, "15": 0.45, "3": 0.05}})
+    if routed:
+        assert interpret("question", client, rosters, "me").kwargs["limit"] == 15
+    else:
+        with pytest.raises(Clarification, match="confidently"):
+            interpret("question", client, rosters, "me")
 
 
 def test_unused_questions_are_ignored():
