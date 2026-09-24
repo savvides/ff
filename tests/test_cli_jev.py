@@ -98,6 +98,15 @@ def test_abstains_without_dispatch(configured, monkeypatch, operation, arguments
 
 
 @responses.activate
+def test_picks_window_follows_latest_draft(configured):
+    serve("get_picks", {"team": "league"})
+    result = runner.invoke(app, ["ask", "league picks", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert "seasons: ['2027', '2028']; rounds: 2" in result.output
+    assert "2027 1st" in result.output and "2026 1st" not in result.output
+
+
+@responses.activate
 def test_lineup_missing_projections(configured, monkeypatch):
     serve("get_lineup", {"team": "mine"})
     monkeypatch.setattr("ff.cli.ProjectionsClient", lambda: Mock(week=Mock(return_value={})))

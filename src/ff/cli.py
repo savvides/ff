@@ -111,6 +111,26 @@ def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
     return build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
 
 
+def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
+                 years: int = 2, rounds: Optional[int] = None) -> Tuple[List[str], int]:
+    """(future seasons, rookie rounds per season) for a pick ledger."""
+    # "Future" starts after the latest draft's season: once a year's rookie
+    # draft exists its picks live on the draft board (`ff draft`), not here.
+    latest = _active_draft(sc, cfg.league_id)
+    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
+    start = base + 1 if latest else base
+    seasons = [str(start + i) for i in range(max(1, years))]
+    # Future rookie drafts are sized by the league's draft_rounds setting; the
+    # latest draft's own round count is only a fallback because in a first-year
+    # league that draft is the startup, whose 20+ rounds would fabricate future
+    # picks. --rounds overrides both (the year-one escape hatch).
+    rounds_n = int(rounds
+                   or (league.get("settings") or {}).get("draft_rounds")
+                   or (((latest or {}).get("settings")) or {}).get("rounds")
+                   or 4)
+    return seasons, rounds_n
+
+
 class _LazyContext(dict):
     """Lazy evaluation context for LLM dispatcher tools to avoid eager network/cache reads."""
 
@@ -132,6 +152,12 @@ class _LazyContext(dict):
         if "_state" not in self._cache:
             self._cache["_state"] = self._sc.state() or {}
         return self._cache["_state"]
+
+    def _get_pick_window(self) -> Tuple[List[str], int]:
+        # One drafts read (uncached upstream) serves both 'seasons' and 'rounds'.
+        if "_pick_window" not in self._cache:
+            self._cache["_pick_window"] = _pick_window(self._sc, self._cfg, self._get_league())
+        return self._cache["_pick_window"]
 
     def __getitem__(self, key: str) -> Any:
         if key in self:
@@ -168,6 +194,10 @@ class _LazyContext(dict):
             return self._sc.trending(kind="add", limit=50)
         elif key == "traded_picks":
             return self._sc.traded_picks(self._cfg.league_id)
+        elif key == "seasons":
+            return self._get_pick_window()[0]
+        elif key == "rounds":
+            return self._get_pick_window()[1]
         elif key == "week":
             state = self._get_state()
             return int(state.get("display_week") or state.get("week") or 1)
@@ -389,21 +419,7 @@ def picks(
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     league = sc.league(cfg.league_id) or {}
-
-    # "Future" starts after the latest draft's season: once a year's rookie
-    # draft exists its picks live on the draft board (`ff draft`), not here.
-    latest = _active_draft(sc, cfg.league_id)
-    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
-    start = base + 1 if latest else base
-    seasons = [str(start + i) for i in range(max(1, years))]
-    # Future rookie drafts are sized by the league's draft_rounds setting; the
-    # latest draft's own round count is only a fallback because in a first-year
-    # league that draft is the startup, whose 20+ rounds would fabricate future
-    # picks. --rounds overrides both (the year-one escape hatch).
-    rounds_n = int(rounds
-                   or (league.get("settings") or {}).get("draft_rounds")
-                   or (((latest or {}).get("settings")) or {}).get("rounds")
-                   or 4)
+    seasons, rounds_n = _pick_window(sc, cfg, league, years, rounds)
 
     valuations = value_all_rosters(rosters, book, sc.players())
     ranks = {v.roster_id: v.power_rank for v in valuations}
@@ -1252,14 +1268,6 @@ def _ask_jev(query: str, cfg: Config) -> None:
             ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"])
             if not ctx["projections"]:
                 raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
-        elif route.tool == "get_picks":
-            league = sc.league(cfg.league_id) or {}
-            latest = _active_draft(sc, cfg.league_id)
-            base = int((latest or {}).get("season") or league.get("season") or cfg.season)
-            start = base + 1 if latest else base
-            ctx["seasons"] = [str(start), str(start + 1)]
-            ctx["rounds"] = int((league.get("settings") or {}).get("draft_rounds")
-                                or ((latest or {}).get("settings") or {}).get("rounds") or 4)
         details = dict(route.kwargs)
         if details.pop("free_agents_only", False):
             details["availability"] = "free agents"

@@ -104,6 +104,20 @@ def test_ask_command_tool_execution_loop(
     assert "evaluate_trade" in synth
 
 
+def test_ask_picks_uses_league_pick_window(fake_clients) -> None:
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.side_effect = ['{"tool": "get_picks", "kwargs": {}}', "Your picks."]
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "what picks do I own"])
+    assert res.exit_code == 0, res.output
+    synth = mock_inst.run.call_args_list[1].kwargs["prompt"]
+    assert '"season": "2027"' in synth
+    assert '"season": "2026"' not in synth
+    assert '"round": 3' not in synth
+
+
 def test_ask_rejects_unknown_tool() -> None:
     with patch("ff.cli.TerminalRunner") as MockRunner:
         mock_inst = MagicMock()

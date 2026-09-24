@@ -60,6 +60,16 @@ def test_picks_league_summary(fake_clients, league):
     assert "2027" in result.output and "2028" in result.output
 
 
+def test_picks_years_and_rounds_override(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["picks", "--rounds", "3"])
+    assert result.exit_code == 0, result.output
+    assert "3rd" in result.output  # overrides the latest draft's 2 rounds
+    result = runner.invoke(app, ["picks", "--years", "1"])
+    assert result.exit_code == 0, result.output
+    assert "2027" in result.output and "2028" not in result.output
+
+
 def test_picks_team_detail(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["picks", "Dynasty Warriors"])
@@ -347,6 +357,21 @@ def test_cli_lineup_handles_unsupported_slots(fake_clients, league, monkeypatch)
     assert res.exit_code == 0, res.output
     assert "optimal lineup" in res.output
     assert "IDP" in res.output  # Surfaced in unsupported slots notice
+
+
+def test_cli_lazy_context_pick_window(fake_clients, league):
+    from ff.cli import _LazyContext, SleeperClient
+    from ff.core.config import Config
+    cfg = Config(league_id="LG1", season="2026", format=detect_format(league), user_id="userA")
+    sc = SleeperClient()
+    drafts = sc.drafts
+    calls = []
+    sc.drafts = lambda lid: calls.append(lid) or drafts(lid)
+    ctx = _LazyContext(cfg, sc)
+    # Same window as `ff picks`: after the latest (2026) draft, its 2 rounds.
+    assert ctx["seasons"] == ["2027", "2028"]
+    assert ctx["rounds"] == 2
+    assert calls == ["LG1"]
 
 
 def test_cli_lazy_context(fake_clients, league):
