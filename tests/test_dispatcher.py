@@ -59,10 +59,11 @@ def test_dispatch_get_waivers() -> None:
     from ff.services.llm.dispatcher import dispatch_tool
     mock_target = MagicMock()
     mock_target.model_dump.return_value = {"asset": {"name": "Player A"}, "add_count": 10}
-    mock_target.asset.position = "RB"
-    with patch("ff.analysis.waivers.waiver_targets", return_value=[mock_target]):
+    with patch("ff.analysis.waivers.waiver_targets", return_value=[mock_target]) as calculate:
         res = dispatch_tool("get_waivers", {"position": "RB", "limit": 5}, ctx={})
         assert res == [{"asset": {"name": "Player A"}, "add_count": 10}]
+    assert calculate.call_args.kwargs["position"] == "RB"
+    assert calculate.call_args.kwargs["limit"] == 5
 
 
 def test_waivers_filter_before_limit_and_use_league_format():

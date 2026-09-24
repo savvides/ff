@@ -27,6 +27,7 @@ def waiver_targets(
     limit: int = 25,
     free_agents_only: bool = True,
     is_superflex: bool = True,
+    position: Optional[str] = None,
 ) -> List[WaiverTarget]:
     rostered = {pid for r in rosters for pid in r.player_ids}
     qb2_promoted = precompute_qb2_promotions(players_meta)
@@ -79,6 +80,8 @@ def waiver_targets(
 
     if free_agents_only:
         targets = [t for t in targets if not t.is_rostered]
+    if position:
+        targets = [t for t in targets if t.asset.position == position.upper()]
 
     # Highest opportunity score first (dynasty value x depth chart), with raw value
     # and add_count breaking ties.

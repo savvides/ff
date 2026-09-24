@@ -40,3 +40,17 @@ def test_include_rostered(book, trending, rosters_raw, users_raw, players_meta):
     assert rostered.depth_chart_order == 1
     assert rostered.depth_role == "WR1"
 
+
+
+def test_position_filter_before_limit():
+    from ff.contracts import Asset
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="wr", name="Receiver", position="WR", value=5000),
+        Asset(id="rb", name="Runner", position="RB", value=1000),
+    ])
+    trending = [{"player_id": p, "count": 1} for p in ("wr", "rb")]
+    targets = waiver_targets(trending, book, [], limit=1, is_superflex=False, position="rb")
+    # The higher-valued WR must not take the only slot before the RB filter.
+    assert [t.asset.id for t in targets] == ["rb"]

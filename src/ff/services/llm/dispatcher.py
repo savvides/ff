@@ -19,8 +19,7 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
         for r in rosters:
             team_name = (getattr(r, "team_name", "") or "").lower()
             owner_id = (getattr(r, "owner_id", "") or "").lower()
-            roster_id = str(getattr(r, "roster_id", "")).lower()
-            if q == team_name or q == owner_id or q == roster_id:
+            if q == team_name or q == owner_id:
                 return r
         for r in rosters:
             team_name = (getattr(r, "team_name", "") or "").lower()
@@ -151,13 +150,11 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             book=value_book,
             rosters=rosters,
             players_meta=players_meta,
-            limit=len(trending) if position else limit,
+            limit=limit,
             free_agents_only=free_agents_only,
             is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
+            position=position,
         )
-        if position:
-            targets = [t for t in targets if t.asset and t.asset.position == position.upper()]
-        targets = targets[:limit]
         return [t.model_dump() if hasattr(t, "model_dump") else t for t in targets]
 
     elif tool_name == "get_roster":
