@@ -386,6 +386,14 @@ def test_cli_lazy_context_pick_window(fake_clients, league):
     assert calls == ["LG1"]
 
 
+def test_cli_lazy_context_value_book_scope(fake_clients, league, book, multi_market_book):
+    from ff.cli import _LazyContext, SleeperClient
+    from ff.core.config import Config
+    cfg = Config(league_id="LG1", season="2026", format=detect_format(league), user_id="userA")
+    assert _LazyContext(cfg, SleeperClient())["value_book"] is multi_market_book
+    assert _LazyContext(cfg, SleeperClient(), include_secondary=False)["value_book"] is book
+
+
 def test_cli_lazy_context(fake_clients, league):
     from ff.cli import _LazyContext, SleeperClient
     from ff.core.config import Config

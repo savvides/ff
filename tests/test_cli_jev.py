@@ -283,10 +283,11 @@ def test_waiver_calculation_matches_direct_analysis(configured, book, rosters_ra
         captured["result"] = original_dispatch(tool, args, ctx)
         return captured["result"]
     monkeypatch.setattr(cli, "dispatch_tool", capture)
-    serve("get_waivers", {"position": "RB", "limit": "1"})
-    result = runner.invoke(app, ["ask", "top available RB", "--backend", "jev"])
+    serve("get_waivers", {"position": "WR", "limit": "1"})
+    result = runner.invoke(app, ["ask", "top available WR", "--backend", "jev"])
     assert result.exit_code == 0, result.output
-    direct = waiver_targets(trending, book, build_rosters(rosters_raw, users_raw), players_meta, limit=len(trending), is_superflex=True)
-    expected = [t.model_dump() for t in direct if t.asset.position == "RB"][:1]
-    # Secondary market fields do not affect the opportunity score.
-    assert [(t["asset"]["id"], t["opportunity_score"]) for t in captured["result"]] == [(t["asset"]["id"], t["opportunity_score"]) for t in expected]
+    direct = waiver_targets(trending, book, build_rosters(rosters_raw, users_raw), players_meta,
+                            limit=1, is_superflex=False, position="WR")
+    # Full equality: the Jev book carries no secondary-market values.
+    assert captured["result"] == [t.model_dump() for t in direct]
+    assert captured["result"]

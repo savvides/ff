@@ -139,13 +139,14 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
 class _LazyContext(dict):
     """Lazy evaluation context for LLM dispatcher tools to avoid eager network/cache reads."""
 
-    def __init__(self, cfg: Config, sc: SleeperClient):
+    def __init__(self, cfg: Config, sc: SleeperClient, include_secondary: bool = True):
         super().__init__()
         self["config"] = cfg
         self["onboard_user"] = onboard_user
         self["season"] = str(cfg.season)
         self._cfg = cfg
         self._sc = sc
+        self._include_secondary = include_secondary
         self._cache: Dict[str, Any] = {}
 
     def _get_league(self) -> Dict[str, Any]:
@@ -181,7 +182,7 @@ class _LazyContext(dict):
         if key == "rosters":
             return _league_rosters(self._cfg, self._sc)
         elif key == "value_book":
-            return _book(self._cfg)
+            return _book(self._cfg, include_secondary=self._include_secondary)
         elif key == "players_meta":
             return self._sc.players()
         elif key == "projections":
@@ -219,9 +220,9 @@ class _LazyContext(dict):
         raise KeyError(key)
 
 
-def _analysis_ctx(cfg: Config, sc: SleeperClient) -> _LazyContext:
+def _analysis_ctx(cfg: Config, sc: SleeperClient, include_secondary: bool = True) -> _LazyContext:
     """I/O bundle the LLM dispatcher needs so tools see the same data as `ff` commands."""
-    return _LazyContext(cfg, sc)
+    return _LazyContext(cfg, sc, include_secondary)
 
 
 def _signed(n: int) -> str:
@@ -1263,7 +1264,8 @@ def _ask_jev(query: str, cfg: Config) -> None:
     try:
         client = JevClient()
         sc = SleeperClient()
-        ctx = _analysis_ctx(cfg, sc)
+        # Jev renders FantasyCalc-only tables, so skip the secondary-market scrape.
+        ctx = _analysis_ctx(cfg, sc, include_secondary=False)
         route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id)
         if route.tool == "get_lineup":
             if str(ctx._get_state().get("season")) != str(cfg.season):
