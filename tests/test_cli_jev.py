@@ -75,7 +75,7 @@ def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
     dispatch = Mock(side_effect=AssertionError("Must not dispatch"))
     monkeypatch.setattr("ff.cli.dispatch_tool", dispatch)
     result = runner.invoke(app, ["ask", "unclear", "--backend", "jev"])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "confidently" in result.output
     dispatch.assert_not_called()
     assert len(responses.calls) == (1 if stage == "operation" else 2)
@@ -92,7 +92,7 @@ def test_abstains_without_dispatch(configured, monkeypatch, operation, arguments
     dispatch = Mock()
     monkeypatch.setattr("ff.cli.dispatch_tool", dispatch)
     result = runner.invoke(app, ["ask", "unsupported", "--backend", "jev"])
-    assert result.exit_code == 2, result.output
+    assert result.exit_code == 3, result.output
     assert "Interpreted:" not in result.output
     dispatch.assert_not_called()
 
@@ -102,7 +102,7 @@ def test_lineup_missing_projections(configured, monkeypatch):
     serve("get_lineup", {"team": "mine"})
     monkeypatch.setattr("ff.cli.ProjectionsClient", lambda: Mock(week=Mock(return_value={})))
     result = runner.invoke(app, ["ask", "my lineup", "--backend", "jev"])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "No projections available" in result.output
 
 
@@ -128,7 +128,7 @@ def test_lineup_stale_season(configured):
     save_config(cfg)
     serve("get_lineup", {"team": "mine"})
     result = runner.invoke(app, ["ask", "my lineup", "--backend", "jev"])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "season is not current" in result.output
 
 

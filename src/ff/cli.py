@@ -1281,7 +1281,7 @@ def _ask_jev(query: str, cfg: Config) -> None:
         render_qa_footer(run_qa("ask", tool_name=route.tool, result=result, query=query), console)
     except Clarification as exc:
         console.print(str(exc), markup=False)
-        raise typer.Exit(2)
+        raise typer.Exit(3)
     except JevError as exc:
         console.print(f"error: {exc}", markup=False)
         raise typer.Exit(1)

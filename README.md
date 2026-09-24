@@ -193,7 +193,7 @@ instead. Unknown teams and unsupported details request clarification; they do no
 silently use defaults. Missing projections produce an unavailable message.
 
 Each operation and argument must meet a provisional confidence threshold of 0.80.
-Low confidence requests a clearer question (exit code 2). API errors exit with
+Low confidence requests a clearer question (exit code 3). API errors exit with
 code 1; there is no automatic model fallback or retry. This threshold measures
 interpretation confidence, not the chance a fantasy recommendation succeeds.
 
