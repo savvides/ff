@@ -20,9 +20,9 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
         if mode == "api_error":
             raise JevError("unavailable")
         if mode == "false_abstention" or (mode == "control_fails" and case["id"] == "control_roster"):
-            raise Clarification("uncertain")
+            raise Clarification("uncertain", "limit", 0.5)
         if case["expected"] is None:
-            raise Clarification("unsupported")
+            raise Clarification("unsupported", "time")
         if mode == "wrong":
             return Route(tool="get_power_rankings", kwargs={"bad": True})
         return Route.model_validate(case["expected"])
@@ -40,3 +40,11 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
     if mode == "control_fails":
         assert report["supported_exact_accuracy"] > 0.90
         assert report["control_passed"] is False
+    control = next(c for c in report["cases"] if c["id"] == "control_roster")
+    if mode in ("false_abstention", "control_fails"):
+        assert (control["question"], control["confidence"]) == ("limit", 0.5)
+    if mode == "wrong":
+        assert control["route"] == {"tool": "get_power_rankings", "kwargs": {"bad": True}}
+    abstention = next(c for c in report["cases"] if c["id"] == "trade")
+    if mode in ("pass", "wrong", "control_fails"):
+        assert (abstention["question"], abstention["confidence"]) == ("time", None)

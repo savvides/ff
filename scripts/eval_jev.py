@@ -33,23 +33,28 @@ def main() -> int:
     for case in cases:
         start = time.perf_counter()
         expected = case["expected"]
+        # Diagnostics name ff's own question or locally built route, never raw replies.
+        detail: dict = {}
         try:
             route = interpret(case["query"], client, lambda: rosters, "me")
             passed = expected is not None and route.model_dump() == expected
             if passed:
                 correct += 1
+            else:
+                detail = {"route": route.model_dump()}
             outcome = "correct" if passed else "incorrect"
-        except Clarification:
+        except Clarification as exc:
             passed = expected is None
             if passed:
                 abstained += 1
             outcome = "abstained"
+            detail = {"question": exc.question, "confidence": exc.confidence}
         except JevError:
             passed = False
             errors += 1
             outcome = "api_error"
         durations.append(time.perf_counter() - start)
-        results.append({"id": case["id"], "passed": passed, "outcome": outcome})
+        results.append({"id": case["id"], "passed": passed, "outcome": outcome, **detail})
     accuracy = correct / supported
     controls_passed = all(r["passed"] for r in results if r["id"] == "control_roster")
     passed = accuracy >= 0.90 and abstained == len(cases) - supported and errors == 0 and controls_passed
