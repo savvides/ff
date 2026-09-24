@@ -154,8 +154,7 @@ class _LazyContext(dict):
         elif key == "players_meta":
             return self._sc.players()
         elif key == "projections":
-            state = self._get_state()
-            week = int(state.get("display_week") or state.get("week") or 1)
+            week = self["week"]
             season = str(self._cfg.season)
             try:
                 return ProjectionsClient().week(season, week)
@@ -187,7 +186,7 @@ class _LazyContext(dict):
         raise KeyError(key)
 
 
-def _analysis_ctx(cfg: Config, sc: SleeperClient) -> Dict[str, Any]:
+def _analysis_ctx(cfg: Config, sc: SleeperClient) -> _LazyContext:
     """I/O bundle the LLM dispatcher needs so tools see the same data as `ff` commands."""
     return _LazyContext(cfg, sc)
 
@@ -1248,10 +1247,8 @@ def _ask_jev(query: str, cfg: Config) -> None:
         ctx = _analysis_ctx(cfg, sc)
         route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id)
         if route.tool == "get_lineup":
-            state = sc.state()
-            if str(state.get("season")) != str(cfg.season):
+            if str(ctx._get_state().get("season")) != str(cfg.season):
                 raise Clarification("The configured season is not current. Run `ff setup <username>` or use `ff lineup --season Y --week N`.")
-            ctx["week"] = int(state.get("display_week") or state.get("week") or 1)
             ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"])
             if not ctx["projections"]:
                 raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")

@@ -122,6 +122,19 @@ def test_lineup_fetch_and_label_use_same_week(configured, monkeypatch):
 
 
 @responses.activate
+def test_lineup_state_unavailable(configured, monkeypatch):
+    import ff.cli as cli
+    sleeper = cli.SleeperClient()
+    sleeper.state = lambda: None
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
+    serve("get_lineup", {"team": "mine"})
+    result = runner.invoke(app, ["ask", "my lineup", "--backend", "jev"])
+    assert result.exit_code == 3
+    assert "season is not current" in result.output
+    assert isinstance(result.exception, SystemExit)
+
+
+@responses.activate
 def test_lineup_stale_season(configured):
     cfg = load_config()
     cfg.season = 2025
