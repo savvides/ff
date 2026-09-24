@@ -1282,7 +1282,7 @@ def _ask_jev(query: str, cfg: Config) -> None:
     except Clarification as exc:
         console.print(str(exc), markup=False)
         raise typer.Exit(2)
-    except (JevError, ValueError) as exc:
+    except JevError as exc:
         console.print(f"error: {exc}", markup=False)
         raise typer.Exit(1)
 

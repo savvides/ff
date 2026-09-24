@@ -3,6 +3,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+import requests
 import responses
 from typer.testing import CliRunner
 
@@ -165,6 +166,26 @@ def test_api_error_is_not_a_sleeper_or_config_error(configured):
     assert "authentication failed" in result.output
     assert "private-test-key" not in result.output
     assert "config is corrupt" not in result.output
+
+
+@pytest.mark.parametrize("broken, message", [
+    ("sleeper", "could not reach Sleeper/FantasyCalc"), ("result", "config is corrupt"),
+])
+@responses.activate
+def test_data_errors_use_guard(configured, monkeypatch, broken, message):
+    import ff.cli as cli
+    if broken == "sleeper":
+        sleeper = cli.SleeperClient()
+        sleeper.rosters = Mock(side_effect=requests.exceptions.JSONDecodeError("Expecting value", "", 0))
+        monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
+    else:
+        monkeypatch.setattr(cli, "dispatch_tool", lambda *args: [{}])
+    serve("get_power_rankings", {})
+    result = runner.invoke(app, ["ask", "rank the league", "--backend", "jev"])
+    assert result.exit_code == 1
+    assert message in result.output
+    assert "error:" not in result.output
+    assert "validation error" not in result.output
 
 
 @responses.activate
