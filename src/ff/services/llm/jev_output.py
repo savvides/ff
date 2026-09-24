@@ -34,10 +34,13 @@ def render_result(route: Route, result: Any, ctx: Dict[str, Any], console: Conso
         valuation = RosterValuation.model_validate(result)
         report = run_qa("roster", valuation=valuation, target_roster=target)
         console.print(f"{valuation.team_name}: dynasty value {valuation.total_value:,}; starters {valuation.starters_value:,}", markup=False)
+        shown = valuation.assets[:args["limit"]]
         _table(console, "Roster", ("player", "pos", "role", "injury", "value"), (
             (a.name, a.position or "-", a.depth_role, a.injury_tag or "-", f"{a.value:,}")
-            for a in valuation.assets[:args["limit"]]
+            for a in shown
         ))
+        if len(shown) < len(valuation.assets):
+            console.print(f"Showing the top {len(shown)} of {len(valuation.assets)} players; ask for the entire roster to see all.", markup=False)
         if valuation.unvalued:
             console.print(f"Unvalued players: {len(valuation.unvalued)}; totals exclude missing market values.")
     elif tool == "get_power_rankings":

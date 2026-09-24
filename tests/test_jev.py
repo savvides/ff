@@ -180,6 +180,42 @@ def test_default_count_and_its_number_share_confidence(operation, routed):
             interpret("question", client, rosters, "me")
 
 
+def test_all_is_offered_only_when_asked():
+    control, entire = ScriptedClient("get_roster"), ScriptedClient("get_roster")
+    interpret("Show my roster", control, rosters, "me")
+    interpret("Show my entire roster", entire, rosters, "me")
+    assert "all" not in control.questions[0]["limit"]["criteria"]
+    assert "all" in entire.questions[0]["limit"]["criteria"]
+
+
+def three_players():
+    return [Roster(roster_id=1, owner_id="me", player_ids=["a", "b", "c"])]
+
+
+@pytest.mark.parametrize("operation", ["get_roster", "get_roster_cleanup"])
+def test_entire_roster_is_bounded_by_the_team(operation):
+    route = interpret("Show my entire roster", ScriptedClient(operation, {"limit": "all"}), three_players, "me")
+    assert route.kwargs == {"team": "1", "limit": 3}
+
+
+def test_every_result_and_its_count_share_confidence():
+    client = ScriptedClient("get_roster", {"limit": "all"}, {"limit": 0.2},
+                            {"limit": {"all": 0.5, "3": 0.45, "none": 0.05}})
+    assert interpret("Show my whole roster", client, three_players, "me").kwargs["limit"] == 3
+
+
+@pytest.mark.parametrize("operation", ["get_waivers", "get_dynasty_values"])
+def test_every_free_agent_or_player_abstains(operation):
+    with pytest.raises(Clarification, match="--help") as error:
+        interpret("Show every one of them", ScriptedClient(operation, {"limit": "all"}), rosters, "me")
+    assert error.value.question == "limit"
+
+
+def test_asking_all_does_not_break_the_default():
+    route = interpret("Show all dynasty WRs", ScriptedClient("get_dynasty_values", {"position": "WR"}), rosters, "me")
+    assert route.kwargs == {"position": "WR", "limit": 40}
+
+
 def test_unused_questions_are_ignored():
     # Power rankings read no team, position or limit, so their uncertainty is irrelevant.
     client = ScriptedClient("get_power_rankings", {"limit": "other", "team": "named"},

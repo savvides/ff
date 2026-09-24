@@ -163,12 +163,22 @@ QUESTIONS = {
         "QB": "Quarterbacks", "RB": "Running backs", "WR": "Wide receivers", "TE": "Tight ends",
         "all": "No position restriction", "other": "Other position or multiple positions",
     }),
-    "limit": choice(
-        "How many results does the user explicitly request? For cleanup count drop candidates. For roster count displayed players. Do not confuse roster numbers with result counts.",
-        {**{str(i): f"Exactly {i} results" for i in range(1, 51)},
-         "none": "No result count requested", "other": "Count outside 1-50 or requests every result without a bound"},
-    ),
 }
+EVERY = re.compile(r"\b(all|every|entire|full|whole|complete)\b", re.IGNORECASE)
+
+
+def _limit(query: str) -> Dict[str, Any]:
+    criteria = {str(i): f"Exactly {i} results" for i in range(1, 51)}
+    criteria["none"] = "No result count requested"
+    # Offered only when the words ask for it, so "Show my roster" never weighs
+    # "all" against the default count.
+    if EVERY.search(query):
+        criteria["all"] = "Every result, such as an entire roster"
+    criteria["other"] = "A count above 50 or below 1"
+    return choice(
+        "How many results does the user explicitly request? For cleanup count drop candidates. For roster count displayed players. Do not confuse roster numbers with result counts.",
+        criteria,
+    )
 
 
 def _named_teams(query: str, rosters: List[Roster]) -> List[Roster]:
@@ -209,7 +219,7 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
               user_id: Optional[str]) -> Route:
     if not query.strip():
         raise Clarification("Please enter a question.")
-    answers = client.choose(query, QUESTIONS)
+    answers = client.choose(query, {**QUESTIONS, "limit": _limit(query)})
     op = answers["operation"]
     # An abstaining answer keeps its hint at any confidence; the floor gates execution.
     if op.choice in DEFERRED:
@@ -224,6 +234,7 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
             raise Clarification(unsupported, name)
     kwargs: Dict[str, Any] = {}
     outcomes: Dict[str, Dict[str, Any]] = {}  # per question: option -> the argument it resolves to
+    target: Optional[Roster] = None
     team = answers["team"].choice if "team" in used else None
     if team == "league" and operation != "get_picks":
         raise Clarification(unsupported, "team")
@@ -234,12 +245,17 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
                  "named": _named_teams(query, rosters)}
         if len(found[team]) != 1:
             raise Clarification(TEAM_HINT, "team")
-        kwargs["team"] = str(found[team][0].roster_id)
+        target = found[team][0]
+        kwargs["team"] = str(target.roster_id)
         outcomes["team"] = {option: str(m[0].roster_id) for option, m in found.items() if len(m) == 1}
     if "position" in used and answers["position"].choice != "all":
         kwargs["position"] = answers["position"].choice
     if "limit" in used:
         limits = {**{str(i): i for i in range(1, 51)}, "none": LIMITS[operation]}
+        if target is not None:  # one team's roster bounds "every result"
+            limits["all"] = len(target.player_ids)
+        if answers["limit"].choice not in limits:  # every dynasty player or free agent
+            raise Clarification(unsupported, "limit")
         kwargs["limit"] = limits[answers["limit"].choice]
         outcomes["limit"] = limits
     for name in used:

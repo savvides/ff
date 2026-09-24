@@ -112,6 +112,25 @@ def test_picks_window_follows_latest_draft(configured):
     assert "2027 1st" in result.output and "2026 1st" not in result.output
 
 
+@pytest.mark.parametrize("query, limit, shown, note", [
+    ("my roster", "2", 2, "Showing the top 2 of 3 players"),
+    ("my roster", "none", 15, None),
+    ("my entire roster", "all", 3, None),
+])
+@responses.activate
+def test_roster_shows_the_requested_players(configured, query, limit, shown, note):
+    serve("get_roster", {"limit": limit})
+    result = runner.invoke(app, ["ask", query, "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert f"limit: {shown}" in result.output
+    # Roster 1 by value: Chase, Gibbs, then the unvalued kicker.
+    assert ("Test Kicker" in result.output) is (shown >= 3)
+    if note:
+        assert note in result.output
+    else:
+        assert "Showing the top" not in result.output
+
+
 @responses.activate
 def test_lineup_missing_projections(configured, monkeypatch):
     serve("get_lineup", {"team": "mine"})
