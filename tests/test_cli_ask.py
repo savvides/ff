@@ -118,6 +118,32 @@ def test_ask_picks_uses_league_pick_window(fake_clients) -> None:
     assert '"round": 3' not in synth
 
 
+def test_ask_waivers_pool_follows_limit(fake_clients, trending, monkeypatch) -> None:
+    import ff.cli as cli
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    sc = cli.SleeperClient()
+    sc.trending = MagicMock(return_value=trending)
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sc)
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.side_effect = ['{"tool": "get_waivers", "kwargs": {"limit": 30}}', "Targets."]
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "who should I add"])
+    assert res.exit_code == 0, res.output
+    sc.trending.assert_called_once_with(kind="add", limit=90)
+
+
+def test_ask_waivers_bad_limit_is_a_tool_error(fake_clients) -> None:
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.return_value = '{"tool": "get_waivers", "kwargs": {"limit": "abc"}}'
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "who should I add"])
+    assert res.exit_code == 0, res.output
+    assert "Error executing tool calculation" in res.output
+
+
 def test_ask_rejects_unknown_tool() -> None:
     with patch("ff.cli.TerminalRunner") as MockRunner:
         mock_inst = MagicMock()

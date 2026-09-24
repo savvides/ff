@@ -81,6 +81,18 @@ def test_picks_team_detail(fake_clients, league):
     assert re.search(r"own\s+│\s+mid\s+│\s+3,100", result.output)
 
 
+def test_waivers_pool_size(fake_clients, league, trending, monkeypatch):
+    from unittest.mock import Mock
+    import ff.cli as cli
+    _write_config(league)
+    sc = cli.SleeperClient()
+    sc.trending = Mock(return_value=trending)
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sc)
+    result = runner.invoke(app, ["waivers", "--limit", "20"])
+    assert result.exit_code == 0, result.output
+    sc.trending.assert_called_once_with(kind="add", limit=60)
+
+
 def test_values_by_position(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["values", "-p", "WR"])

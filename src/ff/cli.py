@@ -111,6 +111,11 @@ def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
     return build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
 
 
+def _trending_adds(sc: SleeperClient, limit: int) -> List[Dict[str, Any]]:
+    """Trending-add candidates for waiver ranking: three per requested row, at least 50."""
+    return sc.trending(kind="add", limit=max(limit * 3, 50))
+
+
 def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
                  years: int = 2, rounds: Optional[int] = None) -> Tuple[List[str], int]:
     """(future seasons, rookie rounds per season) for a pick ledger."""
@@ -190,8 +195,6 @@ class _LazyContext(dict):
             return self._get_league().get("scoring_settings") or {}
         elif key == "roster_positions":
             return self._get_league().get("roster_positions") or []
-        elif key == "trending":
-            return self._sc.trending(kind="add", limit=50)
         elif key == "traded_picks":
             return self._sc.traded_picks(self._cfg.league_id)
         elif key == "seasons":
@@ -704,7 +707,7 @@ def waivers(
     cfg, sc = _load()
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    trending = sc.trending(kind="add", limit=max(limit * 3, 50))
+    trending = _trending_adds(sc, limit)
     targets = waiver_targets(
         trending,
         book,
@@ -1268,6 +1271,8 @@ def _ask_jev(query: str, cfg: Config) -> None:
             ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"])
             if not ctx["projections"]:
                 raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
+        elif route.tool == "get_waivers":
+            ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
         details = dict(route.kwargs)
         if details.pop("free_agents_only", False):
             details["availability"] = "free agents"
@@ -1380,9 +1385,12 @@ def ask(
         console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
         return
 
-    ctx = _analysis_ctx(cfg, SleeperClient())
+    sc = SleeperClient()
+    ctx = _analysis_ctx(cfg, sc)
 
     try:
+        if tool_name == "get_waivers":
+            ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
         result = dispatch_tool(tool_name, kwargs, ctx)
     except Exception as e:
         console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")

@@ -154,6 +154,31 @@ def test_lineup_stale_season(configured):
     assert "season is not current" in result.output
 
 
+@pytest.mark.parametrize("limit, pool", [("5", 50), ("20", 60)])
+@responses.activate
+def test_waiver_pool_matches_ff_waivers(configured, monkeypatch, trending, limit, pool):
+    import ff.cli as cli
+    sleeper = cli.SleeperClient()
+    sleeper.trending = Mock(return_value=trending)
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
+    serve("get_waivers", {"position": "all", "limit": limit})
+    result = runner.invoke(app, ["ask", "waivers", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    sleeper.trending.assert_called_once_with(kind="add", limit=pool)
+
+
+@pytest.mark.parametrize("limit, note", [("5", "Only 2 of 5"), ("1", None)])
+@responses.activate
+def test_waiver_shortfall_note(configured, limit, note):
+    serve("get_waivers", {"position": "WR", "limit": limit})
+    result = runner.invoke(app, ["ask", "waiver receivers", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    if note:
+        assert note in result.output
+    else:
+        assert "Only " not in result.output
+
+
 @responses.activate
 def test_empty_waivers(configured, monkeypatch):
     import ff.cli as cli

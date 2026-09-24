@@ -59,6 +59,8 @@ def render_result(route: Route, result: Any, ctx: Dict[str, Any], console: Conso
             (t.asset.name, t.asset.position or "-", t.depth_role, f"{t.asset.value:,}", t.opportunity_score, t.add_count)
             for t in targets
         ))
+        if len(targets) < args["limit"]:
+            console.print(f"Only {len(targets)} of {args['limit']} requested results matched among trending adds.", markup=False)
         console.print("Candidates come from Sleeper trending adds; this is not a complete free-agent inventory.")
     elif tool == "get_picks":
         ledger = [TeamPicks.model_validate(t) for t in result]
