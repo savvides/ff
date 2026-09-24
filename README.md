@@ -46,8 +46,8 @@ make install                 # create venv + install dependencies + enable pre-c
   ff setup my_sleeper_user
   ```
 
-- **`ff config set-llm <backend>`** — Configures the local LLM runner used by `ff ask`.
-  - `backend`: `auto`, `agy`, `gemini`, `claude`, or `ollama`.
+- **`ff config set-llm <backend>`** — Configures the backend used by `ff ask`.
+  - `backend`: `auto`, `jev`, `agy`, `gemini`, `claude`, or `ollama`. `auto` selects terminal runners only.
   - `-m, --model M`: Model name when using Ollama (default: `llama3.2`).
   ```bash
   ff config set-llm agy
@@ -149,13 +149,60 @@ make install                 # create venv + install dependencies + enable pre-c
   ff draft -r --mode contend
   ```
 
-- **`ff ask "<query>"`** — Natural language Q&A interface using your terminal's local AI runner (`agy`, `gemini`, `claude`, `ollama`) to execute deterministic Python analysis tools and synthesize plain-English explanations.
+- **`ff ask "<query>"`** — Natural language Q&A using a terminal AI runner for explanations, or the optional hosted Jev pilot for deterministic tables.
   - `query`: Natural language question.
-  - `--backend BACKEND`: Override LLM backend: `auto`, `agy`, `gemini`, `claude`, or `ollama`.
+  - `--backend BACKEND`: Override backend: `auto`, `jev`, `agy`, `gemini`, `claude`, or `ollama`.
   ```bash
   ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
   ff ask "Who should I start at FLEX this week?"
   ```
+
+#### Optional Jev pilot
+
+[Jev](https://docs.typesafe.ai/introduction) interprets a question into a supported
+operation and bounded arguments. Python calculates the result, and the CLI shows
+the interpretation followed by tables. No terminal AI runner is used on this path.
+
+After `ff setup`, enter the key in your **zsh terminal**, without echo or shell history:
+
+```zsh
+read -rs 'TYPESAFE_API_KEY?TypeSafe API key: '; echo
+export TYPESAFE_API_KEY
+./.venv/bin/ff ask "Which five available running backs should I target?" --backend jev
+./.venv/bin/ff ask "Show my roster" --backend jev
+./.venv/bin/ff config set-llm jev  # optional: save backend preference, never the key
+```
+
+The key must be exported in the terminal running `ff`. `TYPESAFE_MODEL` optionally
+selects a pinned model; the default is `jev-latest`. No additional dependency is required.
+
+| Request | Supported arguments / defaults |
+|---|---|
+| Roster valuation | Known team (default yours); top players (default 15) |
+| League power rankings | Entire league, by dynasty player value |
+| Dynasty player rankings | QB/RB/WR/TE filter; limit (default 40) |
+| Waivers | Trending free agents only; position filter; limit (default 20) |
+| Draft-pick ownership | Known team (default yours) or explicit whole league; next two draft seasons |
+| Roster cleanup | Known team (default yours); drop-candidate limit (default 8) |
+| Starting lineup | Known team (default yours); full current-week lineup |
+
+Result limits are 1–50. Trade parsing, setup, draft recommendations, news analysis,
+player comparisons, multiple operations, and other filters are deferred with a
+direct-command hint. Lineup requests with explicit week numbers use `ff lineup`
+instead. Unknown teams and unsupported details request clarification; they do not
+silently use defaults. Missing projections produce an unavailable message.
+
+Each operation and argument must meet a provisional confidence threshold of 0.80.
+Low confidence requests a clearer question (exit code 2). API errors exit with
+code 1; there is no automatic model fallback or retry. This threshold measures
+interpretation confidence, not the chance a fantasy recommendation succeeds.
+
+Jev sends your question and, for team-specific questions, league team names and
+roster numbers to TypeSafe's hosted API. Requests consume your API allowance.
+The client does not store the key, questions, or responses. Existing Sleeper and
+market-data caching still applies. Automatic backend selection does not enable Jev.
+
+See [the 40-question live evaluation](evals/README.md) for model-accuracy checks.
 
 ### 6. Diagnostics & Utilities
 

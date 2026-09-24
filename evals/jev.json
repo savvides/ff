@@ -1,0 +1,350 @@
+[
+  {
+    "id": "control_roster",
+    "query": "Show my roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "roster_named",
+    "query": "Value the Gridiron Kings roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "2",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "roster_top",
+    "query": "Show my top five roster players by value",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 5
+      }
+    }
+  },
+  {
+    "id": "roster_other",
+    "query": "Show the top three players on Dynasty Warriors",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 3
+      }
+    }
+  },
+  {
+    "id": "power_rank",
+    "query": "Rank all teams by dynasty value",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "power_strength",
+    "query": "Show league power rankings",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "power_best",
+    "query": "Which teams have the most valuable rosters?",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "power_order",
+    "query": "Order the league teams by total player value",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "values_default",
+    "query": "Show dynasty player rankings",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "limit": 40
+      }
+    }
+  },
+  {
+    "id": "values_rb",
+    "query": "Top ten dynasty running backs",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "position": "RB",
+        "limit": 10
+      }
+    }
+  },
+  {
+    "id": "values_te",
+    "query": "Show the top five dynasty tight ends",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "position": "TE",
+        "limit": 5
+      }
+    }
+  },
+  {
+    "id": "values_qb",
+    "query": "Rank the top fifty quarterbacks by dynasty value",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "position": "QB",
+        "limit": 50
+      }
+    }
+  },
+  {
+    "id": "waivers_default",
+    "query": "Who should I target on waivers?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waivers_rb",
+    "query": "Which five available running backs should I target?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "position": "RB",
+        "limit": 5,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waivers_wr",
+    "query": "Show ten trending free-agent wide receivers",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "position": "WR",
+        "limit": 10,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waivers_qb",
+    "query": "Who is the top available quarterback on waivers?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "position": "QB",
+        "limit": 1,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "picks_own",
+    "query": "What future draft picks do I own?",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "picks_named",
+    "query": "Show future draft picks owned by Gridiron Kings",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {
+        "team": "2"
+      }
+    }
+  },
+  {
+    "id": "picks_league",
+    "query": "Show future draft pick ownership for the whole league",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "picks_default",
+    "query": "Show my draft capital",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "cleanup_default",
+    "query": "Help me make room on my roster",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "1",
+        "limit": 8
+      }
+    }
+  },
+  {
+    "id": "cleanup_three",
+    "query": "Show three drop candidates on my team",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "1",
+        "limit": 3
+      }
+    }
+  },
+  {
+    "id": "cleanup_named",
+    "query": "Audit the Gridiron Kings roster capacity",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "2",
+        "limit": 8
+      }
+    }
+  },
+  {
+    "id": "cleanup_taxi",
+    "query": "Which of my players can I stash on taxi to open roster space?",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "1",
+        "limit": 8
+      }
+    }
+  },
+  {
+    "id": "lineup_default",
+    "query": "Who should I start this week?",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "lineup_named",
+    "query": "Optimize the Gridiron Kings starting lineup this week",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "2"
+      }
+    }
+  },
+  {
+    "id": "lineup_own",
+    "query": "Show my best starting lineup",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "lineup_named2",
+    "query": "Set out the optimal current-week lineup for Dynasty Warriors",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "trade",
+    "query": "Should I trade Gibbs for Bijan?",
+    "expected": null
+  },
+  {
+    "id": "setup",
+    "query": "Set up a league for alice",
+    "expected": null
+  },
+  {
+    "id": "draft",
+    "query": "Who should I draft next?",
+    "expected": null
+  },
+  {
+    "id": "news",
+    "query": "Explain the latest injury news for Bijan",
+    "expected": null
+  },
+  {
+    "id": "comparison",
+    "query": "Start Gibbs or Bijan?",
+    "expected": null
+  },
+  {
+    "id": "multi",
+    "query": "Show my roster and rank waiver targets",
+    "expected": null
+  },
+  {
+    "id": "future",
+    "query": "Optimize my lineup next week",
+    "expected": null
+  },
+  {
+    "id": "history",
+    "query": "Show my roster values as of last year",
+    "expected": null
+  },
+  {
+    "id": "unknown_team",
+    "query": "Show the Moon Unicorns roster",
+    "expected": null
+  },
+  {
+    "id": "large_limit",
+    "query": "Show the top 100 dynasty players",
+    "expected": null
+  },
+  {
+    "id": "custom_filter",
+    "query": "Show waiver running backs younger than 24",
+    "expected": null
+  },
+  {
+    "id": "unclear",
+    "query": "What should I do?",
+    "expected": null
+  }
+]

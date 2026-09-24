@@ -12,6 +12,10 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
         return None
     if team_query:
         q = str(team_query).lower()
+        # Jev resolves team choices to canonical roster IDs before dispatch.
+        for r in rosters:
+            if q == str(getattr(r, "roster_id", "")).lower():
+                return r
         for r in rosters:
             team_name = (getattr(r, "team_name", "") or "").lower()
             owner_id = (getattr(r, "owner_id", "") or "").lower()
@@ -147,11 +151,13 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             book=value_book,
             rosters=rosters,
             players_meta=players_meta,
-            limit=limit,
-            free_agents_only=free_agents_only
+            limit=len(trending) if position else limit,
+            free_agents_only=free_agents_only,
+            is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
         )
         if position:
             targets = [t for t in targets if t.asset and t.asset.position == position.upper()]
+        targets = targets[:limit]
         return [t.model_dump() if hasattr(t, "model_dump") else t for t in targets]
 
     elif tool_name == "get_roster":
@@ -203,6 +209,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             reserve_slots=ctx.get("reserve_slots", 0),
             taxi_allow_vets=ctx.get("taxi_allow_vets", False),
             taxi_years=ctx.get("taxi_years", None),
+            is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
+            drop_limit=kwargs.get("limit", 8),
         )
         return res.model_dump() if hasattr(res, "model_dump") else res
 

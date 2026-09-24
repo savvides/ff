@@ -64,6 +64,39 @@ def test_dispatch_get_waivers() -> None:
         res = dispatch_tool("get_waivers", {"position": "RB", "limit": 5}, ctx={})
         assert res == [{"asset": {"name": "Player A"}, "add_count": 10}]
 
+
+def test_waivers_filter_before_limit_and_use_league_format():
+    from ff.contracts import Asset, Format
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="wr", name="Receiver", position="WR", value=5000),
+        Asset(id="rb", name="Runner", position="RB", value=1000),
+    ])
+    ctx = {"value_book": book, "trending": [{"player_id": p, "count": 1} for p in ("wr", "rb")],
+           "config": Config(league_id="x", season=2026, format=Format(superflex=False))}
+    result = dispatch_tool("get_waivers", {"position": "RB", "limit": 1}, ctx)
+    assert [t["asset"]["id"] for t in result] == ["rb"]
+    with patch("ff.analysis.waivers.waiver_targets", return_value=[]) as calculate:
+        dispatch_tool("get_waivers", {}, ctx)
+    assert calculate.call_args.kwargs["is_superflex"] is False
+
+
+def test_cleanup_dispatch_uses_league_format_and_drop_limit():
+    from ff.contracts import Format, Roster
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+
+    cfg = Config(league_id="x", season=2026, user_id="me", format=Format(superflex=False))
+    with patch("ff.analysis.cleanup.audit_roster") as calculate:
+        dispatch_tool("get_roster_cleanup", {"limit": 3}, {
+            "config": cfg, "rosters": [Roster(roster_id=1, owner_id="me")],
+        })
+    assert calculate.call_args.kwargs["is_superflex"] is False
+    assert calculate.call_args.kwargs["drop_limit"] == 3
+
 def test_dispatch_get_roster() -> None:
     from ff.services.llm.dispatcher import dispatch_tool
     mock_val = MagicMock()
@@ -199,3 +232,10 @@ def test_dispatcher_find_roster_owner_id_priority() -> None:
     matched = _find_roster([other_team, user_team], None, {"config": cfg})
     assert matched.roster_id == 1
 
+
+def test_roster_id_takes_priority_over_numeric_team_name():
+    from ff.contracts import Roster
+    from ff.services.llm.dispatcher import _find_roster
+    wrong = Roster(roster_id=2, team_name="1")
+    intended = Roster(roster_id=1, team_name="My Team")
+    assert _find_roster([wrong, intended], "1", {}) is intended

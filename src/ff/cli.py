@@ -53,6 +53,8 @@ from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
+from ff.services.llm.jev import Clarification, JevClient, JevError, interpret
+from ff.services.llm.jev_output import render_result
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
@@ -1239,15 +1241,66 @@ def draft(
     render_qa_footer(qa_rep, console)
 
 
+def _ask_jev(query: str, cfg: Config) -> None:
+    try:
+        client = JevClient()
+        sc = SleeperClient()
+        ctx = _analysis_ctx(cfg, sc)
+        route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id)
+        if route.tool == "get_lineup":
+            state = sc.state()
+            if str(state.get("season")) != str(cfg.season):
+                raise Clarification("The configured season is not current. Run `ff setup <username>` or use `ff lineup --season Y --week N`.")
+            ctx["week"] = int(state.get("display_week") or state.get("week") or 1)
+            ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"])
+            if not ctx["projections"]:
+                raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
+        elif route.tool == "get_picks":
+            league = sc.league(cfg.league_id) or {}
+            latest = _active_draft(sc, cfg.league_id)
+            base = int((latest or {}).get("season") or league.get("season") or cfg.season)
+            start = base + 1 if latest else base
+            ctx["seasons"] = [str(start), str(start + 1)]
+            ctx["rounds"] = int((league.get("settings") or {}).get("draft_rounds")
+                                or ((latest or {}).get("settings") or {}).get("rounds") or 4)
+        details = dict(route.kwargs)
+        if details.pop("free_agents_only", False):
+            details["availability"] = "free agents"
+        if "team" in details:
+            details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
+        if route.tool == "get_picks":
+            details.update(seasons=ctx["seasons"], rounds=ctx["rounds"])
+            details.setdefault("team", "whole league")
+        if route.tool == "get_lineup":
+            details.update(season=cfg.season, week=ctx["week"])
+        operation = route.tool.removeprefix("get_").replace("_", " ")
+        filters = "; ".join(f"{key}: {value}" for key, value in details.items())
+        console.print(f"Interpreted: {operation}" + (f"; {filters}" if filters else ""), markup=False)
+        result = dispatch_tool(route.tool, route.kwargs, ctx)
+        render_result(route, result, ctx, console)
+        render_qa_footer(run_qa("ask", tool_name=route.tool, result=result, query=query), console)
+    except Clarification as exc:
+        console.print(str(exc), markup=False)
+        raise typer.Exit(2)
+    except (JevError, ValueError) as exc:
+        console.print(f"error: {exc}", markup=False)
+        raise typer.Exit(1)
+
+
 @app.command()
 @_guard
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your league"),
-    backend: Optional[str] = typer.Option(None, "--backend", help="Override LLM backend (agy, gemini, claude, ollama)"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (jev, agy, gemini, claude, ollama)"),
 ) -> None:
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
     target_backend = backend or (cfg.llm_backend if cfg else "auto")
+    if target_backend == "jev":
+        if cfg is None:
+            _fail("No league configured. Run `ff setup <username>` first.")
+        _ask_jev(query, cfg)
+        return
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
     try:
@@ -1346,7 +1399,7 @@ def ask(
 @config_app.command(name="set-llm")
 @_guard
 def set_llm(
-    backend: str = typer.Argument(..., help="LLM backend: auto, agy, gemini, claude, ollama"),
+    backend: str = typer.Argument(..., help="LLM backend: auto, jev, agy, gemini, claude, ollama"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
 ) -> None:
     """Configure the LLM backend used by 'ff ask'."""
@@ -1356,7 +1409,7 @@ def set_llm(
         cfg = load_config()
     except FileNotFoundError:
         _fail("No league configured. Run 'ff setup <username>' first.")
-    valid_backends = SUPPORTED_BACKENDS + ["auto"]
+    valid_backends = SUPPORTED_BACKENDS + ["auto", "jev"]
     backend_clean = backend.lower()
     if backend_clean not in valid_backends:
         _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
