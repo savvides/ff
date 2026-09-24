@@ -178,27 +178,36 @@ selects a pinned model; the default is `jev-latest`. No additional dependency is
 
 | Request | Supported arguments / defaults |
 |---|---|
-| Roster valuation | Known team (default yours); top players (default 15) |
+| Roster valuation | Known team (default yours); top players (default 15) or entire roster |
 | League power rankings | Entire league, by dynasty player value |
 | Dynasty player rankings | QB/RB/WR/TE filter; limit (default 40) |
 | Waivers | Trending free agents only; position filter; limit (default 20) |
-| Draft-pick ownership | Known team (default yours) or explicit whole league; next two draft seasons |
+| Draft-pick ownership | Known team (default yours) or explicit whole league; the two seasons after the latest draft, league round count |
 | Roster cleanup | Known team (default yours); drop-candidate limit (default 8) |
 | Starting lineup | Known team (default yours); full current-week lineup |
 
-Result limits are 1–50. Trade parsing, setup, draft recommendations, news analysis,
-player comparisons, multiple operations, and other filters are deferred with a
-direct-command hint. Lineup requests with explicit week numbers use `ff lineup`
-instead. Unknown teams and unsupported details request clarification; they do not
-silently use defaults. Missing projections produce an unavailable message.
+Result limits are 1–50, or the entire roster for roster and cleanup requests.
+Trade parsing, setup, draft recommendations, news analysis, player comparisons,
+multiple operations, other player filters (such as age), and other weeks or seasons
+are deferred with a direct-command hint, even when Jev is unsure of them. Lineup
+requests for another week use `ff lineup` instead. Teams are matched on your
+machine: "my team" is the team you own, and any other team must be named by its
+full team name or roster number; unknown or ambiguous teams request clarification.
+Details that have no argument above, such as a market (KTC/Dealer), custom scoring,
+or a specific draft year, are not checked: the request runs with the defaults
+above, which the `Interpreted:` line shows. Missing projections produce an
+unavailable message.
 
-Each operation and argument must meet a provisional confidence threshold of 0.80.
-Low confidence requests a clearer question (exit code 3). API errors exit with
+Every answer an operation uses must meet a provisional confidence threshold of 0.80.
+Options that resolve to the same argument, such as your team by name and "my team",
+or no count and the default count, count together. A request Jev cannot run as asked
+(low confidence, a deferred or unsupported detail, an unknown team, a stale season,
+or missing projections) prints guidance and exits with code 3. API errors exit with
 code 1; there is no automatic model fallback or retry. This threshold measures
 interpretation confidence, not the chance a fantasy recommendation succeeds.
 
-Jev sends your question and, for team-specific questions, league team names and
-roster numbers to TypeSafe's hosted API. Requests consume your API allowance.
+Jev receives only your question text, in one request per question; team names,
+rosters, and values stay on your machine. Requests consume your API allowance.
 The client does not store the key, questions, or responses. Existing Sleeper and
 market-data caching still applies. Automatic backend selection does not enable Jev.
 
