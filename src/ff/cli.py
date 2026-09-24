@@ -1286,6 +1286,9 @@ def _ask_jev(query: str, cfg: Config) -> None:
         raise typer.Exit(1)
 
 
+_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto", "jev"]
+
+
 @app.command()
 @_guard
 def ask(
@@ -1294,7 +1297,9 @@ def ask(
 ) -> None:
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
-    target_backend = backend or (cfg.llm_backend if cfg else "auto")
+    target_backend = (backend or (cfg.llm_backend if cfg else "auto")).lower()
+    if target_backend not in _LLM_BACKENDS:
+        _fail(f"Invalid backend '{target_backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
     if target_backend == "jev":
         if cfg is None:
             _fail("No league configured. Run `ff setup <username>` first.")
@@ -1304,7 +1309,7 @@ def ask(
 
     try:
         runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
-    except (RuntimeError, ValueError) as e:
+    except RuntimeError as e:
         _fail(str(e))
 
     system_prompt = (
@@ -1408,10 +1413,9 @@ def set_llm(
         cfg = load_config()
     except FileNotFoundError:
         _fail("No league configured. Run 'ff setup <username>' first.")
-    valid_backends = SUPPORTED_BACKENDS + ["auto", "jev"]
     backend_clean = backend.lower()
-    if backend_clean not in valid_backends:
-        _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
+    if backend_clean not in _LLM_BACKENDS:
+        _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
     cfg.llm_backend = backend_clean
     if model:
         cfg.ollama_model = model

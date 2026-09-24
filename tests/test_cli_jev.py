@@ -200,6 +200,32 @@ def test_saved_jev_backend(configured):
 
 
 @responses.activate
+def test_backend_name_is_case_insensitive(configured):
+    serve("get_power_rankings", {})
+    result = runner.invoke(app, ["ask", "rank the league", "--backend", "Jev"])
+    assert result.exit_code == 0, result.output
+    configured.assert_not_called()
+
+
+@responses.activate
+def test_saved_backend_name_is_case_insensitive(configured):
+    cfg = load_config()
+    cfg.llm_backend = "JEV"
+    save_config(cfg)
+    serve("get_power_rankings", {})
+    result = runner.invoke(app, ["ask", "rank the league"])
+    assert result.exit_code == 0, result.output
+    configured.assert_not_called()
+
+
+def test_unknown_backend_lists_jev(configured):
+    result = runner.invoke(app, ["ask", "rank the league", "--backend", "jevv"])
+    assert result.exit_code == 1
+    assert "jev" in result.output.replace("jevv", "")
+    configured.assert_not_called()
+
+
+@responses.activate
 def test_waiver_calculation_matches_direct_analysis(configured, book, rosters_raw, users_raw, players_meta, trending, monkeypatch):
     from ff.analysis.waivers import waiver_targets
     from ff.sleeper import build_rosters
