@@ -8,7 +8,7 @@ import responses
 
 from ff.contracts import Roster
 from ff.services.llm.jev import (
-    ENDPOINT, Clarification, JevClient, JevError, choice, interpret,
+    DEFERRED, ENDPOINT, ChoiceAnswer, Clarification, JevClient, JevError, choice, interpret,
 )
 
 
@@ -33,7 +33,7 @@ def test_client_posts_contract_and_model_override(monkeypatch):
     client = JevClient()
     questions = {"operation": choice("Which operation?", {"a": "A", "b": "B"})}
     responses.post(ENDPOINT, json=payload(questions, {"operation": "a"}))
-    assert client.choose("question", questions) == {"operation": "a"}
+    assert client.choose("question", questions)["operation"].choice == "a"
     import json
     call = responses.calls[0]
     assert call.request.headers["Authorization"] == "Bearer private-test-key"
@@ -97,22 +97,20 @@ def test_rejects_bad_responses(client, corruption):
         client.choose("test", questions)
 
 
-@pytest.mark.parametrize("confidence, accepted", [(0.79, False), (0.8, True)])
 @responses.activate
-def test_confidence_boundary(client, confidence, accepted):
+def test_choose_returns_low_confidence_answers(client):
+    # The floor is applied by interpret(), which knows which answers would execute.
     questions = {"op": choice("Choose", {"a": "A", "b": "B"})}
-    responses.post(ENDPOINT, json=payload(questions, {"op": "a"}, confidence))
-    if accepted:
-        assert client.choose("test", questions) == {"op": "a"}
-    else:
-        with pytest.raises(Clarification, match="confidently"):
-            client.choose("test", questions)
+    responses.post(ENDPOINT, json=payload(questions, {"op": "a"}, 0.1))
+    answer = client.choose("test", questions)["op"]
+    assert (answer.choice, answer.confidence) == ("a", 0.1)
 
 
 class ScriptedClient:
-    def __init__(self, operation, answers):
+    def __init__(self, operation, answers, confidence=None):
         self.operation = operation
         self.answers = answers
+        self.confidence = confidence or {}
         self.questions = []
 
     def choose(self, state, questions):
@@ -121,7 +119,22 @@ class ScriptedClient:
         assert set(result) == set(questions)
         for name, value in result.items():
             assert value in questions[name]["criteria"]
-        return result
+        return {name: ChoiceAnswer(type="choice", choice=value, confidence=self.confidence.get(name, 0.95),
+                                   probabilities={k: float(k == value) for k in questions[name]["criteria"]})
+                for name, value in result.items()}
+
+
+@pytest.mark.parametrize("stage", ["operation", "scope", "team"])
+@pytest.mark.parametrize("confidence, accepted", [(0.79, False), (0.8, True)])
+def test_confidence_floor(stage, confidence, accepted):
+    client = ScriptedClient("get_picks", {"scope": "supported", "team": "mine"}, {stage: confidence})
+    teams = Mock(return_value=[Roster(roster_id=1, owner_id="me")])
+    if accepted:
+        assert interpret("question", client, teams, "me").kwargs == {"team": "1"}
+    else:
+        with pytest.raises(Clarification, match="confidently") as error:
+            interpret("question", client, teams, "me")
+        assert (error.value.question, error.value.confidence) == (stage, confidence)
 
 
 @pytest.mark.parametrize("operation, answers, expected", [
@@ -147,10 +160,13 @@ def test_interpret_validated_arguments(operation, answers, expected):
 
 @pytest.mark.parametrize("operation", ["trade", "setup", "draft", "news", "unsupported", "ambiguous"])
 def test_deferred_operations_stop_before_arguments(operation):
-    client = ScriptedClient(operation, {})
+    # Even an uncertain abstaining answer keeps its direct-command hint.
+    client = ScriptedClient(operation, {}, {"operation": 0.3})
     teams = Mock()
-    with pytest.raises(Clarification):
+    with pytest.raises(Clarification) as error:
         interpret("question", client, teams, "me")
+    assert str(error.value) == DEFERRED[operation]
+    assert error.value.question == "operation"
     assert len(client.questions) == 1
     teams.assert_not_called()
 
