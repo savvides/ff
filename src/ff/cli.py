@@ -1278,7 +1278,6 @@ def _ask_jev(query: str, cfg: Config) -> None:
         console.print(f"Interpreted: {operation}" + (f"; {filters}" if filters else ""), markup=False)
         result = dispatch_tool(route.tool, route.kwargs, ctx)
         render_result(route, result, ctx, console)
-        render_qa_footer(run_qa("ask", tool_name=route.tool, result=result, query=query), console)
     except Clarification as exc:
         console.print(str(exc), markup=False)
         raise typer.Exit(3)

@@ -57,7 +57,7 @@ def test_supported_journeys(configured, operation, arguments, expected):
     assert result.exit_code == 0, result.output + str(result.exception)
     assert "Interpreted:" in result.output
     assert expected in result.output
-    assert "QA:" in result.output
+    assert result.output.count("QA:") == 1
     configured.assert_not_called()
     assert len(responses.calls) == 2
     # Never send roster contents or valuation data to the model.
