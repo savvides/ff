@@ -126,7 +126,9 @@ class JevClient:
                 probs = answer.probabilities
                 if (answer.choice not in options or set(probs) != set(options)
                         or any(not 0 <= p <= 1 for p in probs.values())
-                        or abs(sum(probs.values()) - 1) > 0.01
+                        # Jev rounds each probability to 0.01, so the sum may drift by
+                        # half a unit per option (0.99 is normal on the 52-option limit).
+                        or abs(sum(probs.values()) - 1) > 0.005 * len(options) + 1e-9
                         or probs[answer.choice] < max(probs.values())):
                     raise ValueError
         except (ValueError, ValidationError):

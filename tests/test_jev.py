@@ -122,6 +122,19 @@ def test_rejects_bad_responses(client, corruption):
         client.choose("test", questions)
 
 
+@pytest.mark.parametrize("probabilities", [
+    {"a": 0.51, "b": 0.50},  # two rounded halves
+    {**{str(i): 0.0 for i in range(50)}, "a": 0.93, "b": 0.06},  # 52 options summing to 0.99
+])
+@responses.activate
+def test_accepts_rounded_probabilities(client, probabilities):
+    questions = {"op": choice("Choose", {k: k for k in probabilities})}
+    data = payload(questions, {"op": "a"})
+    data["answers"]["op"]["probabilities"] = probabilities
+    responses.post(ENDPOINT, json=data)
+    assert client.choose("test", questions)["op"].choice == "a"
+
+
 @responses.activate
 def test_choose_returns_low_confidence_answers(client):
     # The floor is applied by interpret(), which knows which answers would execute.
