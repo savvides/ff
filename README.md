@@ -194,7 +194,9 @@ a direct-command hint, even when Jev is unsure of them; draft-pick requests chec
 only for multiple requests and the team. Lineup requests for another week use
 `ff lineup` instead. Teams are matched on your
 machine: "my team" is the team you own, and any other team must be named by its
-full team name or roster number; unknown or ambiguous teams request clarification.
+full team name or roster number. A name nested in another team's name, or made only
+of generic words, needs the roster number; unknown or ambiguous teams request
+clarification.
 Details that have no argument above, such as a market (KTC/Dealer), custom scoring,
 or a specific draft year, are not checked: the request runs with the defaults
 above, which the `Interpreted:` line shows. Missing projections produce an

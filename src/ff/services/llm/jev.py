@@ -168,6 +168,9 @@ QUESTIONS = {
     }),
 }
 EVERY = re.compile(r"\b(all|every|entire|full|whole|complete)\b", re.IGNORECASE)
+POSSESSIVE = re.compile(r"\b(my|our|mine)\b", re.IGNORECASE)
+# Words that cannot tell teams apart; a team name made only of them never matches.
+GENERIC = {"unknown", "the", "my", "our", "team", "roster", "league", "dynasty"}
 
 
 def _limit(query: str) -> Dict[str, Any]:
@@ -188,15 +191,21 @@ def _named_teams(query: str, rosters: List[Roster]) -> List[Roster]:
     """Rosters the question names literally, by full team name or "roster/team N".
 
     League members choose team names, so names never reach Jev; a name can only
-    select a team by appearing in the user's own words."""
+    select a team by appearing in the user's own words. A name nested in another
+    team's name ("Kings" in "Gridiron Kings") never decides alone: the user may
+    have mistyped the longer name, or a leaguemate may have lengthened theirs to
+    capture the shorter one."""
+    def within(part: str, whole: str) -> bool:
+        return re.search(rf"(?<!\w){re.escape(part)}(?!\w)", whole) is not None
+
     text = " ".join(query.casefold().split())
     numbers = set(re.findall(r"\b(?:roster|team)\s*#?\s*(\d+)\b", text))
-
-    def mentioned(name: str) -> bool:
-        name = " ".join(name.casefold().split())
-        return name not in ("", "unknown") and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text) is not None
-
-    return [r for r in rosters if str(r.roster_id) in numbers or mentioned(r.team_name)]
+    names = {r.roster_id: " ".join(r.team_name.casefold().split()) for r in rosters}
+    names = {rid: name for rid, name in names.items() if not set(name.split()) <= GENERIC}
+    by_name = {rid for rid, name in names.items() if within(name, text)}
+    nested = {other for rid in by_name for other, name in names.items()
+              if other != rid and (within(name, names[rid]) or within(names[rid], name))}
+    return [r for r in rosters if str(r.roster_id) in numbers or r.roster_id in by_name | nested]
 
 
 def _confidence(answer: ChoiceAnswer, outcomes: Dict[str, Any]) -> float:
@@ -250,6 +259,9 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         if len(found[team]) != 1:
             raise Clarification(TEAM_HINT, "team")
         target = found[team][0]
+        # "my" or "our" with someone else's team is a contradiction, not a lookup.
+        if team == "named" and POSSESSIVE.search(query) and not (user_id and target.owner_id == user_id):
+            raise Clarification(TEAM_HINT, "team")
         kwargs["team"] = str(target.roster_id)
         outcomes["team"] = {option: str(m[0].roster_id) for option, m in found.items() if len(m) == 1}
     if "position" in used and answers["position"].choice != "all":
