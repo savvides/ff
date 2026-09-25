@@ -54,7 +54,7 @@ DEFERRED = {
     "setup": "Set up your league with `ff setup <username>`.",
     "draft": "Use `ff draft` for draft recommendations.",
     "news": "Use `ff news` for player status and trending activity.",
-    "unsupported": "This pilot supports roster, power, values, waivers, picks, cleanup and current-week lineup questions. Use `ff --help` for other commands.",
+    "unsupported": "This pilot supports roster, power, values, dynasty or weekly waivers, picks, cleanup, current-week lineups and two-player start/sit comparisons. Use `ff --help` for other commands.",
     "ambiguous": "Please ask one specific question, such as 'Show my roster' or 'Top five available running backs'.",
 }
 LOW_CONFIDENCE = "Jev could not interpret this confidently. Please name one operation and make the team or filters explicit."

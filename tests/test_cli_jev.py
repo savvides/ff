@@ -84,6 +84,8 @@ def test_named_comparison_direct_and_jev_use_same_calculation(configured):
     direct = runner.invoke(app, ["compare", "Ja'Marr Chase", "Jahmyr Gibbs"])
     assert via_jev.exit_code == direct.exit_code == 0, via_jev.output + direct.output
     assert "Both players" in direct.output
+    assert "players: Ja'Marr Chase, Jahmyr Gibbs" in via_jev.output
+    assert "player_ids:" not in via_jev.output
     # Rich may wrap the interpreted line, so compare the actual result region.
     assert re.sub(r"\([0-9.]+ms\)", "", via_jev.output[via_jev.output.index("Both players"):]) == re.sub(r"\([0-9.]+ms\)", "", direct.output)
     assert direct.output.count("QA:") == 1

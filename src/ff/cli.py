@@ -1367,6 +1367,8 @@ def _ask_jev(query: str, cfg: Config) -> None:
             details["availability"] = "unrostered (claim status unknown)"
         if "team" in details:
             details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
+        if "player_ids" in details:
+            details["players"] = ", ".join(player_name(pid, ctx["players_meta"]) for pid in details.pop("player_ids"))
         if route.tool == "get_picks":
             details.update(seasons=ctx["seasons"], rounds=ctx["rounds"])
             details.setdefault("team", "whole league")
