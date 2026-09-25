@@ -58,11 +58,15 @@ def test_live_loader_refreshes_status_and_uses_matchup_actual_zero():
         {"roster_id": 1, "starters": ["a"], "players_points": {"a": 0}}])
     roster = Roster(roster_id=1, player_ids=["a"], starters=["a"])
     context, meta = load_weekly(SleeperClient(), "L", roster, "2026", 3,
-                                {"roster_positions": ["WR"]}, {"a": {"injury_status": None}})
+                                {"roster_positions": ["WR"]}, {"a": {"injury_status": None}},
+                                candidate_meta={"b": {"team": "WAS", "injury_status": None}})
     assert context.players["a"].actual == 0
     assert context.players["a"].injury_status == meta["a"]["injury_status"] == "Out"
     assert context.players["a"].game_status == "final"
     assert context.as_of.tzinfo
+    assert context.players["a"].source == "https://api.sleeper.com/players/nfl/a"
+    assert context.players["b"].source.startswith("https://api.sleeper.com/projections/")
+    assert len(responses.calls) == 4  # candidate status comes from the bulk projection snapshot
 
 
 def test_invalid_ir_and_autosubs_block_actionable_advice():

@@ -133,6 +133,8 @@ def load_weekly(sc: SleeperClient, league_id: str, roster: Roster, season: str,
     verified = {**(candidate_meta or {}), **{p: fresh[p] for p in roster.player_ids}}
     context = build_weekly(roster, verified, games, matchup, league.get("settings") or {},
                            league.get("roster_positions") or [], datetime.now(timezone.utc))
+    for pid in set(candidate_meta or {}) - set(roster.player_ids):
+        context.players[pid].source = f"https://api.sleeper.com/projections/nfl/{season}/{week}?season_type=regular"
     for pid in roster.player_ids:
         if (context.players[pid].injury_status or "").lower() not in {"questionable", "doubtful"}:
             continue
