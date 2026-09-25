@@ -241,7 +241,7 @@ def _confidence(answer: ChoiceAnswer, outcomes: Dict[str, Any]) -> float:
     if peak <= answer.probabilities[answer.choice]:
         return answer.confidence
     n = len(answer.probabilities)
-    return max(answer.confidence, (n * peak - 1) / (n - 1))
+    return max(answer.confidence, min(1.0, (n * peak - 1) / (n - 1)))
 
 
 def _low(answer: ChoiceAnswer) -> Optional[float]:

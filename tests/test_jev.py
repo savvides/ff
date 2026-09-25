@@ -135,6 +135,29 @@ def test_accepts_rounded_probabilities(client, probabilities):
     assert client.choose("test", questions)["op"].choice == "a"
 
 
+@pytest.mark.parametrize("probabilities", [
+    {"a": 0.50, "b": 0.48},  # beyond two rounding errors
+    {**{str(i): 0.0 for i in range(50)}, "a": 0.60, "b": 0.10},  # 52 options summing to 0.70
+])
+@responses.activate
+def test_rejects_probabilities_beyond_rounding(client, probabilities):
+    questions = {"op": choice("Choose", {k: k for k in probabilities})}
+    data = payload(questions, {"op": "a"})
+    data["answers"]["op"]["probabilities"] = probabilities
+    responses.post(ENDPOINT, json=data)
+    with pytest.raises(JevError, match="invalid response"):
+        client.choose("test", questions)
+
+
+def test_pooled_confidence_never_exceeds_one():
+    # A rounded 52-option answer may sum above 1; pooling must not report more than certainty.
+    from ff.services.llm.jev import _confidence
+    probabilities = {**{str(i): 0.0 for i in range(1, 51)}, "none": 0.9, "other": 0.0}
+    probabilities["15"] = 0.35
+    answer = ChoiceAnswer(type="choice", choice="none", confidence=0.9, probabilities=probabilities)
+    assert _confidence(answer, {"none": 15, "15": 15}) == 1.0
+
+
 @responses.activate
 def test_choose_returns_low_confidence_answers(client):
     # The floor is applied by interpret(), which knows which answers would execute.
