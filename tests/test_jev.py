@@ -269,16 +269,19 @@ def test_deferred_operations_stop_before_arguments(operation):
     with pytest.raises(Clarification) as error:
         interpret("question", client, teams, "me")
     assert str(error.value) == DEFERRED[operation]
-    assert error.value.question == "operation"
+    assert (error.value.question, error.value.confidence) == ("operation", 0.3)
     assert len(client.questions) == 1
     teams.assert_not_called()
 
 
 @pytest.mark.parametrize("answer", ["named", "mine"])
-def test_unknown_or_missing_own_team(answer):
-    client = ScriptedClient("get_picks", {"team": answer})
-    with pytest.raises(Clarification, match="unknown or ambiguous"):
+@pytest.mark.parametrize("confidence, recorded", [(0.95, None), (0.4, 0.4)])
+def test_unknown_or_missing_own_team(answer, confidence, recorded):
+    # An uncertain team answer that also fails to resolve is reported as a near miss.
+    client = ScriptedClient("get_picks", {"team": answer}, {"team": confidence})
+    with pytest.raises(Clarification, match="unknown or ambiguous") as error:
         interpret("question", client, lambda: [Roster(roster_id=1, owner_id="someone_else")], "me")
+    assert (error.value.question, error.value.confidence) == ("team", recorded)
 
 
 def test_league_team_only_for_picks():
@@ -302,7 +305,7 @@ def test_unsupported_details_abstain(operation, field):
     teams = Mock(side_effect=rosters)
     with pytest.raises(Clarification, match=f"`ff {COMMANDS[operation]} --help`") as error:
         interpret("question", client, teams, "me")
-    assert error.value.question == field
+    assert (error.value.question, error.value.confidence) == (field, 0.3)
     teams.assert_not_called()
 
 

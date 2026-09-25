@@ -227,6 +227,11 @@ def _confidence(answer: ChoiceAnswer, outcomes: Dict[str, Any]) -> float:
     return max(answer.confidence, (n * peak - 1) / (n - 1))
 
 
+def _low(answer: ChoiceAnswer) -> Optional[float]:
+    """An abstaining answer's confidence when below the floor, for evaluation reports."""
+    return answer.confidence if answer.confidence < CONFIDENCE_FLOOR else None
+
+
 def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Roster]],
               user_id: Optional[str]) -> Route:
     if not query.strip():
@@ -235,7 +240,7 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
     op = answers["operation"]
     # An abstaining answer keeps its hint at any confidence; the floor gates execution.
     if op.choice in DEFERRED:
-        raise Clarification(DEFERRED[op.choice], "operation")
+        raise Clarification(DEFERRED[op.choice], "operation", _low(op))
     if op.confidence < CONFIDENCE_FLOOR:
         raise Clarification(LOW_CONFIDENCE, "operation", op.confidence)
     operation, used = op.choice, USES[op.choice]
@@ -244,24 +249,24 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
     for name in used:
         value = answers[name].choice
         if value == "other" or (name == "position" and value != "all" and operation not in POSITIONED):
-            raise Clarification(unsupported, name)
+            raise Clarification(unsupported, name, _low(answers[name]))
     kwargs: Dict[str, Any] = {}
     outcomes: Dict[str, Dict[str, Any]] = {}  # per question: option -> the argument it resolves to
     target: Optional[Roster] = None
     team = answers["team"].choice if "team" in used else None
     if team == "league" and operation != "get_picks":
-        raise Clarification(unsupported, "team")
+        raise Clarification(unsupported, "team", _low(answers["team"]))
     if team in ("mine", "named"):
         rosters = get_rosters()
         # "mine" is identity, never a name: a leaguemate cannot rename their way into it.
         found = {"mine": [r for r in rosters if user_id and r.owner_id == user_id],
                  "named": _named_teams(query, rosters)}
         if len(found[team]) != 1:
-            raise Clarification(TEAM_HINT, "team")
+            raise Clarification(TEAM_HINT, "team", _low(answers["team"]))
         target = found[team][0]
         # "my" or "our" with someone else's team is a contradiction, not a lookup.
         if team == "named" and POSSESSIVE.search(query) and not (user_id and target.owner_id == user_id):
-            raise Clarification(TEAM_HINT, "team")
+            raise Clarification(TEAM_HINT, "team", _low(answers["team"]))
         kwargs["team"] = str(target.roster_id)
         outcomes["team"] = {option: str(m[0].roster_id) for option, m in found.items() if len(m) == 1}
     if "position" in used and answers["position"].choice != "all":
@@ -271,7 +276,7 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         if target is not None:  # one team's roster bounds "every result"
             limits["all"] = len(target.player_ids)
         if answers["limit"].choice not in limits:  # every dynasty player or free agent
-            raise Clarification(unsupported, "limit")
+            raise Clarification(unsupported, "limit", _low(answers["limit"]))
         kwargs["limit"] = limits[answers["limit"].choice]
         outcomes["limit"] = limits
     for name in used:

@@ -42,7 +42,7 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
         assert report["control_passed"] is False
     control = next(c for c in report["cases"] if c["id"] == "control_roster")
     if mode in ("false_abstention", "control_fails"):
-        assert (control["question"], control["confidence"]) == ("limit", 0.5)
+        assert (control["question"], control["confidence"], control["message"]) == ("limit", 0.5, "uncertain")
     if mode == "wrong":
         assert control["route"] == {"tool": "get_power_rankings", "kwargs": {"bad": True}}
     abstention = next(c for c in report["cases"] if c["id"] == "trade")

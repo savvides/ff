@@ -29,5 +29,6 @@ calibration study. Do not lower thresholds merely to make the set pass.
 Exit codes: `0` passes; `1` fails a gate; `2` means the API key is missing.
 The report includes case IDs, exact accuracy, abstentions, API failures, resolved
 model versions, latency, and token usage. Each abstention names the ff question
-that abstained and, when it fell below the floor, its confidence; each incorrect
-case shows the locally built route. It excludes credentials and raw replies.
+that abstained, ff's own message, and, when it fell below the floor, its
+confidence; each incorrect case shows the locally built route. It excludes
+credentials and raw replies.

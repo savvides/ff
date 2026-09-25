@@ -48,7 +48,7 @@ def main() -> int:
             if passed:
                 abstained += 1
             outcome = "abstained"
-            detail = {"question": exc.question, "confidence": exc.confidence}
+            detail = {"question": exc.question, "confidence": exc.confidence, "message": str(exc)}
         except JevError:
             passed = False
             errors += 1
