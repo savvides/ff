@@ -17,13 +17,13 @@ CONFIDENCE_FLOOR = 0.80
 RETRY_STATUSES = (429, 529)
 RETRY_DELAYS = (1.0, 2.0)
 OPERATIONS = {
-    "get_roster": "Value one team's entire roster; optional top-player display limit.",
+    "get_roster": "Value one team's roster: its players, total value and top assets; optional top-player display limit.",
     "get_power_rankings": "Rank all league teams by total dynasty player value.",
-    "get_dynasty_values": "Rank dynasty players by market value; optional position and limit.",
+    "get_dynasty_values": "Rank dynasty players across the whole player pool, not one team's roster, by market value; optional position and limit.",
     "get_waivers": "Rank trending free agents available in this league; optional position and limit.",
     "get_picks": "Show future draft pick ownership for one team or explicitly the whole league, using the default next two draft seasons and league rounds.",
     "get_roster_cleanup": "Audit one team's roster capacity, drop candidates and taxi stashes; optional drop-candidate limit.",
-    "get_lineup": "Optimize one team's full starting lineup for the current week only.",
+    "get_lineup": "Optimize one team's full starting lineup (start/sit) for the current week only.",
 }
 LIMITS = {"get_roster": 15, "get_dynasty_values": 40, "get_waivers": 20, "get_roster_cleanup": 8}
 # The questions each operation reads. Every request asks them all, in one call;
