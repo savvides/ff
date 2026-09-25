@@ -149,7 +149,8 @@
       "kwargs": {
         "position": "WR",
         "limit": 10,
-        "free_agents_only": true
+        "free_agents_only": true,
+        "trending_only": true
       }
     }
   },

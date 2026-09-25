@@ -20,6 +20,7 @@ from ff.contracts import (
     WaiverTarget,
 )
 from ff.core.config import Config
+from ff.analysis.waivers import waiver_positions
 from ff.services.llm.tools import ALLOWED_TOOLS
 from ff.qa.models import QACheck
 
@@ -522,7 +523,8 @@ def validate_news(
     return checks
 
 
-def validate_waivers(targets: List[WaiverTarget], rosters: Optional[List[Roster]] = None) -> List[QACheck]:
+def validate_waivers(targets: List[WaiverTarget], rosters: Optional[List[Roster]] = None,
+                     roster_positions: Optional[List[str]] = None) -> List[QACheck]:
     """Validate waiver wire targets invariants."""
     checks: List[QACheck] = []
 
@@ -542,6 +544,13 @@ def validate_waivers(targets: List[WaiverTarget], rosters: Optional[List[Roster]
             message="" if fa_unowned else "Player marked as free agent is currently on a league roster",
         ))
 
+    if roster_positions is not None:
+        eligible = waiver_positions(roster_positions)
+        checks.append(QACheck(
+            name="Waivers League Position Eligibility",
+            passed=all(t.asset.position in eligible for t in targets),
+            message="Waiver candidates must fit a starting slot in this league.",
+        ))
     return checks
 
 

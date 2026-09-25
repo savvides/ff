@@ -57,14 +57,16 @@ def render_result(route: Route, result: Any, ctx: Dict[str, Any], console: Conso
         ))
     elif tool == "get_waivers":
         targets = [WaiverTarget.model_validate(t) for t in result]
-        report = run_qa("waivers", targets=targets, rosters=ctx.get("rosters", []))
-        _table(console, "Trending free agents by opportunity", ("player", "pos", "role", "value", "opportunity", "adds"), (
-            (t.asset.name, t.asset.position or "-", t.depth_role, f"{t.asset.value:,}", t.opportunity_score, t.add_count)
+        report = run_qa("waivers", targets=targets, rosters=ctx.get("rosters", []),
+                        roster_positions=ctx.get("roster_positions"))
+        title = "Unrostered players by dynasty opportunity" + (" (trending only)" if args.get("trending_only") else "")
+        _table(console, title, ("player", "pos", "role", "value", "opportunity", "adds"), (
+            (t.asset.name, t.asset.position or "-", t.depth_role, f"{t.asset.value:,}", t.opportunity_score, t.add_count or "-")
             for t in targets
         ))
         if len(targets) < args["limit"]:
-            console.print(f"Only {len(targets)} of {args['limit']} requested results matched among trending adds.", markup=False)
-        console.print("Candidates come from Sleeper trending adds; this is not a complete free-agent inventory.")
+            console.print(f"Only {len(targets)} of {args['limit']} requested results matched the filters.", markup=False)
+        console.print("Unrostered does not establish waiver claim status or immediate pickup eligibility; check Sleeper. Adds: '-' means outside the trending sample. Rankings use dynasty opportunity, not weekly projected points.")
     elif tool == "get_picks":
         ledger = [TeamPicks.model_validate(t) for t in result]
         selected = [target] if target else ctx.get("rosters", [])

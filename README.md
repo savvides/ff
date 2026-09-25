@@ -130,9 +130,12 @@ make install                 # create venv + install dependencies + enable pre-c
   ff news
   ```
 
-- **`ff waivers`** — Identifies trending free-agent adds across Sleeper, joins them with FantasyCalc dynasty values, and flags availability in your league.
+- **`ff waivers`** — Ranks unrostered active NFL players and market-listed prospects by dynasty opportunity, restricted to positions your league can start. Trending adds annotate the results instead of limiting the candidate pool.
   - `--limit N`: Number of waiver targets to show (default: 20).
-  - `--all`: Include currently rostered players (default: free agents only).
+  - `--all`: Include currently rostered players (default: unrostered only).
+  - `--position RB`: Filter candidates by position before applying the limit.
+  - `--trending`: Restrict candidates to the sampled Sleeper trending adds.
+  - Unrostered does not mean immediately claimable. Check waiver claim status in Sleeper. These rankings use dynasty value and depth-chart opportunity, not weekly projected points.
   ```bash
   ff waivers --limit 20
   ```
@@ -187,7 +190,7 @@ overrides the tested default, `jev-1.13.0`. No additional dependency is required
 | Roster valuation | Known team (default yours); top players (default 15) or entire roster |
 | League power rankings | Entire league, by dynasty player value |
 | Dynasty player rankings | QB/RB/WR/TE filter; limit (default 40) |
-| Waivers | Trending free agents only; position filter; limit (default 20) |
+| Waivers | Unrostered players in eligible league positions; optional position and trending-only filters; limit (default 20) |
 | Draft-pick ownership | Known team (default yours) or explicit whole league; the two seasons after the latest draft, league round count |
 | Roster cleanup | Known team (default yours); drop-candidate limit (default 8) |
 | Starting lineup | Known team (default yours); full current-week lineup |
@@ -208,6 +211,13 @@ Requests for a different market (KTC/Dealer), custom scoring, or specific draft
 years/rounds ask for clarification. Supported requests use FantasyCalc values,
 your league's scoring, and the pick seasons shown on the `Interpreted:` line.
 Missing projections produce an unavailable message.
+Waiver results distinguish unrostered players from verified free agents: the public
+API does not establish immediate pickup or pending-claim status. Requests requiring
+that distinction ask you to check Sleeper. Requests to submit claims, place bids or
+change a roster are rejected explicitly; this integration is read-only. FA/FAs and
+position abbreviations are accepted. General waiver requests search active NFL
+players and market-listed prospects; explicit trending requests use the sampled
+trending list. A dash in the adds column means outside that sample, not zero adds.
 
 Every answer an operation uses must meet a provisional confidence threshold of 0.80.
 Options that resolve to the same argument, such as your team by name and "my team",

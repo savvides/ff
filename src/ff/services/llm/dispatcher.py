@@ -154,6 +154,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             free_agents_only=free_agents_only,
             is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
             position=position,
+            roster_positions=ctx.get("roster_positions"),
+            trending_only=bool(kwargs.get("trending_only", False)),
         )
         return [t.model_dump() if hasattr(t, "model_dump") else t for t in targets]
 

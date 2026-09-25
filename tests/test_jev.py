@@ -238,7 +238,8 @@ def test_choose_returns_low_confidence_answers(client):
 
 # A fully in-scope answer to every question; tests override only what they probe.
 SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
-        "team": "mine", "position": "all", "limit": "none"}
+        "team": "mine", "position": "all", "limit": "none",
+        "action": "read", "availability": "any", "pool": "all"}
 
 
 class ScriptedClient:
@@ -268,7 +269,7 @@ def rosters():
     return [Roster(roster_id=1, team_name="Alpha", owner_id="me"), Roster(roster_id=2, team_name="Beta")]
 
 
-@pytest.mark.parametrize("stage", ["operation", "parts", "settings", "team"])
+@pytest.mark.parametrize("stage", ["operation", "parts", "settings", "action", "team"])
 @pytest.mark.parametrize("confidence, accepted", [(0.79, False), (0.8, True)])
 def test_confidence_floor(stage, confidence, accepted):
     client = ScriptedClient("get_picks", confidence={stage: confidence})
@@ -434,7 +435,8 @@ def test_unsupported_details_abstain(operation, field):
     # Every guard an operation reads abstains with that command's hint, at any confidence.
     client = ScriptedClient(operation, {field: "other"}, {field: 0.3})
     teams = Mock(side_effect=rosters)
-    with pytest.raises(Clarification, match=f"`ff {COMMANDS[operation]} --help`") as error:
+    hint = {"action": "read-only", "availability": "claim status"}.get(field, f"`ff {COMMANDS[operation]} --help`")
+    with pytest.raises(Clarification, match=hint) as error:
         interpret("question", client, teams, "me")
     assert (error.value.question, error.value.confidence) == (field, 0.3)
     teams.assert_not_called()
@@ -445,10 +447,24 @@ def test_every_operation_but_picks_reads_every_guard():
     # unrestricted; the eval's must-abstain cases depend on these guards.
     from ff.services.llm.jev import GUARDS
     # Literal, so shrinking GUARDS cannot silently drop the generated cases below.
-    assert GUARDS == ("parts", "players", "time", "filter", "position", "settings")
+    assert GUARDS == ("parts", "players", "time", "filter", "position", "settings", "action")
     for operation, used in USES.items():
         assert set(GUARDS) <= set(used) or operation == "get_picks", operation
     assert "settings" in USES["get_picks"]
+    assert "action" in USES["get_picks"]
+
+
+@pytest.mark.parametrize("pool, expected", [("all", {}), ("trending", {"trending_only": True})])
+def test_waiver_pool_is_an_explicit_filter(pool, expected):
+    route = interpret("waiver targets", ScriptedClient("get_waivers", {"pool": pool}), rosters, "me")
+    assert route.kwargs == {"limit": 20, "free_agents_only": True, **expected}
+
+
+@pytest.mark.parametrize("field", ["action", "availability", "pool"])
+def test_uncertain_waiver_detail_does_not_dispatch(field):
+    with pytest.raises(Clarification, match="confidently") as error:
+        interpret("waivers", ScriptedClient("get_waivers", confidence={field: 0.79}), rosters, "me")
+    assert error.value.question == field
 
 
 @pytest.mark.parametrize("operation", ["get_roster", "get_power_rankings", "get_roster_cleanup", "get_lineup"])

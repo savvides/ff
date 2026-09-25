@@ -703,12 +703,15 @@ def trade(
 def waivers(
     limit: int = typer.Option(20, help="How many to show."),
     include_rostered: bool = typer.Option(False, "--all", help="Include rostered players."),
+    position: Optional[str] = typer.Option(None, "--position", "-p", help="Filter by position."),
+    trending_only: bool = typer.Option(False, "--trending", help="Only players in Sleeper's trending adds."),
 ) -> None:
-    """Trending adds across Sleeper, joined to dynasty value and your league."""
+    """Unrostered players ranked by dynasty opportunity in your league."""
     cfg, sc = _load()
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     trending = _trending_adds(sc, limit)
+    roster_positions = (sc.league(cfg.league_id) or {}).get("roster_positions") or []
     targets = waiver_targets(
         trending,
         book,
@@ -717,17 +720,21 @@ def waivers(
         limit=limit,
         free_agents_only=not include_rostered,
         is_superflex=bool(cfg.format.superflex),
+        position=position,
+        roster_positions=roster_positions,
+        trending_only=trending_only,
     )
 
-    t = Table(title="waiver targets - trending adds by dynasty value")
+    t = Table(title="waiver targets - dynasty opportunity" + (" (trending only)" if trending_only else ""))
     for c in ("player", "pos", "role", "value", "adds", "status"):
         t.add_column(c, justify="right" if c in ("value", "adds") else "left")
     for tgt in targets:
         a = tgt.asset
-        status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
-        t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}", status)
+        status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]unrostered[/]"
+        t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}" if tgt.add_count else "-", status)
     console.print(t)
-    qa_rep = run_qa("waivers", targets=targets, rosters=rosters)
+    console.print("Unrostered does not establish waiver claim status or immediate pickup eligibility; check Sleeper. Adds: '-' means outside the trending sample. Rankings use dynasty opportunity, not weekly projected points.")
+    qa_rep = run_qa("waivers", targets=targets, rosters=rosters, roster_positions=roster_positions)
     render_qa_footer(qa_rep, console)
 
 
@@ -1277,7 +1284,7 @@ def _ask_jev(query: str, cfg: Config) -> None:
             ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
         details = dict(route.kwargs)
         if details.pop("free_agents_only", False):
-            details["availability"] = "free agents"
+            details["availability"] = "unrostered (claim status unknown)"
         if "team" in details:
             details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
         if route.tool == "get_picks":
@@ -1508,8 +1515,10 @@ def qa_cmd(
 
     # 6. Waivers audit
     trending_adds = sc.trending(kind="add", limit=50)
-    targets = waiver_targets(trending_adds, book, rosters, players_meta, limit=20)
-    reports.append(run_qa("waivers", targets=targets, rosters=rosters))
+    targets = waiver_targets(trending_adds, book, rosters, players_meta, limit=20,
+                             roster_positions=league.get("roster_positions") or [])
+    reports.append(run_qa("waivers", targets=targets, rosters=rosters,
+                          roster_positions=league.get("roster_positions") or []))
 
     # 7. Movers / Arbitrage audit
     arb_movers = find_arbitrage_movers(rosters=rosters, book=book, min_value=1000, limit=20)

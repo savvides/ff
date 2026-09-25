@@ -54,3 +54,53 @@ def test_position_filter_before_limit():
     targets = waiver_targets(trending, book, [], limit=1, is_superflex=False, position="rb")
     # The higher-valued WR must not take the only slot before the RB filter.
     assert [t.asset.id for t in targets] == ["rb"]
+
+
+def test_full_pool_includes_nontrending_players_and_respects_league_slots():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    meta = {
+        "rb": {"full_name": "Quiet Runner", "position": "RB", "team": "CIN", "active": True},
+        "qb": {"full_name": "Quiet Quarterback", "position": "QB", "team": "CHI", "active": True},
+        "k": {"full_name": "Trending Kicker", "position": "K", "team": "TB", "active": True},
+        "owned": {"position": "RB", "team": "NYJ", "active": True},
+        "retired": {"position": "QB", "team": "CHI", "active": False},
+    }
+    book = ValueBook([Asset(id="unsigned", name="Unsigned Prospect", position="WR", value=100)])
+    roster = Roster(roster_id=1, team_name="Team", player_ids=["owned"], taxi=["owned"])
+    trending = [{"player_id": "k", "count": 5000}]
+    targets = waiver_targets(trending, book, [roster], meta, roster_positions=["RB", "SUPER_FLEX"])
+    assert {t.asset.id for t in targets} == {"rb", "qb", "unsigned"}
+    assert all(t.add_count == 0 for t in targets)
+    for pos, pid in [("RB", "rb"), ("QB", "qb")]:
+        filtered = waiver_targets(trending, book, [roster], meta, position=pos, limit=1,
+                                  roster_positions=["RB", "SUPER_FLEX"])
+        assert [t.asset.id for t in filtered] == [pid]
+
+
+def test_trending_filter_is_explicit_and_empty_trends_do_not_hide_full_pool():
+    from ff.values import ValueBook
+
+    meta = {"rb": {"full_name": "Runner", "position": "RB", "team": "CIN", "active": True}}
+    assert [t.asset.id for t in waiver_targets([], ValueBook([]), [], meta)] == ["rb"]
+    assert waiver_targets([], ValueBook([]), [], meta, trending_only=True) == []
+
+
+def test_kickers_are_allowed_only_when_the_league_can_start_them():
+    from ff.values import ValueBook
+
+    meta = {"k": {"full_name": "Kicker", "position": "K", "team": "TB", "active": True}}
+    for slots, expected in [(["FLEX"], []), (["K"], ["k"]), ([], [])]:
+        targets = waiver_targets([], ValueBook([]), [], meta, roster_positions=slots)
+        assert [t.asset.id for t in targets] == expected
+
+
+def test_overlapping_flex_slots_allow_their_positions():
+    from ff.values import ValueBook
+
+    meta = {p: {"full_name": p, "position": p, "team": "CIN", "active": True}
+            for p in ("QB", "RB", "WR", "TE", "K")}
+    for slot, expected in [("WRRB_FLEX", {"WR", "RB"}), ("REC_FLEX", {"WR", "TE"})]:
+        targets = waiver_targets([], ValueBook([]), [], meta, roster_positions=[slot])
+        assert {t.asset.position for t in targets} == expected

@@ -1,0 +1,190 @@
+[
+  {
+    "id": "control_roster",
+    "query": "Show my roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "waivers",
+    "query": "Who should I target on waivers?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "free_agents",
+    "query": "Show free agents in my league",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "fa_abbreviation",
+    "query": "Show the top five FAs",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 5,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "rb_five",
+    "query": "Which five available running backs should I target?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 5,
+        "free_agents_only": true,
+        "position": "RB"
+      }
+    }
+  },
+  {
+    "id": "wr_ten",
+    "query": "Show ten trending free-agent wide receivers",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 10,
+        "free_agents_only": true,
+        "position": "WR",
+        "trending_only": true
+      }
+    }
+  },
+  {
+    "id": "qb_one",
+    "query": "Who is the top available quarterback on waivers?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 1,
+        "free_agents_only": true,
+        "position": "QB"
+      }
+    }
+  },
+  {
+    "id": "te_five",
+    "query": "Show five available tight ends on waivers",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 5,
+        "free_agents_only": true,
+        "position": "TE"
+      }
+    }
+  },
+  {
+    "id": "fa_rb",
+    "query": "Show 3 FA RBs",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 3,
+        "free_agents_only": true,
+        "position": "RB"
+      }
+    }
+  },
+  {
+    "id": "waiver_week",
+    "query": "Who should I pick up on waivers this week?",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waiver_dynasty",
+    "query": "Show top 10 dynasty waiver targets",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 10,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waiver_max",
+    "query": "Show 50 waiver targets",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 50,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "all_fa",
+    "query": "List every available free agent",
+    "expected": null
+  },
+  {
+    "id": "rookies",
+    "query": "Show rookie waiver targets",
+    "expected": null
+  },
+  {
+    "id": "age",
+    "query": "Show waiver running backs younger than 24",
+    "expected": null
+  },
+  {
+    "id": "weekly_projection",
+    "query": "Rank available running backs by projected points this week",
+    "expected": null
+  },
+  {
+    "id": "faab",
+    "query": "How much FAAB should I bid on waiver targets?",
+    "expected": null
+  },
+  {
+    "id": "immediate_fa",
+    "query": "Show only free agents I can add immediately without a waiver claim",
+    "expected": null
+  },
+  {
+    "id": "claim",
+    "query": "Submit a waiver claim for the best available running back",
+    "expected": null
+  },
+  {
+    "id": "named_player",
+    "query": "Should I add Samaje Perine?",
+    "expected": null
+  },
+  {
+    "id": "two_positions",
+    "query": "Show available RBs and WRs",
+    "expected": null
+  },
+  {
+    "id": "too_many",
+    "query": "Show 100 waiver targets",
+    "expected": null
+  }
+]

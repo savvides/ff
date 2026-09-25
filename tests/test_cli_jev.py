@@ -27,7 +27,8 @@ def configured(fake_clients, monkeypatch):
 
 # A fully in-scope answer to every question; tests override only what they probe.
 SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
-        "team": "mine", "position": "all", "limit": "none"}
+        "team": "mine", "position": "all", "limit": "none",
+        "action": "read", "availability": "any", "pool": "all"}
 
 
 def serve(operation, arguments, low_stage=None):
@@ -49,7 +50,7 @@ def serve(operation, arguments, low_stage=None):
     ("get_roster", {"team": "mine", "limit": "none"}, "dynasty value"),
     ("get_power_rankings", {}, "League power rankings"),
     ("get_dynasty_values", {"position": "RB", "limit": "1"}, "Dynasty player values"),
-    ("get_waivers", {"position": "RB", "limit": "5"}, "Trending free agents"),
+    ("get_waivers", {"position": "RB", "limit": "5"}, "Unrostered players"),
     ("get_picks", {"team": "mine"}, "2027"),
     ("get_picks", {"team": "league"}, "Gridiron Kings"),
     ("get_roster_cleanup", {"team": "mine", "limit": "3"}, "Drop candidates"),
@@ -81,7 +82,7 @@ def test_supported_journeys(configured, operation, arguments, expected):
     ("top 3 tight ends", "get_dynasty_values", {"position": "TE", "limit": "3"},
      "Interpreted: dynasty values; position: TE; limit: 3"),
     ("five waiver RBs", "get_waivers", {"position": "RB", "limit": "5"},
-     "Interpreted: waivers; position: RB; limit: 5; availability: free agents"),
+     "Interpreted: waivers; position: RB; limit: 5; availability: unrostered (claim status unknown)"),
     ("league picks", "get_picks", {"team": "league"},
      "Interpreted: picks; seasons: ['2027', '2028']; rounds: 2; team: whole league"),
     ("make room", "get_roster_cleanup", {}, "Interpreted: roster cleanup; team: Dynasty Warriors; limit: 8"),
@@ -244,10 +245,49 @@ def test_empty_waivers(configured, monkeypatch):
     sleeper = cli.SleeperClient()
     sleeper.trending = lambda **kwargs: []
     monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
-    serve("get_waivers", {"position": "all", "limit": "none"})
+    serve("get_waivers", {"position": "all", "limit": "none", "pool": "trending"})
     result = runner.invoke(app, ["ask", "waivers", "--backend", "jev"])
     assert result.exit_code == 0, result.output
     assert "no results" in result.output
+
+
+@responses.activate
+def test_general_waivers_find_nontrending_players_and_explain_availability(configured, monkeypatch):
+    import ff.cli as cli
+    sleeper = cli.SleeperClient()
+    meta = dict(sleeper.players())
+    meta["quiet"] = {"full_name": "Quiet Quarterback", "position": "QB", "team": "CHI", "active": True}
+    meta["k"] = {"full_name": "Trending Kicker", "position": "K", "team": "TB", "active": True}
+    sleeper.players = lambda: meta
+    sleeper.trending = lambda **kwargs: [{"player_id": "k", "count": 100}]
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
+    serve("get_waivers", {})
+    result = runner.invoke(app, ["ask", "Show free agents", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert "Quiet Quarterback" in result.output
+    assert "Trending Kicker" not in result.output
+    assert "Unrostered" in result.output
+    assert "claim status" in result.output
+    assert "availability: free agents" not in result.output
+    direct = runner.invoke(app, ["waivers"])
+    assert direct.exit_code == 0, direct.output
+    assert "Quiet Quarterback" in direct.output and "Trending Kicker" not in direct.output
+    assert "claim status" in direct.output
+
+
+@pytest.mark.parametrize("query, guard, message", [
+    ("Submit a waiver claim for the best available running back", "action", "read-only"),
+    ("Show only free agents I can add immediately without a waiver claim", "availability", "claim status"),
+])
+@responses.activate
+def test_waiver_unsupported_actions_and_availability_never_dispatch(configured, monkeypatch, query, guard, message):
+    serve("get_waivers", {guard: "other"})
+    dispatch = Mock()
+    monkeypatch.setattr("ff.cli.dispatch_tool", dispatch)
+    result = runner.invoke(app, ["ask", query, "--backend", "jev"])
+    assert result.exit_code == 3, result.output
+    assert message in result.output
+    dispatch.assert_not_called()
 
 
 def test_missing_config(monkeypatch):

@@ -47,7 +47,7 @@ This separate set has 16 supported cases (including the unchanged control) and
 14 must-abstain cases. It uses the same gate: at least 90% supported exact matches,
 every unsupported case abstaining, no API errors, and a passing control. It covers
 different wording, roster numbers, and unsupported markets, scoring rules, draft
-years/rounds, positions and result counts. The original 40 cases remain unchanged.
+years/rounds, positions and result counts. The original 40 question texts and gate remain unchanged; the explicit trending query now also expects `trending_only=true`.
 These are regression sets used during development, not an independent accuracy estimate.
 
 ## Verified 2026-09-25 on jev-1.13.0
@@ -72,3 +72,59 @@ All seven real `ff ask --backend jev` journeys (roster, power, values, waivers,
 picks, cleanup and lineup) also completed against the configured Sleeper league
 with `FF_QA=strict`: exit 0, expected interpretation/table, passing domain QA,
 and empty stderr. Private league output and credentials are not included here.
+
+## FA and waiver root-cause investigation, 2026-09-25
+
+The initial focused evaluation matched 9/11 supported waiver requests plus the
+roster control, and rejected 9/10 unsupported requests. Rechecks also exposed
+inconsistent immediate-pickup filtering. The plan was to reproduce each failure,
+fix candidate selection and interpretation separately, then verify the original
+cases, the fixed roster control, and real league results before shipping.
+
+| Failure | Root cause | Fix and verification |
+|---|---|---|
+| Kickers recommended in a no-kicker league | Waiver analysis never received starting slots. Its zero-value opportunity floor let trending kickers rank. | Pass league slots through both commands, filter before ranking/limit, and add a QA eligibility invariant. Tests cover kicker-enabled leagues and overlapping flexes too. |
+| Non-trending RBs omitted | A sample of 50 trending adds was the entire candidate universe. | General requests now search active NFL players and market-listed prospects. Non-trending RB regression passes; the live RB results include the previously omitted player. |
+| Available QB query returned nothing | The same truncated candidate universe contained no unrostered QB. | The full pool is searched before position and count filters. Live QB requests now return results and include the previously omitted candidate. |
+| `Show 3 FA RBs` abstained | Classification questions did not explain the FA shorthand, causing operation and position ambiguity. | Define FA/FAs and position abbreviations in the classification questions. Exact query passes both final live runs and the real CLI journey. |
+| This-week pickup request sometimes abstained | The count question treated pickup wording as an ambiguous quantity. | Clarify that pickup verbs and current-week wording do not specify a result count. The query resolves to the existing default of 20 in both final live runs. |
+| Claim submission became a recommendation | A broad operation question was the only mutation check. | A separate action question distinguishes analysis from execution. Claim submission prints a read-only explanation, exits 3, and never dispatches. |
+| Immediate-only request silently lost its restriction | Unrostered ownership was conflated with acquisition eligibility; there was no explicit acquisition-condition check. | Label results unrostered with unknown claim status. Explicit immediate/claim-state requests abstain with guidance to check Sleeper. |
+
+The [public Sleeper API](https://docs.sleeper.com/) is read-only. This change does
+not add transactions or infer pending-claim/instant-pickup eligibility from
+roster ownership. Rankings remain dynasty opportunity heuristics, not weekly
+projected-point rankings. Explicit trending requests retain their sample filter.
+
+Six new regression cases failed against the original implementation before the
+fixes. They pass afterward, along with additional guard, filter, and QA checks.
+The 0.80 confidence floor and existing acceptance thresholds are unchanged.
+
+```bash
+./.venv/bin/python scripts/eval_jev.py --cases evals/jev-waivers.json
+```
+
+The focused set contains 11 supported waiver queries, the unchanged `Show my
+roster` control, and 10 must-abstain queries. For this fix, all 22 must pass on
+two consecutive runs, in addition to the broader suites' existing gates.
+
+| Final verification | Exact supported | Must abstain | API errors | Control |
+|---|---|---|---|---|
+| Original 40 questions | 27/28 | 12/12 | 0 | pass |
+| Additional 30 questions | 16/16 | 14/14 | 0 | pass |
+| Focused FA/waivers, run 1 | 12/12 | 10/10 | 0 | pass |
+| Focused FA/waivers, run 2 | 12/12 | 10/10 | 0 | pass |
+
+The original known ambiguous named-team query (`roster_other`) still asks for
+clarification. No incorrect route executed in these final evaluations. These
+are development regression results, not an independent accuracy estimate.
+
+Ten real league journeys passed with `FF_QA=strict`: eight recommendation
+requests, including non-trending RB/QB coverage and explicit trending WRs,
+plus two unsupported requests. Returned structured results matched direct
+analysis exactly; current roster ownership, requested position/count, and
+league-slot eligibility were checked independently. Both unsupported requests
+exited 3 without dispatch. No league transactions occurred.
+
+`make check` passed Ruff, mypy, all 575 offline tests, and package build.
+`git diff --check` passed. No restart is required.
