@@ -150,16 +150,18 @@ def test_confidence_floor(stage, confidence, accepted):
         assert (error.value.question, error.value.confidence) == (stage, confidence)
 
 
-@pytest.mark.parametrize("query, probabilities, routed", [
-    # Naming your own team and saying "my team" are one interpretation: 2 * 0.95 - 1 = 0.90.
-    ("Show the Alpha roster", {"mine": 0.55, "named": 0.40, "league": 0.05}, True),
-    # Pooled, but still split against another argument: 2 * 0.55 - 1 = 0.10.
-    ("Show the Alpha roster", {"mine": 0.45, "named": 0.10, "league": 0.45}, False),
+@pytest.mark.parametrize("query, choice, confidence, probabilities, routed", [
+    # Naming your own team and saying "my team" are one interpretation: (3 * 0.95 - 1) / 2 = 0.925.
+    ("Show the Alpha roster", "mine", 0.325, {"mine": 0.55, "named": 0.40, "league": 0.05}, True),
+    # Pooled, but still split against another argument: (3 * 0.55 - 1) / 2 = 0.325.
+    ("Show the Alpha roster", "mine", 0.175, {"mine": 0.45, "named": 0.10, "league": 0.45}, False),
     # "named" means Beta here, a different team, so nothing pools.
-    ("Show the Beta roster", {"mine": 0.55, "named": 0.40, "league": 0.05}, False),
+    ("Show the Beta roster", "mine", 0.325, {"mine": 0.55, "named": 0.40, "league": 0.05}, False),
+    # Pooling never lowers confidence: your own team named as confidently as a rival's routes.
+    ("Show the Alpha roster", "named", 0.835, {"mine": 0.0, "named": 0.89, "league": 0.11}, True),
 ])
-def test_equivalent_team_options_share_confidence(query, probabilities, routed):
-    client = ScriptedClient("get_picks", confidence={"team": 0.325}, probabilities={"team": probabilities})
+def test_equivalent_team_options_share_confidence(query, choice, confidence, probabilities, routed):
+    client = ScriptedClient("get_picks", {"team": choice}, {"team": confidence}, {"team": probabilities})
     if routed:
         assert interpret(query, client, rosters, "me").kwargs == {"team": "1"}
     else:
@@ -178,6 +180,13 @@ def test_default_count_and_its_number_share_confidence(operation, routed):
     else:
         with pytest.raises(Clarification, match="confidently"):
             interpret("question", client, rosters, "me")
+
+
+def test_nothing_to_pool_keeps_jevs_confidence():
+    # "none" and "15" agree on roster, but with no probability on "15" there is nothing to pool.
+    with pytest.raises(Clarification, match="confidently") as error:
+        interpret("question", ScriptedClient("get_roster", confidence={"limit": 0.1}), rosters, "me")
+    assert (error.value.question, error.value.confidence) == ("limit", 0.1)
 
 
 def test_all_is_offered_only_when_asked():

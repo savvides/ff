@@ -203,19 +203,19 @@ def _confidence(answer: ChoiceAnswer, outcomes: Dict[str, Any]) -> float:
     """Jev's confidence in the chosen argument, not merely the chosen option.
 
     Options that resolve to the same argument (your own team named and "mine";
-    no count and the default count) pool their probability, and confidence is
-    recomputed over the n distinct arguments with TypeSafe's published Choice
-    formula, (n * peak - 1) / (n - 1). With nothing to pool, Jev's own
-    confidence stands."""
+    no count and the default count) pool their probability into the choice, and
+    confidence is recomputed with TypeSafe's published Choice formula,
+    (n * peak - 1) / (n - 1) over all n options. Pooling can only raise Jev's own
+    confidence; with nothing to pool, it stands."""
     def argument(option: str) -> Tuple[bool, Any]:
         return (True, outcomes[option]) if option in outcomes else (False, option)
 
-    mass: Dict[Tuple[bool, Any], float] = {}
-    for option, p in answer.probabilities.items():
-        mass[argument(option)] = mass.get(argument(option), 0.0) + p
-    if len(mass) == len(answer.probabilities):
+    chosen = argument(answer.choice)
+    peak = sum(p for option, p in answer.probabilities.items() if argument(option) == chosen)
+    if peak <= answer.probabilities[answer.choice]:
         return answer.confidence
-    return (len(mass) * mass[argument(answer.choice)] - 1) / (len(mass) - 1)
+    n = len(answer.probabilities)
+    return max(answer.confidence, (n * peak - 1) / (n - 1))
 
 
 def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Roster]],
