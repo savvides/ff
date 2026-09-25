@@ -163,17 +163,23 @@ make install                 # create venv + install dependencies + enable pre-c
 operation and bounded arguments. Python calculates the result, and the CLI shows
 the interpretation followed by tables. No terminal AI runner is used on this path.
 
-After `ff setup`, enter the key in your **zsh terminal**, without echo or shell history:
+Store your key once in your terminal. Input is hidden and the key is never a
+command-line argument or part of shell history:
 
-```zsh
-read -rs 'TYPESAFE_API_KEY?TypeSafe API key: '; echo
-export TYPESAFE_API_KEY
+```bash
+./.venv/bin/ff config set-jev-key
+# After configuring your league with ff setup:
 ./.venv/bin/ff ask "Which five available running backs should I target?" --backend jev
 ./.venv/bin/ff ask "Show my roster" --backend jev
 ./.venv/bin/ff config set-llm jev  # optional: save backend preference, never the key
 ```
 
-The key must be exported in the terminal running `ff`. `TYPESAFE_MODEL` optionally
+The key is saved separately from league config in `.ff/typesafe_api_key` (or under
+`FF_HOME`), with owner-only read/write permissions (`0600`). It is a plaintext
+local file, not encrypted storage, and is gitignored. Run the same command to
+replace it; deleting the file or running `make clean` removes it. If you customize
+`FF_HOME`, keep that directory private and outside shared or synced folders.
+An exported `TYPESAFE_API_KEY` overrides the saved key. `TYPESAFE_MODEL` optionally
 selects a pinned model; the default is `jev-latest`. No additional dependency is required.
 
 | Request | Supported arguments / defaults |
@@ -215,7 +221,7 @@ recommendation succeeds.
 
 Jev receives only your question text, in one request per question (plus any 429/529
 retries); team names, rosters, and values stay on your machine. Requests consume your API allowance.
-The client does not store the key, questions, or responses. Existing Sleeper and
+Only `config set-jev-key` stores the key; questions and responses are not stored. Existing Sleeper and
 market-data caching still applies. Automatic backend selection does not enable Jev.
 
 See [the 40-question live evaluation](evals/README.md) for model-accuracy checks.

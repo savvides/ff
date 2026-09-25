@@ -53,7 +53,7 @@ from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
-from ff.services.llm.jev import Clarification, JevClient, JevError, interpret
+from ff.services.llm.jev import Clarification, JevClient, JevError, interpret, save_jev_key
 from ff.services.llm.jev_output import render_result
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
@@ -1413,6 +1413,19 @@ def ask(
     console.print(Markdown(final_response))
     qa_rep = run_qa("ask", tool_name=tool_name, result=result, query=query)
     render_qa_footer(qa_rep, console)
+
+
+@config_app.command(name="set-jev-key")
+def set_jev_key() -> None:
+    """Privately enter and save a TypeSafe API key for Jev."""
+    key = typer.prompt("TypeSafe API key", hide_input=True)
+    try:
+        path = save_jev_key(key)
+    except JevError as exc:
+        console.print(f"error: {exc}", markup=False)
+        raise typer.Exit(1)
+    console.print(f"Saved TypeSafe API key to {path} (owner read/write only).", markup=False)
+    console.print("An exported TYPESAFE_API_KEY takes precedence over this saved key.")
 
 
 @config_app.command(name="set-llm")

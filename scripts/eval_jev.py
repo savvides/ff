@@ -1,7 +1,7 @@
 """Opt-in live routing evaluation using synthetic teams, without league API calls.
 
 Run: .venv/bin/python scripts/eval_jev.py
-Requires TYPESAFE_API_KEY. Prints aggregate metrics and case IDs, never the key.
+Requires a saved key or TYPESAFE_API_KEY. Prints metrics and case IDs, never the key.
 """
 from __future__ import annotations
 

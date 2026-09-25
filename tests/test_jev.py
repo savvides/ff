@@ -47,6 +47,61 @@ def test_missing_key(monkeypatch):
         JevClient()
 
 
+@responses.activate
+def test_environment_key_overrides_saved_key(monkeypatch):
+    from ff.services.llm.jev import save_jev_key
+    save_jev_key("saved-test-key")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "environment-test-key")
+    client = JevClient()
+    responses.post(ENDPOINT, json=payload({}, {}))
+    client.choose("test", {})
+    assert responses.calls[0].request.headers["Authorization"] == "Bearer environment-test-key"
+
+
+def test_replacing_key_is_private_and_does_not_follow_symlinks(tmp_path):
+    from ff.core.config import home
+    from ff.services.llm.jev import save_jev_key
+    home().mkdir()
+    other = tmp_path / "other"
+    other.write_text("original")
+    path = home() / "typesafe_api_key"
+    path.symlink_to(other)
+    assert save_jev_key("replacement-test-key") == path
+    assert not path.is_symlink()
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert other.read_text() == "original"
+
+
+def test_invalid_key_does_not_replace_saved_key():
+    from ff.services.llm.jev import save_jev_key
+    path = save_jev_key("saved-test-key")
+    with pytest.raises(JevError):
+        save_jev_key("bad\nkey")
+    assert path.read_text().strip() == "saved-test-key"
+
+
+def test_failed_key_replacement_preserves_old_key_and_removes_temporary_file(monkeypatch):
+    from pathlib import Path
+    from ff.services.llm.jev import save_jev_key
+    path = save_jev_key("saved-test-key")
+    def fail_replace(*args):
+        raise OSError("private-provider-detail")
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(JevError, match="Could not save") as error:
+        save_jev_key("replacement-test-key")
+    assert "private-provider-detail" not in str(error.value)
+    assert path.read_text().strip() == "saved-test-key"
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_unreadable_saved_key_is_a_safe_error(monkeypatch):
+    from ff.core.config import home
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    (home() / "typesafe_api_key").mkdir(parents=True)
+    with pytest.raises(JevError, match="read saved"):
+        JevClient()
+
+
 @pytest.mark.parametrize("key", ["\u201cts_live_abc\u201d", "ts_live\nabc"])
 def test_mispasted_key_is_a_clean_error(monkeypatch, key):
     monkeypatch.setenv("TYPESAFE_API_KEY", key)

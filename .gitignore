@@ -9,6 +9,7 @@ dist/
 
 # Local league config + on-disk API cache (machine-specific, never committed)
 .ff/
+typesafe_api_key
 
 # Local per-machine Claude Code instructions (personal; loaded each session)
 CLAUDE.local.md

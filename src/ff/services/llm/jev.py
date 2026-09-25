@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import requests
 from pydantic import BaseModel, Field, ValidationError
 
 from ff.contracts import Roster
+from ff.core.config import home
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 CONFIDENCE_FLOOR = 0.80
@@ -87,14 +90,46 @@ class Route(BaseModel):
     kwargs: Dict[str, Any]
 
 
+def _validate_key(key: str) -> str:
+    key = key.strip()
+    if not key:
+        raise JevError("Set TYPESAFE_API_KEY or run `ff config set-jev-key` to use Jev.")
+    if not (key.isascii() and key.isprintable()):
+        raise JevError("TypeSafe API key contains invalid characters. Copy the key again, without quotes.")
+    return key
+
+
+def save_jev_key(key: str) -> Path:
+    """Save a key atomically with owner-only permissions, separate from league config."""
+    key = _validate_key(key)
+    path = home() / "typesafe_api_key"
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # NamedTemporaryFile creates mode 0600; replace never follows a destination symlink.
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(key + "\n")
+        temporary.replace(path)
+    except OSError:
+        raise JevError("Could not save the TypeSafe API key. Check permissions on FF_HOME.") from None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return path
+
+
 class JevClient:
     def __init__(self) -> None:
-        self._key = os.environ.get("TYPESAFE_API_KEY", "").strip()
-        if not self._key:
-            raise JevError("Set TYPESAFE_API_KEY in your environment to use Jev.")
-        # An HTTP header cannot carry smart quotes or control characters from a bad paste.
-        if not (self._key.isascii() and self._key.isprintable()):
-            raise JevError("TYPESAFE_API_KEY contains invalid characters. Copy the key again, without quotes.")
+        key = os.environ.get("TYPESAFE_API_KEY", "").strip()
+        if not key:
+            try:
+                key = (home() / "typesafe_api_key").read_text()
+            except FileNotFoundError:
+                pass
+            except (OSError, UnicodeError):
+                raise JevError("Could not read saved TypeSafe API key. Run `ff config set-jev-key` again.") from None
+        self._key = _validate_key(key)
         self.model = os.environ.get("TYPESAFE_MODEL", "jev-latest").strip() or "jev-latest"
         # In-memory metrics only; no questions, answers, or credentials are logged.
         self.calls: List[Dict[str, Any]] = []
@@ -115,7 +150,7 @@ class JevClient:
                 break
             time.sleep(delay)
         if response.status_code in (401, 403):
-            raise JevError("Jev authentication failed. Check TYPESAFE_API_KEY and account access.")
+            raise JevError("Jev authentication failed. Check your saved key or TYPESAFE_API_KEY and account access.")
         if response.status_code == 429:
             raise JevError("Jev rate limit reached. Try again later.")
         if response.status_code != 200:

@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from ff.cli import app
 from ff.contracts import Format
-from ff.core.config import Config, load_config, save_config
+from ff.core.config import Config, home, load_config, save_config
 from ff.services.llm.jev import ENDPOINT
 
 runner = CliRunner()
@@ -262,6 +262,33 @@ def test_missing_key(configured, monkeypatch):
     result = runner.invoke(app, ["ask", "hello", "--backend", "jev"])
     assert result.exit_code == 1
     assert "TYPESAFE_API_KEY" in result.output
+
+
+@responses.activate
+def test_saved_key_works_without_an_export(configured, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    result = runner.invoke(app, ["config", "set-jev-key"], input="saved-test-key\n")
+    assert result.exit_code == 0, result.output
+    assert "saved-test-key" not in result.output
+    assert "saved-test-key" not in load_config().model_dump_json()
+    assert (home() / "typesafe_api_key").stat().st_mode & 0o777 == 0o600
+    serve("get_roster", {})
+    result = runner.invoke(app, ["ask", "Show my roster", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert responses.calls[0].request.headers["Authorization"] == "Bearer saved-test-key"
+
+
+def test_key_setup_does_not_require_a_league():
+    result = runner.invoke(app, ["config", "set-jev-key"], input="saved-test-key\n")
+    assert result.exit_code == 0, result.output
+    assert (home() / "typesafe_api_key").read_text().strip() == "saved-test-key"
+
+
+def test_cancelled_key_setup_preserves_existing_key():
+    runner.invoke(app, ["config", "set-jev-key"], input="saved-test-key\n")
+    result = runner.invoke(app, ["config", "set-jev-key"], input="\x03")
+    assert result.exit_code != 0
+    assert (home() / "typesafe_api_key").read_text().strip() == "saved-test-key"
 
 
 def test_mispasted_key(configured, monkeypatch):

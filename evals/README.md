@@ -1,6 +1,7 @@
 # Jev routing evaluation
 
-Run from the repo root, with `TYPESAFE_API_KEY` exported in the same terminal:
+Run from the repo root, after saving a key with `ff config set-jev-key` or
+exporting `TYPESAFE_API_KEY` in the same terminal:
 
 ```bash
 ./.venv/bin/python scripts/eval_jev.py
@@ -27,7 +28,7 @@ performance requires running this evaluator. Do not treat mock results as model
 accuracy. This small set is a pilot gate, not a fantasy-outcome benchmark or a
 calibration study. Do not lower thresholds merely to make the set pass.
 
-Exit codes: `0` passes; `1` fails a gate; `2` means the API key is missing.
+Exit codes: `0` passes; `1` fails a gate; `2` means the API key is missing or cannot be loaded.
 The report includes case IDs, exact accuracy, abstentions, API failures, resolved
 model versions, latency, and token usage. Each abstention names the ff question
 that abstained, ff's own message, and, when it fell below the floor, its
