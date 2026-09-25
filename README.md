@@ -198,9 +198,9 @@ full team name or roster number. A name nested in another team's name, or made o
 of generic words, needs the roster number; unknown or ambiguous teams request
 clarification.
 Details that have no argument above, such as a market (KTC/Dealer), custom scoring,
-or a specific draft year, are not checked: the request runs with the defaults
-above, which the `Interpreted:` line shows. Missing projections produce an
-unavailable message.
+or a specific draft year, are not checked: the request runs with ff's defaults
+(FantasyCalc values, your league's scoring, and the pick seasons shown on the
+`Interpreted:` line). Missing projections produce an unavailable message.
 
 Every answer an operation uses must meet a provisional confidence threshold of 0.80.
 Options that resolve to the same argument, such as your team by name and "my team",

@@ -74,6 +74,27 @@ def test_supported_journeys(configured, operation, arguments, expected):
         assert "Dynasty Warriors" not in str(body) and "Gridiron Kings" not in str(body)
 
 
+@pytest.mark.parametrize("query, operation, arguments, line", [
+    ("Value the Gridiron Kings roster", "get_roster", {"team": "named"},
+     "Interpreted: roster; team: Gridiron Kings; limit: 15"),
+    ("rank the league", "get_power_rankings", {}, "Interpreted: power rankings"),
+    ("top 3 tight ends", "get_dynasty_values", {"position": "TE", "limit": "3"},
+     "Interpreted: dynasty values; position: TE; limit: 3"),
+    ("five waiver RBs", "get_waivers", {"position": "RB", "limit": "5"},
+     "Interpreted: waivers; position: RB; limit: 5; availability: free agents"),
+    ("league picks", "get_picks", {"team": "league"},
+     "Interpreted: picks; seasons: ['2027', '2028']; rounds: 2; team: whole league"),
+    ("make room", "get_roster_cleanup", {}, "Interpreted: roster cleanup; team: Dynasty Warriors; limit: 8"),
+    ("my lineup", "get_lineup", {}, "Interpreted: lineup; team: Dynasty Warriors; season: 2026; week: 1"),
+])
+@responses.activate
+def test_interpreted_line_names_what_runs(configured, query, operation, arguments, line):
+    serve(operation, arguments)
+    result = runner.invoke(app, ["ask", query, "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[0] == line
+
+
 @pytest.mark.parametrize("stage", ["operation", "team", "time"])
 @responses.activate
 def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
