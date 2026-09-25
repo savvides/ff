@@ -374,6 +374,8 @@ def test_every_operation_but_picks_reads_every_guard():
     # A restricted question ("my rookies", "last year", "Gibbs or Bijan") must never run
     # unrestricted; the eval's must-abstain cases depend on these guards.
     from ff.services.llm.jev import GUARDS
+    # Literal, so shrinking GUARDS cannot silently drop the generated cases below.
+    assert GUARDS == ("parts", "players", "time", "filter", "position")
     for operation, used in USES.items():
         assert set(GUARDS) <= set(used) or operation == "get_picks", operation
 
