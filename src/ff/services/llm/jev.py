@@ -158,7 +158,7 @@ QUESTIONS = {
         "none": "No individual NFL player is named; fantasy team names and positions are not players",
         "other": "Names one or more NFL players",
     }),
-    "time": choice("Which time does the request ask about?", {
+    "time": choice("Which time does the request ask about? Dynasty values and rankings are current.", {
         "current": "Now: this week, this season, current values, or no time mentioned",
         "other": "Another time: next week, a numbered week, last year, a past season or date",
     }),
