@@ -213,8 +213,8 @@ short pause, as TypeSafe recommends; there is no model fallback or other retry.
 This threshold measures interpretation confidence, not the chance a fantasy
 recommendation succeeds.
 
-Jev receives only your question text, in one request per question; team names,
-rosters, and values stay on your machine. Requests consume your API allowance.
+Jev receives only your question text, in one request per question (plus any 429/529
+retries); team names, rosters, and values stay on your machine. Requests consume your API allowance.
 The client does not store the key, questions, or responses. Existing Sleeper and
 market-data caching still applies. Automatic backend selection does not enable Jev.
 
