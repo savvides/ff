@@ -87,6 +87,9 @@ class JevClient:
         self._key = os.environ.get("TYPESAFE_API_KEY", "").strip()
         if not self._key:
             raise JevError("Set TYPESAFE_API_KEY in your environment to use Jev.")
+        # An HTTP header cannot carry smart quotes or control characters from a bad paste.
+        if not (self._key.isascii() and self._key.isprintable()):
+            raise JevError("TYPESAFE_API_KEY contains invalid characters. Copy the key again, without quotes.")
         self.model = os.environ.get("TYPESAFE_MODEL", "jev-latest").strip() or "jev-latest"
         # In-memory metrics only; no questions, answers, or credentials are logged.
         self.calls: List[Dict[str, Any]] = []

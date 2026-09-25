@@ -47,6 +47,14 @@ def test_missing_key(monkeypatch):
         JevClient()
 
 
+@pytest.mark.parametrize("key", ["\u201cts_live_abc\u201d", "ts_live\nabc"])
+def test_mispasted_key_is_a_clean_error(monkeypatch, key):
+    monkeypatch.setenv("TYPESAFE_API_KEY", key)
+    with pytest.raises(JevError, match="invalid characters") as error:
+        JevClient()
+    assert "ts_live" not in str(error.value)
+
+
 @pytest.mark.parametrize("status, message", [(401, "authentication"), (403, "authentication"), (429, "rate limit"), (503, "HTTP 503"), (302, "HTTP 302")])
 @responses.activate
 def test_http_failures_are_safe_and_never_retried(client, status, message):

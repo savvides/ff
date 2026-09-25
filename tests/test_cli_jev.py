@@ -230,6 +230,15 @@ def test_missing_key(configured, monkeypatch):
     assert "TYPESAFE_API_KEY" in result.output
 
 
+def test_mispasted_key(configured, monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "\u201cprivate-test-key\u201d")
+    result = runner.invoke(app, ["ask", "hello", "--backend", "jev"])
+    assert result.exit_code == 1
+    assert "invalid characters" in result.output
+    assert "private-test-key" not in result.output
+    assert isinstance(result.exception, SystemExit)
+
+
 @responses.activate
 def test_api_error_is_not_a_sleeper_or_config_error(configured):
     responses.post(ENDPOINT, status=401, body="private-test-key")
