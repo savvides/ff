@@ -397,6 +397,7 @@ def test_empty_query_does_not_call_api(client):
     ("show the Kings dynasty roster", ["Dynasty", "Alpha"], []),
     ("show the Rampage roster", ["Ram", "Alpha"], []),  # whole words only
     ("value the Gridiron Kings' roster", ["Gridiron Kings", "Alpha"], [1]),
+    ("show the dynasty roster", ["The Dynasty", "Show The Dynasty"], [1, 2]),  # a lengthened generic name
 ])
 def test_named_teams_match_whole_names_or_numbers(query, names, expected):
     from ff.services.llm.jev import _named_teams
@@ -416,8 +417,24 @@ def test_team_names_never_reach_jev_or_capture_my_team():
     assert all(r.team_name not in sent for r in teams)
     # Even if Jev answers "named", a rival's name cannot answer a question about "my" team.
     for query in ("Show my roster", "Show my best lineup"):
-        with pytest.raises(Clarification, match="unknown or ambiguous"):
+        with pytest.raises(Clarification, match="unknown or ambiguous|roster number"):
             interpret(query, ScriptedClient("get_roster", {"team": "named"}), lambda: teams, "me")
+
+
+@pytest.mark.parametrize("query, names, routed", [
+    ("Show the Gridiron Kings roster in my league", ["Alpha", "Gridiron Kings"], True),
+    ("Value roster 2 in our league", ["Alpha", "Gridiron Kings"], True),
+    ("Value the Land Mine roster", ["Alpha", "Land Mine"], False),  # possessive inside the name
+    ("Value roster 2 so I can plan my trade", ["Alpha", "Gridiron Kings"], False),
+])
+def test_possessive_with_another_team(query, names, routed):
+    teams = [Roster(roster_id=i, team_name=name, owner_id="me" if i == 1 else "rival") for i, name in enumerate(names, 1)]
+    client = ScriptedClient("get_roster", {"team": "named"})
+    if routed:
+        assert interpret(query, client, lambda: teams, "me").kwargs["team"] == "2"
+    else:
+        with pytest.raises(Clarification, match="by roster number"):
+            interpret(query, client, lambda: teams, "me")
 
 
 def test_my_team_needs_a_known_user():

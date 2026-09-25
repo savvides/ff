@@ -50,6 +50,7 @@ DEFERRED = {
 }
 LOW_CONFIDENCE = "Jev could not interpret this confidently. Please name one operation and make the team or filters explicit."
 TEAM_HINT = "Your team is unknown or ambiguous. Specify an exact team name or run `ff setup <username>`."
+MIXED_HINT = "This question says my, our or mine but names another team. Ask about that team by roster number (for example 'roster 2') without my or our."
 
 
 class JevError(RuntimeError):
@@ -183,7 +184,7 @@ QUESTIONS = {
     }),
 }
 EVERY = re.compile(r"\b(all|every|entire|full|whole|complete)\b", re.IGNORECASE)
-POSSESSIVE = re.compile(r"\b(my|our|mine)\b", re.IGNORECASE)
+POSSESSIVE = re.compile(r"\b(my|our|mine)\b(?!\s+league\b)", re.IGNORECASE)  # "my league" is everyone's
 # Words that cannot tell teams apart; a team name made only of them never matches.
 GENERIC = {"unknown", "the", "my", "our", "team", "roster", "league", "dynasty"}
 
@@ -216,10 +217,11 @@ def _named_teams(query: str, rosters: List[Roster]) -> List[Roster]:
     text = " ".join(query.casefold().split())
     numbers = set(re.findall(r"\b(?:roster|team)\s*#?\s*(\d+)\b", text))
     names = {r.roster_id: " ".join(r.team_name.casefold().split()) for r in rosters}
-    names = {rid: name for rid, name in names.items() if not set(name.split()) <= GENERIC}
-    by_name = {rid for rid, name in names.items() if within(name, text)}
+    by_name = {rid for rid, name in names.items() if not set(name.split()) <= GENERIC and within(name, text)}
+    # Nesting is checked against every name, generic ones included, so lengthening
+    # an unmatchable name ("The Dynasty" -> "Show The Dynasty") cannot capture it.
     nested = {other for rid in by_name for other, name in names.items()
-              if other != rid and (within(name, names[rid]) or within(names[rid], name))}
+              if name and other != rid and (within(name, names[rid]) or within(names[rid], name))}
     return [r for r in rosters if str(r.roster_id) in numbers or r.roster_id in by_name | nested]
 
 
@@ -279,9 +281,10 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         if len(found[team]) != 1:
             raise Clarification(TEAM_HINT, "team", _low(answers["team"]))
         target = found[team][0]
-        # "my" or "our" with someone else's team is a contradiction, not a lookup.
+        # "my" or "our" with someone else's team is a contradiction, not a lookup, even
+        # when the word is part of that team's own name: it could be a capture attempt.
         if team == "named" and POSSESSIVE.search(query) and not (user_id and target.owner_id == user_id):
-            raise Clarification(TEAM_HINT, "team", _low(answers["team"]))
+            raise Clarification(MIXED_HINT, "team", _low(answers["team"]))
         kwargs["team"] = str(target.roster_id)
         outcomes["team"] = {option: str(m[0].roster_id) for option, m in found.items() if len(m) == 1}
     if "position" in used and answers["position"].choice != "all":
