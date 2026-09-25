@@ -122,7 +122,7 @@ def multi_market_book(fc_entries, ktc_map):
 def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, users_raw, players_meta,
                  trending, traded_picks):
     class FakeSleeper:
-        def state(self, sport="nfl"):
+        def state(self, sport="nfl", *, fresh=False):
             return {"season": "2026", "previous_season": "2025"}
 
         def user(self, u):
@@ -131,10 +131,10 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
         def user_leagues(self, uid, season, sport="nfl"):
             return [league]
 
-        def league(self, lid):
+        def league(self, lid, *, fresh=False):
             return league
 
-        def rosters(self, lid):
+        def rosters(self, lid, *, fresh=False):
             return rosters_raw
 
         def league_users(self, lid):
@@ -184,10 +184,20 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
             return multi_market_book if (include_secondary and include_ktc) else book
 
     class FakeProjections:
-        def week(self, season, week, positions=None):
+        def week(self, season, week, positions=None, *, fresh=False):
             return {"7564": {"rec": 8, "rec_yd": 100, "rec_td": 1},
                     "9221": {"rush_yd": 90, "rush_td": 1}}
 
+    def fake_weekly(sc, league_id, roster, season, week, league_data, meta, candidate_meta=None):
+        from datetime import datetime, timezone, timedelta
+        from ff.contracts.models import WeeklyContext, WeeklyPlayer
+        now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        context = WeeklyContext(as_of=now, players={
+            p: WeeklyPlayer(game_status="scheduled", kickoff=now + timedelta(days=1), source="fixture")
+            for p in set(roster.player_ids) | set(candidate_meta or {})})
+        return context, {**meta, **(candidate_meta or {})}
+
+    monkeypatch.setattr("ff.cli.load_weekly", fake_weekly)
     monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: FakeSleeper())
     monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: FakeValues())
     monkeypatch.setattr("ff.cli.ProjectionsClient", lambda *a, **k: FakeProjections())

@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 from ff.analysis import cleanup, fit, lineup, movers, picks, roster, trade, waivers
 from ff.analysis.draft import available
+from ff.analysis.compare import compare_players
+from ff.analysis.weekly_waivers import weekly_waivers
 from ff.services.llm.tools import ALLOWED_TOOLS
 
 
@@ -12,11 +14,14 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
         return None
     if team_query:
         q = str(team_query).lower()
+        # Jev resolves team choices to canonical roster IDs before dispatch.
+        for r in rosters:
+            if q == str(getattr(r, "roster_id", "")).lower():
+                return r
         for r in rosters:
             team_name = (getattr(r, "team_name", "") or "").lower()
             owner_id = (getattr(r, "owner_id", "") or "").lower()
-            roster_id = str(getattr(r, "roster_id", "")).lower()
-            if q == team_name or q == owner_id or q == roster_id:
+            if q == team_name or q == owner_id:
                 return r
         for r in rosters:
             team_name = (getattr(r, "team_name", "") or "").lower()
@@ -92,7 +97,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         raise ValueError(f"Unknown tool: {tool_name}")
 
     res: Any = None
-    value_book: Any = ctx.get("value_book")
+    value_book: Any = None
 
     if tool_name == "setup_league":
         username = kwargs.get("username", "")
@@ -121,17 +126,48 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         )
         return res.model_dump() if hasattr(res, "model_dump") else res
 
+    elif tool_name == "get_weekly_waivers":
+        team = kwargs.get("team")
+        ctx["weekly_candidates"] = True
+        prepare = ctx.get("prepare_weekly")
+        r = prepare(team) if prepare and ctx.get("weekly_team") != team else _require_roster(ctx.get("rosters", []), team, ctx)
+        if not ctx.get("weekly"):
+            raise ValueError("Fresh weekly context is required for weekly waivers")
+        trending_ids = {str(t["player_id"]) for t in ctx.get("trending", [])} if kwargs.get("trending_only") else None
+        res = weekly_waivers(r, ctx.get("rosters", []), ctx.get("projections", {}), ctx.get("scoring", {}),
+                             ctx.get("roster_positions", []), ctx.get("players_meta", {}), ctx["weekly"],
+                             ctx.get("season", ""), ctx.get("week", 0), position=kwargs.get("position"),
+                             limit=kwargs.get("limit", 20), trending_ids=trending_ids)
+        return res.model_dump()
+
+    elif tool_name == "get_player_comparison":
+        team = kwargs.get("team")
+        prepare = ctx.get("prepare_weekly")
+        r = prepare(team) if prepare and ctx.get("weekly_team") != team else _require_roster(ctx.get("rosters", []), team, ctx)
+        if not ctx.get("weekly"):
+            raise ValueError("Fresh weekly context is required for comparisons")
+        res = compare_players(kwargs.get("player_ids", []), r, ctx.get("projections", {}), ctx.get("scoring", {}),
+                              ctx.get("roster_positions", []), ctx.get("players_meta", {}), ctx["weekly"],
+                              ctx.get("season", ""), ctx.get("week", 0))
+        return res.model_dump()
+
     elif tool_name == "get_lineup":
         rosters = ctx.get("rosters", [])
         team = kwargs.get("team")
-        r = _require_roster(rosters, team, ctx)
+        prepare = ctx.get("prepare_weekly")
+        if prepare and ctx.get("weekly_team") != team:
+            r = prepare(team)
+        else:
+            r = _require_roster(rosters, team, ctx)
+        if ctx.get("weekly") and kwargs.get("week") not in (None, ctx.get("week")):
+            raise ValueError("Fresh weekly advice is for the current week; use ff lineup --week N for a projection-only scenario")
         projections = ctx.get("projections", {})
         scoring = ctx.get("scoring", {})
         roster_positions = ctx.get("roster_positions", [])
         players_meta = ctx.get("players_meta")
         season = ctx.get("season", "")
         week = kwargs.get("week") or ctx.get("week", 0)
-        res = lineup.optimal_lineup(r, projections, scoring, roster_positions, players_meta, season=season, week=week)
+        res = lineup.optimal_lineup(r, projections, scoring, roster_positions, players_meta, season=season, week=week, weekly=ctx.get("weekly"))
         return res.model_dump() if hasattr(res, "model_dump") else res
 
     elif tool_name == "get_waivers":
@@ -148,10 +184,12 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             rosters=rosters,
             players_meta=players_meta,
             limit=limit,
-            free_agents_only=free_agents_only
+            free_agents_only=free_agents_only,
+            is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
+            position=position,
+            roster_positions=ctx.get("roster_positions"),
+            trending_only=bool(kwargs.get("trending_only", False)),
         )
-        if position:
-            targets = [t for t in targets if t.asset and t.asset.position == position.upper()]
         return [t.model_dump() if hasattr(t, "model_dump") else t for t in targets]
 
     elif tool_name == "get_roster":
@@ -203,6 +241,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             reserve_slots=ctx.get("reserve_slots", 0),
             taxi_allow_vets=ctx.get("taxi_allow_vets", False),
             taxi_years=ctx.get("taxi_years", None),
+            is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
+            drop_limit=kwargs.get("limit", 8),
         )
         return res.model_dump() if hasattr(res, "model_dump") else res
 

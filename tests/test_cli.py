@@ -60,6 +60,16 @@ def test_picks_league_summary(fake_clients, league):
     assert "2027" in result.output and "2028" in result.output
 
 
+def test_picks_years_and_rounds_override(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["picks", "--rounds", "3"])
+    assert result.exit_code == 0, result.output
+    assert "3rd" in result.output  # overrides the latest draft's 2 rounds
+    result = runner.invoke(app, ["picks", "--years", "1"])
+    assert result.exit_code == 0, result.output
+    assert "2027" in result.output and "2028" not in result.output
+
+
 def test_picks_team_detail(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["picks", "Dynasty Warriors"])
@@ -69,6 +79,18 @@ def test_picks_team_detail(fake_clients, league):
     # The tier COLUMN itself, not the footer text: own 2027 1st row reads
     # own | mid | 3,100. (The footer always contains "early/mid/late".)
     assert re.search(r"own\s+│\s+mid\s+│\s+3,100", result.output)
+
+
+def test_waivers_pool_size(fake_clients, league, trending, monkeypatch):
+    from unittest.mock import Mock
+    import ff.cli as cli
+    _write_config(league)
+    sc = cli.SleeperClient()
+    sc.trending = Mock(return_value=trending)
+    monkeypatch.setattr(cli, "SleeperClient", lambda: sc)
+    result = runner.invoke(app, ["waivers", "--limit", "20"])
+    assert result.exit_code == 0, result.output
+    sc.trending.assert_called_once_with(kind="add", limit=60)
 
 
 def test_values_by_position(fake_clients, league):
@@ -341,12 +363,34 @@ def test_cli_lineup_handles_unsupported_slots(fake_clients, league, monkeypatch)
     custom_league["roster_positions"] = list(league.get("roster_positions", [])) + ["IDP"]
     _write_config(custom_league)
     fake_inst = SleeperClient()
-    fake_inst.league = lambda lid: custom_league
+    fake_inst.league = lambda lid, **kwargs: custom_league
     monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: fake_inst)
     res = runner.invoke(app, ["lineup"])
-    assert res.exit_code == 0, res.output
-    assert "optimal lineup" in res.output
-    assert "IDP" in res.output  # Surfaced in unsupported slots notice
+    assert res.exit_code == 1, res.output
+    assert "Unsupported lineup slots: IDP" in res.output
+
+
+def test_cli_lazy_context_pick_window(fake_clients, league):
+    from ff.cli import _LazyContext, SleeperClient
+    from ff.core.config import Config
+    cfg = Config(league_id="LG1", season="2026", format=detect_format(league), user_id="userA")
+    sc = SleeperClient()
+    drafts = sc.drafts
+    calls = []
+    sc.drafts = lambda lid: calls.append(lid) or drafts(lid)
+    ctx = _LazyContext(cfg, sc)
+    # Same window as `ff picks`: after the latest (2026) draft, its 2 rounds.
+    assert ctx["seasons"] == ["2027", "2028"]
+    assert ctx["rounds"] == 2
+    assert calls == ["LG1"]
+
+
+def test_cli_lazy_context_value_book_scope(fake_clients, league, book, multi_market_book):
+    from ff.cli import _LazyContext, SleeperClient
+    from ff.core.config import Config
+    cfg = Config(league_id="LG1", season="2026", format=detect_format(league), user_id="userA")
+    assert _LazyContext(cfg, SleeperClient())["value_book"] is multi_market_book
+    assert _LazyContext(cfg, SleeperClient(), include_secondary=False)["value_book"] is book
 
 
 def test_cli_lazy_context(fake_clients, league):

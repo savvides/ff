@@ -30,6 +30,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ff import __version__
+from ff.analysis.compare import compare_players, resolve_player
+from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
     analyze_trade,
     audit_roster,
@@ -53,9 +55,12 @@ from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
+from ff.services.llm.jev import Clarification, JevClient, JevError, interpret, save_jev_key
+from ff.services.llm.jev_output import render_result, render_weekly_notes, render_comparison, render_weekly_waivers
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
+from ff.services.weekly import load_weekly
 from ff.sleeper import SleeperClient, build_rosters, detect_format, player_name
 from ff.values import ValueBook, ValuesClient, normalize_name
 
@@ -82,9 +87,11 @@ def _guard(fn: Callable) -> Callable:
         try:
             return fn(*args, **kwargs)
         except requests.exceptions.RequestException as e:
-            _fail(f"could not reach Sleeper/FantasyCalc ({e}). Check your connection and retry.")
+            _fail(f"could not reach a football data provider ({e}). Check your connection and retry.")
         except (ValidationError, json.JSONDecodeError):
             _fail("config is corrupt or out of date. Run `ff setup <sleeper-username>` to rebuild it.")
+        except ValueError as e:
+            _fail(str(e))
 
     wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]  # keep Typer's option parsing
     return wrapper
@@ -109,16 +116,42 @@ def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
     return build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
 
 
+def _trending_adds(sc: SleeperClient, limit: int) -> List[Dict[str, Any]]:
+    """Trending-add candidates for waiver ranking: three per requested row, at least 50."""
+    return sc.trending(kind="add", limit=max(limit * 3, 50))
+
+
+def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
+                 years: int = 2, rounds: Optional[int] = None) -> Tuple[List[str], int]:
+    """(future seasons, rookie rounds per season) for a pick ledger."""
+    # "Future" starts after the latest draft's season: once a year's rookie
+    # draft exists its picks live on the draft board (`ff draft`), not here.
+    latest = _active_draft(sc, cfg.league_id)
+    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
+    start = base + 1 if latest else base
+    seasons = [str(start + i) for i in range(max(1, years))]
+    # Future rookie drafts are sized by the league's draft_rounds setting; the
+    # latest draft's own round count is only a fallback because in a first-year
+    # league that draft is the startup, whose 20+ rounds would fabricate future
+    # picks. --rounds overrides both (the year-one escape hatch).
+    rounds_n = int(rounds
+                   or (league.get("settings") or {}).get("draft_rounds")
+                   or (((latest or {}).get("settings")) or {}).get("rounds")
+                   or 4)
+    return seasons, rounds_n
+
+
 class _LazyContext(dict):
     """Lazy evaluation context for LLM dispatcher tools to avoid eager network/cache reads."""
 
-    def __init__(self, cfg: Config, sc: SleeperClient):
+    def __init__(self, cfg: Config, sc: SleeperClient, include_secondary: bool = True):
         super().__init__()
         self["config"] = cfg
         self["onboard_user"] = onboard_user
         self["season"] = str(cfg.season)
         self._cfg = cfg
         self._sc = sc
+        self._include_secondary = include_secondary
         self._cache: Dict[str, Any] = {}
 
     def _get_league(self) -> Dict[str, Any]:
@@ -130,6 +163,12 @@ class _LazyContext(dict):
         if "_state" not in self._cache:
             self._cache["_state"] = self._sc.state() or {}
         return self._cache["_state"]
+
+    def _get_pick_window(self) -> Tuple[List[str], int]:
+        # One drafts read (uncached upstream) serves both 'seasons' and 'rounds'.
+        if "_pick_window" not in self._cache:
+            self._cache["_pick_window"] = _pick_window(self._sc, self._cfg, self._get_league())
+        return self._cache["_pick_window"]
 
     def __getitem__(self, key: str) -> Any:
         if key in self:
@@ -145,15 +184,16 @@ class _LazyContext(dict):
             return default
 
     def _compute(self, key: str) -> Any:
+        if key == "prepare_weekly":
+            return lambda team: _prepare_weekly(self, team)
         if key == "rosters":
             return _league_rosters(self._cfg, self._sc)
         elif key == "value_book":
-            return _book(self._cfg)
+            return _book(self._cfg, include_secondary=self._include_secondary)
         elif key == "players_meta":
             return self._sc.players()
         elif key == "projections":
-            state = self._get_state()
-            week = int(state.get("display_week") or state.get("week") or 1)
+            week = self["week"]
             season = str(self._cfg.season)
             try:
                 return ProjectionsClient().week(season, week)
@@ -163,10 +203,12 @@ class _LazyContext(dict):
             return self._get_league().get("scoring_settings") or {}
         elif key == "roster_positions":
             return self._get_league().get("roster_positions") or []
-        elif key == "trending":
-            return self._sc.trending(kind="add", limit=50)
         elif key == "traded_picks":
             return self._sc.traded_picks(self._cfg.league_id)
+        elif key == "seasons":
+            return self._get_pick_window()[0]
+        elif key == "rounds":
+            return self._get_pick_window()[1]
         elif key == "week":
             state = self._get_state()
             return int(state.get("display_week") or state.get("week") or 1)
@@ -185,9 +227,38 @@ class _LazyContext(dict):
         raise KeyError(key)
 
 
-def _analysis_ctx(cfg: Config, sc: SleeperClient) -> Dict[str, Any]:
+def _analysis_ctx(cfg: Config, sc: SleeperClient, include_secondary: bool = True) -> _LazyContext:
     """I/O bundle the LLM dispatcher needs so tools see the same data as `ff` commands."""
-    return _LazyContext(cfg, sc)
+    return _LazyContext(cfg, sc, include_secondary)
+
+
+def _prepare_weekly(ctx: _LazyContext, team: Optional[str]) -> Roster:
+    """Refresh one consistent current-week snapshot for every weekly entry point."""
+    cfg, sc = ctx._cfg, ctx._sc
+    ctx._cache["_state"] = state = sc.state(fresh=True) or {}
+    ctx._cache["_league"] = sc.league(cfg.league_id, fresh=True)
+    ctx["week"] = int(state.get("display_week") or state.get("week") or 1)
+    if str(state.get("season")) != str(cfg.season):
+        raise Clarification("The configured season is not current. Run `ff setup <username>`.")
+    if ctx._get_league().get("season_type", "regular") != "regular":
+        raise Clarification("Weekly advice supports regular-season leagues only.")
+    ctx["rosters"] = build_rosters(sc.rosters(cfg.league_id, fresh=True), sc.league_users(cfg.league_id))
+    target = next((r for r in ctx["rosters"] if str(r.roster_id) == team), None)
+    if target is None:
+        target = _pick_roster(ctx["rosters"], team, cfg.user_id)
+    if target is None:
+        raise Clarification("Could not find that team in the fresh roster snapshot.")
+    candidates = None
+    if ctx.get("weekly_candidates", False):
+        ctx["projections"], candidates = ProjectionsClient().snapshot(str(cfg.season), ctx["week"], fresh=True)
+    else:
+        ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"], fresh=True)
+    if not ctx["projections"]:
+        raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
+    ctx["weekly"], ctx["players_meta"] = load_weekly(
+        sc, cfg.league_id, target, str(cfg.season), ctx["week"], ctx._get_league(), ctx["players_meta"], candidate_meta=candidates)
+    ctx["weekly_team"] = str(target.roster_id)
+    return target
 
 
 def _signed(n: int) -> str:
@@ -388,21 +459,7 @@ def picks(
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
     league = sc.league(cfg.league_id) or {}
-
-    # "Future" starts after the latest draft's season: once a year's rookie
-    # draft exists its picks live on the draft board (`ff draft`), not here.
-    latest = _active_draft(sc, cfg.league_id)
-    base = int((latest or {}).get("season") or league.get("season") or cfg.season)
-    start = base + 1 if latest else base
-    seasons = [str(start + i) for i in range(max(1, years))]
-    # Future rookie drafts are sized by the league's draft_rounds setting; the
-    # latest draft's own round count is only a fallback because in a first-year
-    # league that draft is the startup, whose 20+ rounds would fabricate future
-    # picks. --rounds overrides both (the year-one escape hatch).
-    rounds_n = int(rounds
-                   or (league.get("settings") or {}).get("draft_rounds")
-                   or (((latest or {}).get("settings")) or {}).get("rounds")
-                   or 4)
+    seasons, rounds_n = _pick_window(sc, cfg, league, years, rounds)
 
     valuations = value_all_rosters(rosters, book, sc.players())
     ranks = {v.roster_id: v.power_rank for v in valuations}
@@ -682,12 +739,28 @@ def trade(
 def waivers(
     limit: int = typer.Option(20, help="How many to show."),
     include_rostered: bool = typer.Option(False, "--all", help="Include rostered players."),
+    position: Optional[str] = typer.Option(None, "--position", "-p", help="Filter by position."),
+    trending_only: bool = typer.Option(False, "--trending", help="Only players in Sleeper's trending adds."),
+    weekly: bool = typer.Option(False, "--weekly", help="Rank by current-week lineup improvement instead of dynasty value."),
 ) -> None:
-    """Trending adds across Sleeper, joined to dynasty value and your league."""
+    """Unrostered players by dynasty opportunity, or current-week lineup gain."""
     cfg, sc = _load()
+    if weekly:
+        if include_rostered:
+            _fail("--weekly ranks unrostered acquisition candidates; it cannot be combined with --all.")
+        ctx = _analysis_ctx(cfg, sc, include_secondary=False)
+        ctx["weekly_candidates"] = True
+        target = _prepare_weekly(ctx, None)
+        trending_ids = {str(t["player_id"]) for t in _trending_adds(sc, limit)} if trending_only else None
+        result = weekly_waivers(target, ctx["rosters"], ctx["projections"], ctx["scoring"],
+                                ctx["roster_positions"], ctx["players_meta"], ctx["weekly"], str(cfg.season),
+                                ctx["week"], position=position, limit=limit, trending_ids=trending_ids)
+        render_weekly_waivers(result, target, ctx, console)
+        return
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    trending = sc.trending(kind="add", limit=max(limit * 3, 50))
+    trending = _trending_adds(sc, limit)
+    roster_positions = (sc.league(cfg.league_id) or {}).get("roster_positions") or []
     targets = waiver_targets(
         trending,
         book,
@@ -696,17 +769,21 @@ def waivers(
         limit=limit,
         free_agents_only=not include_rostered,
         is_superflex=bool(cfg.format.superflex),
+        position=position,
+        roster_positions=roster_positions,
+        trending_only=trending_only,
     )
 
-    t = Table(title="waiver targets - trending adds by dynasty value")
+    t = Table(title="waiver targets - dynasty opportunity" + (" (trending only)" if trending_only else ""))
     for c in ("player", "pos", "role", "value", "adds", "status"):
         t.add_column(c, justify="right" if c in ("value", "adds") else "left")
     for tgt in targets:
         a = tgt.asset
-        status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]free agent[/]"
-        t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}", status)
+        status = "[yellow]rostered[/]" if tgt.is_rostered else "[green]unrostered[/]"
+        t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}" if tgt.add_count else "-", status)
     console.print(t)
-    qa_rep = run_qa("waivers", targets=targets, rosters=rosters)
+    console.print("Unrostered does not establish waiver claim status or immediate pickup eligibility; check Sleeper. Adds: '-' means outside the trending sample. Rankings use dynasty opportunity, not weekly projected points.")
+    qa_rep = run_qa("waivers", targets=targets, rosters=rosters, roster_positions=roster_positions)
     render_qa_footer(qa_rep, console)
 
 
@@ -974,47 +1051,59 @@ def lineup(
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
 
-    league = sc.league(cfg.league_id) or {}
+    league = sc.league(cfg.league_id, fresh=True) or {}
     scoring = league.get("scoring_settings") or {}
     roster_positions = league.get("roster_positions") or []
-    rosters = _league_rosters(cfg, sc)
+    rosters = build_rosters(sc.rosters(cfg.league_id, fresh=True), sc.league_users(cfg.league_id))
     target = _pick_roster(rosters, team, cfg.user_id)
     if target is None:
         _fail("could not find that team. Try `ff power` to list teams.")
 
-    state = sc.state() or {}
+    state = sc.state(fresh=True) or {}
     season = season or str(cfg.season)
     week = week or state.get("display_week") or state.get("week") or 1
     if week < 1:
         week = 1
 
-    proj = ProjectionsClient().week(season, week)
+    proj = ProjectionsClient().week(season, week, fresh=True)
     if not proj:
         _fail(f"no projections published for {season} week {week} yet. "
               f"Try a different --week, or wait until they post.")
     players_meta = sc.players()
 
+    weekly = None
+    if season == str(state.get("season")) and week == int(state.get("display_week") or state.get("week") or 1):
+        if league.get("season_type", "regular") != "regular":
+            _fail("Weekly advice supports regular-season leagues only.")
+        weekly, players_meta = load_weekly(sc, cfg.league_id, target, season, week, league, players_meta)
+    else:
+        console.print("Projection-only scenario: current injuries and game locks are not applied.")
     lu = optimal_lineup(target, proj, scoring, roster_positions, players_meta,
-                        season=season, week=week)
+                        season=season, week=week, weekly=weekly)
     info = projected_points(target, proj, scoring, players_meta)
+    for slot in lu.slots + lu.bench:
+        if slot.player_id in info:
+            info[slot.player_id]["points"] = slot.points
 
     console.print(Panel.fit(
         f"[bold]{target.team_name}[/]   {season} week {week}   "
-        f"projected [bold cyan]{lu.total:g}[/]   [dim]({cfg.format.label()})[/]",
+        f"{'actual + remaining projections' if weekly else 'projected'} [bold cyan]{lu.total:g}[/]   [dim]({cfg.format.label()})[/]",
         title="optimal lineup"))
 
     t = Table()
-    for c in ("slot", "player", "pos", "proj"):
-        t.add_column(c, justify="right" if c == "proj" else "left")
+    for c in ("slot", "player", "pos", "points", "basis", "status"):
+        t.add_column(c, justify="right" if c == "points" else "left")
     for s in lu.slots:
-        t.add_row(s.slot, s.name, s.position or "-", f"{s.points:g}")
+        t.add_row(s.slot, s.name, s.position or "-", f"{s.points:g}", s.points_kind,
+                  ("LOCKED; " if s.locked else "") + s.availability)
     console.print(t)
+    render_weekly_notes(lu, console)
     if lu.unsupported_slots:
         console.print(f"[bold yellow]note:[/] this league uses slots the optimizer "
                       f"can't place optimally ({', '.join(sorted(set(lu.unsupported_slots)))}); "
                       f"they're left out of the lineup above.")
 
-    # Start/sit advice vs the lineup currently set on Sleeper.
+    # Compare the same actual/projected basis on both sides.
     optimal_ids = {s.player_id for s in lu.slots if s.player_id}
     roster_positions = league.get("roster_positions") or []
     unsupported_set = set(lu.unsupported_slots or [])
@@ -1032,20 +1121,40 @@ def lineup(
         if start or sit:
             gain = round(lu.total - current_total, 2)
             gain_str = f"+{gain:g}" if gain >= 0 else f"{gain:g}"
-            console.print(f"[bold green]{gain_str} projected[/] vs your current lineup "
+            console.print(f"[bold green]{gain_str} points[/] vs your current lineup "
                           f"([dim]{current_total:g} -> {lu.total:g}[/]):")
             for s in start:
                 console.print(f"  [green]START[/] {s.name} ({s.points:g}) in {s.slot}")
             for p in sit:
                 console.print(f"  [red]SIT[/]   {info[p]['name']} ({info[p]['points']:g})")
         else:
-            console.print("[dim]your current lineup is already optimal.[/]")
+            if weekly and [s.player_id or "0" for s in lu.slots] != target.starters:
+                console.print("Selected starters are unchanged; use the slot assignments above to preserve late-game flexibility.")
+            else:
+                console.print("[dim]your current lineup is already optimal.[/]")
 
     if lu.bench:
         top_bench = ", ".join(f"{b.name} ({b.points:g})" for b in lu.bench[:5])
         console.print(f"[dim]bench: {top_bench}[/]")
-    qa_rep = run_qa("lineup", lineup=lu, target_roster=target, scoring=scoring)
+    qa_rep = run_qa("lineup", lineup=lu, target_roster=target, scoring=scoring, weekly=weekly)
     render_qa_footer(qa_rep, console)
+
+
+@app.command()
+@_guard
+def compare(
+    player_a: str = typer.Argument(..., help="First player's full name or Sleeper ID."),
+    player_b: str = typer.Argument(..., help="Second player's full name or Sleeper ID."),
+    team: Optional[str] = typer.Option(None, help="Team name; defaults to yours."),
+) -> None:
+    """Compare two rostered players for current-week start/sit, including game locks."""
+    cfg, sc = _load()
+    ctx = _analysis_ctx(cfg, sc, include_secondary=False)
+    ids = [resolve_player(p, ctx["players_meta"]) for p in (player_a, player_b)]
+    target = _prepare_weekly(ctx, team)
+    result = compare_players(ids, target, ctx["projections"], ctx["scoring"], ctx["roster_positions"],
+                             ctx["players_meta"], ctx["weekly"], str(cfg.season), ctx["week"])
+    render_comparison(result, target, ctx, console)
 
 
 # --- draft ---------------------------------------------------------------
@@ -1239,20 +1348,69 @@ def draft(
     render_qa_footer(qa_rep, console)
 
 
+def _ask_jev(query: str, cfg: Config) -> None:
+    try:
+        client = JevClient()
+        sc = SleeperClient()
+        # Jev renders FantasyCalc-only tables, so skip the secondary-market scrape.
+        ctx = _analysis_ctx(cfg, sc, include_secondary=False)
+        route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id, lambda: ctx["players_meta"])
+        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
+            ctx["weekly_candidates"] = route.tool == "get_weekly_waivers"
+            if route.kwargs.get("trending_only"):
+                ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
+            _prepare_weekly(ctx, route.kwargs.get("team"))
+        elif route.tool == "get_waivers":
+            ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
+        details = dict(route.kwargs)
+        if details.pop("free_agents_only", False):
+            details["availability"] = "unrostered (claim status unknown)"
+        if "team" in details:
+            details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
+        if "player_ids" in details:
+            details["players"] = ", ".join(player_name(pid, ctx["players_meta"]) for pid in details.pop("player_ids"))
+        if route.tool == "get_picks":
+            details.update(seasons=ctx["seasons"], rounds=ctx["rounds"])
+            details.setdefault("team", "whole league")
+        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
+            details.update(season=cfg.season, week=ctx["week"])
+        operation = route.tool.removeprefix("get_").replace("_", " ")
+        filters = "; ".join(f"{key}: {value}" for key, value in details.items())
+        console.print(f"Interpreted: {operation}" + (f"; {filters}" if filters else ""), markup=False)
+        result = dispatch_tool(route.tool, route.kwargs, ctx)
+        render_result(route, result, ctx, console)
+    except Clarification as exc:
+        console.print(str(exc), markup=False)
+        raise typer.Exit(3)
+    except JevError as exc:
+        console.print(f"error: {exc}", markup=False)
+        raise typer.Exit(1)
+
+
+_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto", "jev"]
+
+
 @app.command()
 @_guard
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your league"),
-    backend: Optional[str] = typer.Option(None, "--backend", help="Override LLM backend (agy, gemini, claude, ollama)"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (jev, agy, gemini, claude, ollama)"),
 ) -> None:
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
-    target_backend = backend or (cfg.llm_backend if cfg else "auto")
+    target_backend = (backend or (cfg.llm_backend if cfg else "auto")).lower()
+    if target_backend not in _LLM_BACKENDS:
+        _fail(f"Invalid backend '{target_backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
+    if target_backend == "jev":
+        if cfg is None:
+            _fail("No league configured. Run `ff setup <username>` first.")
+        _ask_jev(query, cfg)
+        return
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
     try:
         runner_inst = TerminalRunner(backend=target_backend, ollama_model=ollama_model)
-    except (RuntimeError, ValueError) as e:
+    except RuntimeError as e:
         _fail(str(e))
 
     system_prompt = (
@@ -1318,9 +1476,12 @@ def ask(
         console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
         return
 
-    ctx = _analysis_ctx(cfg, SleeperClient())
+    sc = SleeperClient()
+    ctx = _analysis_ctx(cfg, sc)
 
     try:
+        if tool_name == "get_waivers":
+            ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
         result = dispatch_tool(tool_name, kwargs, ctx)
     except Exception as e:
         console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")
@@ -1343,10 +1504,23 @@ def ask(
     render_qa_footer(qa_rep, console)
 
 
+@config_app.command(name="set-jev-key")
+def set_jev_key() -> None:
+    """Privately enter and save a TypeSafe API key for Jev."""
+    key = typer.prompt("TypeSafe API key", hide_input=True)
+    try:
+        path = save_jev_key(key)
+    except JevError as exc:
+        console.print(f"error: {exc}", markup=False)
+        raise typer.Exit(1)
+    console.print(f"Saved TypeSafe API key to {path} (owner read/write only).", markup=False)
+    console.print("An exported TYPESAFE_API_KEY takes precedence over this saved key.")
+
+
 @config_app.command(name="set-llm")
 @_guard
 def set_llm(
-    backend: str = typer.Argument(..., help="LLM backend: auto, agy, gemini, claude, ollama"),
+    backend: str = typer.Argument(..., help="LLM backend: auto, jev, agy, gemini, claude, ollama"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
 ) -> None:
     """Configure the LLM backend used by 'ff ask'."""
@@ -1356,10 +1530,9 @@ def set_llm(
         cfg = load_config()
     except FileNotFoundError:
         _fail("No league configured. Run 'ff setup <username>' first.")
-    valid_backends = SUPPORTED_BACKENDS + ["auto"]
     backend_clean = backend.lower()
-    if backend_clean not in valid_backends:
-        _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(valid_backends)}")
+    if backend_clean not in _LLM_BACKENDS:
+        _fail(f"Invalid backend '{backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
     cfg.llm_backend = backend_clean
     if model:
         cfg.ollama_model = model
@@ -1424,8 +1597,10 @@ def qa_cmd(
 
     # 6. Waivers audit
     trending_adds = sc.trending(kind="add", limit=50)
-    targets = waiver_targets(trending_adds, book, rosters, players_meta, limit=20)
-    reports.append(run_qa("waivers", targets=targets, rosters=rosters))
+    targets = waiver_targets(trending_adds, book, rosters, players_meta, limit=20,
+                             roster_positions=league.get("roster_positions") or [])
+    reports.append(run_qa("waivers", targets=targets, rosters=rosters,
+                          roster_positions=league.get("roster_positions") or []))
 
     # 7. Movers / Arbitrage audit
     arb_movers = find_arbitrage_movers(rosters=rosters, book=book, min_value=1000, limit=20)

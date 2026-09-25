@@ -42,8 +42,8 @@ class Config(BaseModel):
     user_id: Optional[str] = None
     user_name: Optional[str] = None
     league_name: Optional[str] = None
-    # LLM Terminal Runner settings
-    llm_backend: str = "auto"  # "auto" | "agy" | "gemini" | "claude" | "ollama"
+    # Ask backend: optional hosted Jev or existing terminal runners.
+    llm_backend: str = "auto"  # "auto" | "jev" | "agy" | "gemini" | "claude" | "ollama"
     ollama_model: str = "llama3.2"
 
 

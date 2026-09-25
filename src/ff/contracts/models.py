@@ -592,6 +592,23 @@ class WaiverTarget(BaseModel):
         return pos or "-"
 
 
+class WeeklyPlayer(BaseModel):
+    """Fresh weekly facts; unknown data is explicit, never a guessed healthy player."""
+
+    kickoff: Optional[datetime] = None
+    game_status: str = "unknown"  # scheduled / live / final / bye / unknown
+    injury_status: Optional[str] = None
+    actual: Optional[float] = None
+    source: str = ""
+
+
+class WeeklyContext(BaseModel):
+    as_of: datetime
+    players: Dict[str, WeeklyPlayer] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    blocked_reason: Optional[str] = None
+
+
 class LineupSlot(BaseModel):
     """One starting slot (or a bench entry) with its projected player."""
 
@@ -600,6 +617,10 @@ class LineupSlot(BaseModel):
     name: str = "(empty)"
     position: Optional[str] = None
     points: float = 0.0
+    points_kind: str = "projected"
+    locked: bool = False
+    availability: str = "unverified"
+    kickoff: Optional[datetime] = None
 
 
 class Lineup(BaseModel):
@@ -612,10 +633,46 @@ class Lineup(BaseModel):
     # Starting slots the optimizer does not support (non-laminar flexes, IDP, ...).
     # Surfaced so the lineup is never silently wrong for those leagues.
     unsupported_slots: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    as_of: Optional[datetime] = None
 
     @property
     def total(self) -> float:
         return round(sum(s.points for s in self.slots), 2)
+
+
+class WeeklyWaiverTarget(BaseModel):
+    player_id: str
+    name: str
+    position: str
+    projected_points: float
+    lineup_gain: float
+    displaced: List[str] = Field(default_factory=list)
+    availability: str
+    kickoff: Optional[datetime] = None
+
+
+class WeeklyWaivers(BaseModel):
+    baseline: Lineup
+    targets: List[WeeklyWaiverTarget]
+    candidates_evaluated: int
+    warnings: List[str] = Field(default_factory=list)
+
+
+class ComparisonOption(BaseModel):
+    player_id: str
+    name: str
+    projected_points: float
+    availability: str
+    lineup: Optional[Lineup] = None
+    reason: Optional[str] = None
+
+
+class PlayerComparison(BaseModel):
+    options: List[ComparisonOption]
+    baseline: Lineup
+    recommendation: str
+    difference: Optional[float] = None
 
 
 class PositionStanding(BaseModel):

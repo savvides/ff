@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ff.contracts import Lineup, LineupSlot, Roster
+from ff.contracts.models import WeeklyContext, WeeklyPlayer
 from ff.sleeper import player_name
 
 # Which positions may fill each starting slot. This set is intentionally laminar
@@ -119,24 +120,91 @@ def _assign(positions: Dict[str, Optional[str]], scores: Dict[str, float],
 def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
                    scoring: Dict[str, Any], roster_positions: List[str],
                    players_meta: Optional[Dict[str, Any]] = None,
-                   season: str = "", week: int = 0) -> Lineup:
+                   season: str = "", week: int = 0,
+                   weekly: Optional[WeeklyContext] = None,
+                   required_start: Optional[str] = None,
+                   exclude: Optional[set] = None,
+                   contingencies: bool = True) -> Lineup:
+    pid: Optional[str]
     info = projected_points(roster, projections, scoring, players_meta)
     starting = starting_slots(roster_positions)
     # Starting-slot-shaped tokens we don't optimize (e.g. WRRB_FLEX, IDP slots).
     unsupported = [s for s in roster_positions
                    if s not in SLOT_ELIGIBILITY and s not in BENCH_SLOTS]
 
-    # Taxi and IR are subsets of player_ids but do not occupy an active slot, so
-    # they cannot be started. They still appear on the leftover bench list.
-    inactive = set(roster.taxi) | set(roster.reserve)
-    eligible = {pid: d for pid, d in info.items() if pid not in inactive}
+    warnings = list(weekly.warnings) if weekly else []
+    if weekly and (weekly.blocked_reason or unsupported):
+        raise ValueError(weekly.blocked_reason or "Unsupported lineup slots: " + ", ".join(unsupported))
+    inactive = set(roster.taxi) | set(roster.reserve) | (exclude or set())
+    frozen: Dict[int, Optional[str]] = {}
+    locked: set = set()
+    if weekly:
+        if weekly.as_of.tzinfo is None:
+            raise ValueError("Weekly clock must include a timezone")
+        for pid in info:
+            fact = weekly.players.get(pid, WeeklyPlayer())
+            timing_unknown = fact.game_status == "unknown" or (fact.game_status == "scheduled" and (fact.kickoff is None or fact.kickoff.tzinfo is None))
+            is_locked = game_locked(fact, weekly)
+            if is_locked:
+                locked.add(pid)
+            if is_locked or timing_unknown:
+                inactive.add(pid)
+                for i, current in enumerate(roster.starters):
+                    if current == pid and i < len(starting):
+                        if pid in (exclude or set()):
+                            raise ValueError(f"{info[pid]['name']} is locked or timing is unverified")
+                        frozen[i] = pid
+                if timing_unknown:
+                    warnings.append(f"{info[pid]['name']}: game timing unverified; existing assignment preserved.")
+            if fact.game_status == "bye" or unavailable(fact):
+                inactive.add(pid)
+            if pid not in projections and not is_locked:
+                inactive.add(pid)
+                warnings.append(f"{info[pid]['name']}: no projection; not recommended for an open slot.")
+            if is_locked:
+                info[pid]["points"] = fact.actual if fact.actual is not None else 0.0
+                if fact.actual is None:
+                    warnings.append(f"{info[pid]['name']}: actual points unavailable; displayed as zero, total incomplete.")
 
-    # Fill the most restrictive slots first (fewest eligible positions). Build the
-    # score/position maps over `eligible` so iteration order (hence the tie-break)
-    # is identical to the original inline loop.
-    chosen = _assign({pid: d["position"] for pid, d in eligible.items()},
-                     {pid: d["points"] for pid, d in eligible.items()},
-                     starting)
+    eligible = {pid: d for pid, d in info.items() if pid not in inactive}
+    positions = {pid: d["position"] for pid, d in eligible.items()}
+    scores = {pid: d["points"] for pid, d in eligible.items()}
+
+    def assign(fixed: Dict[int, Optional[str]]) -> Dict[int, Optional[str]]:
+        open_indices = [i for i in range(len(starting)) if i not in fixed]
+        available_scores = {p: v for p, v in scores.items() if p not in fixed.values()}
+        assignment = _assign(positions, available_scores, [starting[i] for i in open_indices])
+        return {**fixed, **{open_indices[i]: p for i, p in assignment.items()}}
+
+    if required_start and required_start not in frozen.values():
+        if required_start not in eligible:
+            raise ValueError("Requested player cannot start: unavailable, locked, or missing a projection")
+        choices = [assign({**frozen, i: required_start}) for i, slot in enumerate(starting)
+                   if i not in frozen and positions[required_start] in SLOT_ELIGIBILITY[slot]]
+        if not choices:
+            raise ValueError("Requested player has no legal starting slot")
+        chosen = max(choices, key=lambda c: (sum(p is not None for p in c.values()),
+                                             sum(info[p]["points"] for p in c.values() if p)))
+    else:
+        chosen = assign(frozen)
+
+    # Reassign the same selected players to preserve later kickoff flexibility.
+    # Swaps do not alter points or selected IDs and never move a frozen slot.
+    if weekly:
+        for i in sorted(chosen, key=lambda j: len(SLOT_ELIGIBILITY[starting[j]])):
+            if i in frozen or not chosen[i]:
+                continue
+            for j in chosen:
+                if j in frozen or not chosen[j] or i == j:
+                    continue
+                p, q = chosen[i], chosen[j]
+                assert p is not None and q is not None
+                fp, fq = weekly.players.get(p), weekly.players.get(q)
+                if (SLOT_ELIGIBILITY[starting[i]] < SLOT_ELIGIBILITY[starting[j]]
+                        and info[q]["position"] in SLOT_ELIGIBILITY[starting[i]]
+                        and info[p]["position"] in SLOT_ELIGIBILITY[starting[j]]
+                        and fp and fq and fp.kickoff and fq.kickoff and fp.kickoff > fq.kickoff):
+                    chosen[i], chosen[j] = q, p
     used = {pid for pid in chosen.values() if pid is not None}
 
     slots: List[LineupSlot] = []
@@ -149,13 +217,57 @@ def optimal_lineup(roster: Roster, projections: Dict[str, Dict[str, Any]],
             name=d["name"] if d else "(empty)",
             position=d["position"] if d else None,
             points=d["points"] if d else 0.0,
+            **_slot_facts(pid, weekly, locked),
         ))
 
     bench = [
         LineupSlot(slot="BN", player_id=pid, name=d["name"],
-                   position=d["position"], points=d["points"])
+                   position=d["position"], points=d["points"],
+                   **_slot_facts(pid, weekly, locked))
         for pid, d in sorted(info.items(), key=lambda kv: kv[1]["points"], reverse=True)
         if pid not in used
     ]
+    if weekly and contingencies:
+        for index, entry in enumerate(slots):
+            if index in frozen or entry.locked or entry.availability.lower() not in {"questionable", "doubtful"}:
+                continue
+            alternative = optimal_lineup(roster, projections, scoring, roster_positions, players_meta,
+                                         season, week, weekly=weekly, exclude=(exclude or set()) | {entry.player_id},
+                                         contingencies=False)
+            replacements = [s for s in alternative.slots if s.player_id and s.player_id not in used]
+            names = ", ".join(s.name for s in replacements) or "no projected rostered replacement"
+            deadlines = [s.kickoff for s in replacements + [entry] if s.kickoff]
+            deadline = min(deadlines).isoformat() if deadlines else "unverified"
+            warnings.append(f"Conditional: {entry.name} is {entry.availability}. If out: {names}; "
+                            f"lineup {alternative.total:.2f}; decide before {deadline} (UTC). "
+                            "Replacement availability must also be rechecked.")
     return Lineup(slots=slots, bench=bench, season=str(season), week=week,
-                  unsupported_slots=unsupported)
+                  unsupported_slots=unsupported, warnings=warnings,
+                  as_of=weekly.as_of if weekly else None)
+
+
+UNAVAILABLE = {"out", "ir", "injured reserve", "suspended", "sus", "pup", "physically unable to perform", "inactive"}
+
+
+def unavailable(fact: WeeklyPlayer) -> bool:
+    return (fact.injury_status or "").lower() in UNAVAILABLE
+
+
+def game_locked(fact: WeeklyPlayer, weekly: WeeklyContext) -> bool:
+    return fact.game_status in {"live", "final"} or (
+        fact.game_status == "scheduled" and fact.kickoff is not None
+        and fact.kickoff.tzinfo is not None and fact.kickoff <= weekly.as_of)
+
+
+def _slot_facts(pid: Optional[str], weekly: Optional[WeeklyContext], locked: set) -> Dict[str, Any]:
+    if not weekly or not pid:
+        return {}
+    fact = weekly.players.get(pid, WeeklyPlayer())
+    kind = "projected"
+    if pid in locked:
+        kind = "actual" if fact.game_status == "final" else "actual so far"
+        if fact.actual is None:
+            kind = "actual unavailable"
+    return {"locked": pid in locked, "availability": fact.injury_status or (
+        "no injury designation" if fact.source or fact.game_status != "unknown" else "unverified"),
+        "points_kind": kind, "kickoff": fact.kickoff}

@@ -267,6 +267,14 @@ def test_validate_waivers_valid():
     assert all(c.passed for c in checks)
 
 
+def test_validate_waivers_rejects_kicker_in_league_without_kickers():
+    target = WaiverTarget(asset=Asset(id="k", name="Kicker", position="K", value=0),
+                          add_count=100, is_rostered=False)
+    checks = validate_waivers([target], rosters=[], roster_positions=["QB", "FLEX"])
+    assert [c.name for c in checks if not c.passed] == ["Waivers League Position Eligibility"]
+    assert all(c.passed for c in validate_waivers([target], roster_positions=["K"]))
+
+
 def test_validate_draft_valid():
     p1 = DraftPickInfo(pick_no=1, round=1, slot=1, used=False)
     a1 = Asset(id="10", name="Rookie A", value=6000, position="WR")
