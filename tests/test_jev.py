@@ -8,7 +8,7 @@ import responses
 
 from ff.contracts import Roster
 from ff.services.llm.jev import (
-    DEFERRED, ENDPOINT, ChoiceAnswer, Clarification, JevClient, JevError, choice, interpret,
+    DEFERRED, ENDPOINT, QUESTIONS, USES, ChoiceAnswer, Clarification, JevClient, JevError, choice, interpret,
 )
 
 
@@ -217,11 +217,14 @@ def test_asking_all_does_not_break_the_default():
 
 
 def test_unused_questions_are_ignored():
-    # Power rankings read no team, position or limit, so their uncertainty is irrelevant.
-    client = ScriptedClient("get_power_rankings", {"limit": "other", "team": "named"},
-                            {"limit": 0.1, "position": 0.1, "filter": 0.1})
+    # Picks read only parts and team; power reads no team or limit. Unread answers,
+    # however uncertain or abstaining, change nothing.
+    picks = ScriptedClient("get_picks", {"time": "other", "position": "RB", "limit": "other"},
+                           {"time": 0.1, "position": 0.1, "filter": 0.1, "limit": 0.1})
+    assert interpret("question", picks, rosters, "me").kwargs == {"team": "1"}
     teams = Mock()
-    assert interpret("question", client, teams, "me").kwargs == {}
+    power = ScriptedClient("get_power_rankings", {"limit": "other", "team": "named"}, {"limit": 0.1, "team": 0.1})
+    assert interpret("question", power, teams, "me").kwargs == {}
     teams.assert_not_called()
 
 
@@ -276,18 +279,48 @@ def test_league_team_only_for_picks():
     teams.assert_not_called()
 
 
+COMMANDS = {"get_roster": "roster", "get_power_rankings": "power", "get_dynasty_values": "values",
+            "get_waivers": "waivers", "get_picks": "picks", "get_roster_cleanup": "cleanup", "get_lineup": "lineup"}
+
+
 @pytest.mark.parametrize("operation, field", [
-    ("get_waivers", "parts"), ("get_waivers", "players"), ("get_waivers", "filter"),
-    ("get_waivers", "position"), ("get_waivers", "limit"),
-    ("get_roster", "time"), ("get_lineup", "time"), ("get_lineup", "players"),
-    ("get_dynasty_values", "filter"), ("get_power_rankings", "parts"),
+    (operation, field) for operation, used in USES.items() for field in used
+    if field == "limit" or "other" in QUESTIONS.get(field, {}).get("criteria", {})
 ])
 def test_unsupported_details_abstain(operation, field):
-    # An abstaining detail keeps its direct-command hint at any confidence.
+    # Every guard an operation reads abstains with that command's hint, at any confidence.
     client = ScriptedClient(operation, {field: "other"}, {field: 0.3})
-    with pytest.raises(Clarification, match="--help") as error:
-        interpret("question", client, rosters, "me")
+    teams = Mock(side_effect=rosters)
+    with pytest.raises(Clarification, match=f"`ff {COMMANDS[operation]} --help`") as error:
+        interpret("question", client, teams, "me")
     assert error.value.question == field
+    teams.assert_not_called()
+
+
+def test_every_operation_but_picks_reads_every_guard():
+    # A restricted question ("my rookies", "last year", "Gibbs or Bijan") must never run
+    # unrestricted; the eval's must-abstain cases depend on these guards.
+    from ff.services.llm.jev import GUARDS
+    for operation, used in USES.items():
+        assert set(GUARDS) <= set(used) or operation == "get_picks", operation
+
+
+@pytest.mark.parametrize("operation", ["get_roster", "get_power_rankings", "get_roster_cleanup", "get_lineup"])
+def test_position_abstains_where_it_cannot_apply(operation):
+    # "Show my running backs" must not silently show every position.
+    with pytest.raises(Clarification, match="--help") as error:
+        interpret("question", ScriptedClient(operation, {"position": "RB"}), rosters, "me")
+    assert error.value.question == "position"
+
+
+def test_uncertain_operation_wins_over_other_checks():
+    # No other command's hint, and no roster fetch, for an operation Jev is unsure of.
+    teams = Mock(side_effect=rosters)
+    client = ScriptedClient("get_roster", {"time": "other", "team": "named"}, {"operation": 0.5})
+    with pytest.raises(Clarification, match="confidently") as error:
+        interpret("question", client, teams, "me")
+    assert error.value.question == "operation"
+    teams.assert_not_called()
 
 
 def test_empty_query_does_not_call_api(client):

@@ -24,15 +24,18 @@ OPERATIONS = {
 LIMITS = {"get_roster": 15, "get_dynasty_values": 40, "get_waivers": 20, "get_roster_cleanup": 8}
 # The questions each operation reads. Every request asks them all, in one call;
 # answers to questions an operation does not use are ignored.
+GUARDS = ("parts", "players", "time", "filter", "position")
 USES = {
-    "get_roster": ("parts", "players", "time", "team", "limit"),
-    "get_power_rankings": ("parts", "time"),
-    "get_dynasty_values": ("parts", "players", "time", "filter", "position", "limit"),
-    "get_waivers": ("parts", "players", "filter", "position", "limit"),
+    "get_roster": (*GUARDS, "team", "limit"),
+    "get_power_rankings": GUARDS,
+    "get_dynasty_values": (*GUARDS, "limit"),
+    "get_waivers": (*GUARDS, "limit"),
+    # "Future picks" reads as another time, and no player filter applies to picks.
     "get_picks": ("parts", "team"),
-    "get_roster_cleanup": ("parts", "team", "limit"),
-    "get_lineup": ("parts", "players", "time", "team"),
+    "get_roster_cleanup": (*GUARDS, "team", "limit"),
+    "get_lineup": (*GUARDS, "team"),
 }
+POSITIONED = {"get_dynasty_values", "get_waivers"}  # the rest cannot honor a position
 DEFERRED = {
     "trade": "Trade questions need `ff trade --give ... --get ...`.",
     "setup": "Set up your league with `ff setup <username>`.",
@@ -149,8 +152,8 @@ QUESTIONS = {
         "other": "Another time: next week, a numbered week, last year, a past season or date",
     }),
     "filter": choice(
-        "Besides one position, a result count, dynasty value, and trending or free-agent availability, "
-        "does the user restrict which players qualify?", {
+        "Besides one position, a result count, dynasty value, trending or free-agent availability, "
+        "and roster room or taxi eligibility, does the user restrict which players qualify?", {
             "none": "No other restriction",
             "other": "Another restriction, such as age, rookies, NFL team, injury status or statistics",
         }),
@@ -230,7 +233,8 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
     command = {"get_roster_cleanup": "cleanup", "get_power_rankings": "power", "get_dynasty_values": "values"}.get(operation, operation.removeprefix("get_"))
     unsupported = f"This request has an unsupported or unclear detail. Use `ff {command} --help`, or ask a simpler question."
     for name in used:
-        if answers[name].choice == "other":
+        value = answers[name].choice
+        if value == "other" or (name == "position" and value != "all" and operation not in POSITIONED):
             raise Clarification(unsupported, name)
     kwargs: Dict[str, Any] = {}
     outcomes: Dict[str, Dict[str, Any]] = {}  # per question: option -> the argument it resolves to

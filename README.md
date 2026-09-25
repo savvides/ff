@@ -188,9 +188,11 @@ selects a pinned model; the default is `jev-latest`. No additional dependency is
 
 Result limits are 1–50, or the entire roster for roster and cleanup requests.
 Trade parsing, setup, draft recommendations, news analysis, player comparisons,
-multiple operations, other player filters (such as age), and other weeks or seasons
-are deferred with a direct-command hint, even when Jev is unsure of them. Lineup
-requests for another week use `ff lineup` instead. Teams are matched on your
+multiple operations, named players, player filters (such as age, rookies, or a
+position outside values and waivers), and other weeks or seasons are deferred with
+a direct-command hint, even when Jev is unsure of them; draft-pick requests check
+only for multiple requests and the team. Lineup requests for another week use
+`ff lineup` instead. Teams are matched on your
 machine: "my team" is the team you own, and any other team must be named by its
 full team name or roster number; unknown or ambiguous teams request clarification.
 Details that have no argument above, such as a market (KTC/Dealer), custom scoring,
