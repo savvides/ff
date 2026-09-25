@@ -1,5 +1,6 @@
 """Full offline HTTP -> interpretation -> calculation -> table journeys."""
 import json
+import re
 from unittest.mock import Mock
 
 import pytest
@@ -26,7 +27,7 @@ def configured(fake_clients, monkeypatch):
 
 
 # A fully in-scope answer to every question; tests override only what they probe.
-SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
+SAFE = {"comparison_team": "mine", "weekly_goal": "lineup", "comparison": "start_sit", "parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
         "team": "mine", "position": "all", "limit": "none",
         "action": "read", "availability": "any", "pool": "all"}
 
@@ -73,6 +74,36 @@ def test_supported_journeys(configured, operation, arguments, expected):
         assert "player_ids" not in str(body)
         assert "userA" not in str(body)
         assert "Dynasty Warriors" not in str(body) and "Gridiron Kings" not in str(body)
+
+
+@responses.activate
+def test_named_comparison_direct_and_jev_use_same_calculation(configured):
+    query = "Start Ja'Marr Chase or Jahmyr Gibbs?"
+    serve("get_player_comparison", {"players": "other"})
+    via_jev = runner.invoke(app, ["ask", query, "--backend", "jev"])
+    direct = runner.invoke(app, ["compare", "Ja'Marr Chase", "Jahmyr Gibbs"])
+    assert via_jev.exit_code == direct.exit_code == 0, via_jev.output + direct.output
+    assert "Both players" in direct.output
+    # Rich may wrap the interpreted line, so compare the actual result region.
+    assert re.sub(r"\([0-9.]+ms\)", "", via_jev.output[via_jev.output.index("Both players"):]) == re.sub(r"\([0-9.]+ms\)", "", direct.output)
+    assert direct.output.count("QA:") == 1
+
+
+@responses.activate
+def test_weekly_waivers_direct_and_jev_parity(configured, monkeypatch):
+    import ff.cli as cli
+    projections = cli.ProjectionsClient()
+    projections.snapshot = lambda *a, **k: (
+        {**projections.week("2026", 1), "weekly_free": {"rec": 30}},
+        {"weekly_free": {"full_name": "Weekly Free", "position": "WR", "team": "SEA", "injury_status": None}})
+    monkeypatch.setattr(cli, "ProjectionsClient", lambda: projections)
+    serve("get_weekly_waivers", {"position": "WR", "limit": "5"})
+    via_jev = runner.invoke(app, ["ask", "Which five available WRs would improve my lineup this week?", "--backend", "jev"])
+    direct = runner.invoke(app, ["waivers", "--weekly", "--position", "WR", "--limit", "5"])
+    assert via_jev.exit_code == direct.exit_code == 0, via_jev.output + direct.output
+    assert "Weekly Free" in direct.output and "+30.00" in direct.output
+    assert re.sub(r"\([0-9.]+ms\)", "", via_jev.output[via_jev.output.index("Weekly waiver lineup improvement"):]) == re.sub(r"\([0-9.]+ms\)", "", direct.output)
+    assert "claim status" in direct.output
 
 
 @pytest.mark.parametrize("query, operation, arguments, line", [
@@ -179,14 +210,14 @@ def test_lineup_missing_projections(configured, monkeypatch):
 def test_lineup_fetch_and_label_use_same_week(configured, monkeypatch):
     import ff.cli as cli
     original = cli.SleeperClient()
-    original.state = lambda: {"season": "2026", "week": 3, "display_week": 4}
+    original.state = lambda **kwargs: {"season": "2026", "week": 3, "display_week": 4}
     monkeypatch.setattr(cli, "SleeperClient", lambda: original)
     projections = Mock(week=Mock(return_value={"7564": {"rec": 8}}))
     monkeypatch.setattr(cli, "ProjectionsClient", lambda: projections)
     serve("get_lineup", {"team": "mine"})
     result = runner.invoke(app, ["ask", "my lineup", "--backend", "jev"])
     assert result.exit_code == 0, result.output
-    projections.week.assert_called_once_with("2026", 4)
+    projections.week.assert_called_once_with("2026", 4, fresh=True)
     assert "2026 week 4" in result.output
 
 
@@ -194,7 +225,7 @@ def test_lineup_fetch_and_label_use_same_week(configured, monkeypatch):
 def test_lineup_state_unavailable(configured, monkeypatch):
     import ff.cli as cli
     sleeper = cli.SleeperClient()
-    sleeper.state = lambda: None
+    sleeper.state = lambda **kwargs: None
     monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
     serve("get_lineup", {"team": "mine"})
     result = runner.invoke(app, ["ask", "my lineup", "--backend", "jev"])
@@ -351,7 +382,7 @@ def test_api_error_is_not_a_sleeper_or_config_error(configured):
 
 
 @pytest.mark.parametrize("broken, message", [
-    ("sleeper", "could not reach Sleeper/FantasyCalc"), ("result", "config is corrupt"),
+    ("sleeper", "could not reach a football data provider"), ("result", "config is corrupt"),
 ])
 @responses.activate
 def test_data_errors_use_guard(configured, monkeypatch, broken, message):

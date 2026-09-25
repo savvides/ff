@@ -1,0 +1,201 @@
+[
+  {
+    "id": "control_roster",
+    "query": "Show my roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "compare_full",
+    "query": "Should I start Nico Collins or Cooper Kupp?",
+    "expected": {
+      "tool": "get_player_comparison",
+      "kwargs": {
+        "team": "1",
+        "player_ids": [
+          "900003",
+          "900004"
+        ]
+      }
+    }
+  },
+  {
+    "id": "compare_short",
+    "query": "Collins or Kupp in my lineup this week?",
+    "expected": {
+      "tool": "get_player_comparison",
+      "kwargs": {
+        "team": "1",
+        "player_ids": [
+          "900003",
+          "900004"
+        ]
+      }
+    }
+  },
+  {
+    "id": "compare_sit",
+    "query": "Which should I bench this week, Nico Collins or Cooper Kupp?",
+    "expected": {
+      "tool": "get_player_comparison",
+      "kwargs": {
+        "team": "1",
+        "player_ids": [
+          "900003",
+          "900004"
+        ]
+      }
+    }
+  },
+  {
+    "id": "compare_gibbs",
+    "query": "Start Gibbs or Bijan?",
+    "expected": {
+      "tool": "get_player_comparison",
+      "kwargs": {
+        "team": "1",
+        "player_ids": [
+          "900001",
+          "900002"
+        ]
+      }
+    }
+  },
+  {
+    "id": "weekly_default",
+    "query": "Who should I pick up on waivers this week?",
+    "expected": {
+      "tool": "get_weekly_waivers",
+      "kwargs": {
+        "team": "1",
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "weekly_rb",
+    "query": "Which five available running backs would improve my lineup this week?",
+    "expected": {
+      "tool": "get_weekly_waivers",
+      "kwargs": {
+        "team": "1",
+        "position": "RB",
+        "limit": 5,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "weekly_gain",
+    "query": "Rank available players by improvement to my starting lineup this week",
+    "expected": {
+      "tool": "get_weekly_waivers",
+      "kwargs": {
+        "team": "1",
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "weekly_trending",
+    "query": "Top three trending free agents to help my lineup this week",
+    "expected": {
+      "tool": "get_weekly_waivers",
+      "kwargs": {
+        "team": "1",
+        "limit": 3,
+        "free_agents_only": true,
+        "trending_only": true
+      }
+    }
+  },
+  {
+    "id": "dynasty_control",
+    "query": "Top five available running backs",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "position": "RB",
+        "limit": 5,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "lineup_control",
+    "query": "Who should I start this week?",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "ambiguous_purpose",
+    "query": "Is Nico Collins better than Cooper Kupp?",
+    "expected": null
+  },
+  {
+    "id": "dynasty_compare",
+    "query": "Compare Nico Collins and Cooper Kupp for dynasty value",
+    "expected": null
+  },
+  {
+    "id": "unowned",
+    "query": "Start Justin Jefferson or Cooper Kupp?",
+    "expected": null
+  },
+  {
+    "id": "ambiguous_name",
+    "query": "Start Jones or Kupp?",
+    "expected": null
+  },
+  {
+    "id": "three_players",
+    "query": "Start Gibbs, Bijan or Nico Collins?",
+    "expected": null
+  },
+  {
+    "id": "next_week",
+    "query": "Start Nico Collins or Cooper Kupp next week?",
+    "expected": null
+  },
+  {
+    "id": "add_drop",
+    "query": "Should I drop Collins for Kupp?",
+    "expected": null
+  },
+  {
+    "id": "mutation",
+    "query": "Set Nico Collins as my starter in Sleeper",
+    "expected": null
+  },
+  {
+    "id": "raw_ranking",
+    "query": "Rank available running backs by projected points this week",
+    "expected": null
+  },
+  {
+    "id": "claim",
+    "query": "Who can I immediately pick up without waivers to help this week?",
+    "expected": null
+  },
+  {
+    "id": "split_request",
+    "query": "Compare Collins and Kupp and show my draft picks",
+    "expected": null
+  },
+  {
+    "id": "custom_scoring",
+    "query": "Start Collins or Kupp with two points per reception?",
+    "expected": null
+  }
+]

@@ -21,6 +21,8 @@ from ff.contracts import (
 )
 from ff.core.config import Config
 from ff.analysis.waivers import waiver_positions
+from ff.analysis.lineup import SLOT_ELIGIBILITY, game_locked, unavailable
+from ff.contracts.models import PlayerComparison, WeeklyContext, WeeklyPlayer, WeeklyWaivers
 from ff.services.llm.tools import ALLOWED_TOOLS
 from ff.qa.models import QACheck
 
@@ -363,6 +365,7 @@ def validate_lineup(
     lineup: Lineup,
     target_roster: Optional[Roster] = None,
     scoring: Optional[dict] = None,
+    weekly: Optional[WeeklyContext] = None,
 ) -> List[QACheck]:
     """Validate optimal lineup solver invariants."""
     checks: List[QACheck] = []
@@ -382,6 +385,33 @@ def validate_lineup(
         passed=no_dupes,
         message="" if no_dupes else "Duplicate player placed in multiple starting slots",
     ))
+
+    if weekly is not None and target_roster is not None:
+        frozen_ok = True
+        eligible_ok = True
+        actual_ok = True
+        for pid in target_roster.player_ids:
+            fact = weekly.players.get(pid, WeeklyPlayer())
+            locked = game_locked(fact, weekly)
+            unknown = fact.game_status == "unknown" or (fact.game_status == "scheduled" and not fact.kickoff)
+            if locked or unknown:
+                before = [i for i, p in enumerate(target_roster.starters) if p == pid]
+                after = [i for i, s in enumerate(lineup.slots) if s.player_id == pid]
+                frozen_ok &= before == after
+        for slot in lineup.slots:
+            if not slot.player_id:
+                continue
+            fact = weekly.players.get(slot.player_id, WeeklyPlayer())
+            locked = game_locked(fact, weekly)
+            eligible_ok &= slot.position in SLOT_ELIGIBILITY.get(slot.slot, set())
+            eligible_ok &= locked or fact.game_status == "unknown" or (not unavailable(fact) and fact.game_status != "bye")
+            if locked and fact.actual is not None:
+                actual_ok &= abs(slot.points - fact.actual) < 0.005
+        checks.extend([
+            QACheck(name="Lineup Preserves Frozen Slots", passed=frozen_ok, message="" if frozen_ok else "A locked or unverified player moved"),
+            QACheck(name="Lineup Weekly Eligibility", passed=eligible_ok, message="" if eligible_ok else "Unavailable or position-ineligible starter"),
+            QACheck(name="Lineup Actual Scores", passed=actual_ok, message="" if actual_ok else "Locked score differs from the matchup"),
+        ])
 
     if target_roster is not None:
         taxi_set = set(str(p) for p in (target_roster.taxi or []))
@@ -409,6 +439,42 @@ def validate_lineup(
             message="" if all_owned else "Starter not present in team roster",
         ))
 
+    return checks
+
+
+def validate_comparison(result: PlayerComparison, target_roster: Roster,
+                        weekly: WeeklyContext) -> List[QACheck]:
+    checks = validate_lineup(result.baseline, target_roster, weekly=weekly)
+    ids = {o.player_id for o in result.options}
+    valid = len(result.options) == len(ids) == 2
+    for option in result.options:
+        if option.lineup:
+            checks.extend(validate_lineup(option.lineup, target_roster, weekly=weekly))
+            starters = {s.player_id for s in option.lineup.slots}
+            valid &= option.player_id in starters and not ((ids - {option.player_id}) & starters)
+    checks.append(QACheck(name="Comparison Exclusive Choices", passed=valid,
+                          message="" if valid else "A comparison does not honor the requested start/sit pair"))
+    return checks
+
+
+def validate_weekly_waivers(result: WeeklyWaivers, target_roster: Roster,
+                           rosters: List[Roster], weekly: WeeklyContext,
+                           roster_positions: List[str]) -> List[QACheck]:
+    checks = validate_lineup(result.baseline, target_roster, weekly=weekly)
+    owned = {p for r in rosters for p in r.player_ids}
+    ids = [t.player_id for t in result.targets]
+    allowed = waiver_positions(roster_positions)
+    valid = len(ids) == len(set(ids)) and not (set(ids) & owned)
+    for target in result.targets:
+        fact = weekly.players.get(target.player_id, WeeklyPlayer())
+        valid &= (target.position in allowed and fact.game_status == "scheduled"
+                  and fact.kickoff is not None and not game_locked(fact, weekly) and not unavailable(fact))
+    checks.append(QACheck(name="Weekly Waiver Candidate Eligibility", passed=valid,
+                          message="" if valid else "Owned, unavailable, locked or ineligible waiver candidate"))
+    gains = [t.lineup_gain for t in result.targets]
+    ordered = all(g >= 0 for g in gains) and gains == sorted(gains, reverse=True)
+    checks.append(QACheck(name="Weekly Waiver Gain Order", passed=ordered,
+                          message="" if ordered else "Negative or incorrectly ordered lineup gains"))
     return checks
 
 

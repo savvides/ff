@@ -363,12 +363,11 @@ def test_cli_lineup_handles_unsupported_slots(fake_clients, league, monkeypatch)
     custom_league["roster_positions"] = list(league.get("roster_positions", [])) + ["IDP"]
     _write_config(custom_league)
     fake_inst = SleeperClient()
-    fake_inst.league = lambda lid: custom_league
+    fake_inst.league = lambda lid, **kwargs: custom_league
     monkeypatch.setattr("ff.cli.SleeperClient", lambda *a, **k: fake_inst)
     res = runner.invoke(app, ["lineup"])
-    assert res.exit_code == 0, res.output
-    assert "optimal lineup" in res.output
-    assert "IDP" in res.output  # Surfaced in unsupported slots notice
+    assert res.exit_code == 1, res.output
+    assert "Unsupported lineup slots: IDP" in res.output
 
 
 def test_cli_lazy_context_pick_window(fake_clients, league):

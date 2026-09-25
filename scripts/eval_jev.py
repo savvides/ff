@@ -25,7 +25,16 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
     cases = json.loads(CASES.read_text())
-    rosters = [Roster(roster_id=1, team_name="Dynasty Warriors", owner_id="me"),
+    players = {
+        "900001": {"full_name": "Jahmyr Gibbs", "first_name": "Jahmyr", "last_name": "Gibbs"},
+        "900002": {"full_name": "Bijan Robinson", "first_name": "Bijan", "last_name": "Robinson"},
+        "900003": {"full_name": "Nico Collins", "first_name": "Nico", "last_name": "Collins"},
+        "900004": {"full_name": "Cooper Kupp", "first_name": "Cooper", "last_name": "Kupp"},
+        "900005": {"full_name": "Aaron Jones", "first_name": "Aaron", "last_name": "Jones"},
+        "900006": {"full_name": "Daniel Jones", "first_name": "Daniel", "last_name": "Jones"},
+        "900007": {"full_name": "Justin Jefferson", "first_name": "Justin", "last_name": "Jefferson"},
+    }
+    rosters = [Roster(roster_id=1, team_name="Dynasty Warriors", owner_id="me", player_ids=list(players)[:6]),
                Roster(roster_id=2, team_name="Gridiron Kings", owner_id="other")]
     correct = abstained = errors = 0
     supported = sum(case["expected"] is not None for case in cases)
@@ -37,7 +46,7 @@ def main() -> int:
         # Diagnostics name ff's own question or locally built route, never raw replies.
         detail: dict = {}
         try:
-            route = interpret(case["query"], client, lambda: rosters, "me")
+            route = interpret(case["query"], client, lambda: rosters, "me", lambda: players)
             passed = expected is not None and route.model_dump() == expected
             if passed:
                 correct += 1

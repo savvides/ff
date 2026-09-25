@@ -311,7 +311,16 @@
   {
     "id": "comparison",
     "query": "Start Gibbs or Bijan?",
-    "expected": null
+    "expected": {
+      "tool": "get_player_comparison",
+      "kwargs": {
+        "team": "1",
+        "player_ids": [
+          "900001",
+          "900002"
+        ]
+      }
+    }
   },
   {
     "id": "multi",

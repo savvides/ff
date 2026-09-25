@@ -16,7 +16,7 @@ to stdout and does not save responses. The tested default is pinned to
 `jev-1.13.0`; `TYPESAFE_MODEL` can override it. The report records resolved model IDs.
 
 Acceptance requires at least 90% exact operation-and-argument accuracy across
-28 supported questions, abstention on all 12 unsupported/ambiguous questions,
+29 supported questions, abstention on all 11 unsupported/ambiguous questions,
 no API errors, and a passing fixed control. API errors never count as abstentions.
 Low-confidence abstentions on supported questions count as incorrect.
 
@@ -47,7 +47,7 @@ This separate set has 16 supported cases (including the unchanged control) and
 14 must-abstain cases. It uses the same gate: at least 90% supported exact matches,
 every unsupported case abstaining, no API errors, and a passing control. It covers
 different wording, roster numbers, and unsupported markets, scoring rules, draft
-years/rounds, positions and result counts. The original 40 question texts and gate remain unchanged; the explicit trending query now also expects `trending_only=true`.
+years/rounds, positions and result counts. The original 40 question texts and percentage/error/control gates remain unchanged. The named-player start/sit case is now supported; the explicit trending query expects `trending_only=true`.
 These are regression sets used during development, not an independent accuracy estimate.
 
 ## Verified 2026-09-25 on jev-1.13.0
@@ -127,4 +127,63 @@ league-slot eligibility were checked independently. Both unsupported requests
 exited 3 without dispatch. No league transactions occurred.
 
 `make check` passed Ruff, mypy, all 575 offline tests, and package build.
+`git diff --check` passed. No restart is required.
+
+
+## Weekly decisions, 2026-09-25
+
+Plan and source boundaries: [weekly decisions plan](../docs/weekly-decisions-plan.md).
+Current-week lineup advice now applies fresh availability and kickoff constraints;
+`ff compare` compares two named rostered players; `ff waivers --weekly` ranks the
+full projected unrostered pool by whole-lineup gain. The same functions serve Jev.
+
+Two expected routes changed because the supported capability expanded, not to
+relax a gate: `Start Gibbs or Bijan?` now resolves to a start/sit comparison, and
+`Who should I pick up on waivers this week?` now selects weekly lineup improvement.
+The main set therefore has 29 supported and 11 unsupported cases. Original question
+texts, the 0.80 floor, 90% broad accuracy threshold, zero-error requirement, every
+unsupported abstention and fixed `Show my roster` control remain intact.
+Synthetic player IDs are resolved locally and never appended to Jev's input.
+
+```bash
+./.venv/bin/python scripts/eval_jev.py --cases evals/jev-weekly.json
+```
+
+This fourth set contains 11 supported cases and 12 must-abstain cases. It covers
+full/short player names, different start/sit phrasing, weekly lineup-gain waivers,
+trending filters, dynasty and lineup controls, ambiguous/unowned players, other
+weeks, custom scoring, execution requests and acquisition conditions. Require all
+23 passing twice, plus the existing broader and focused waiver gates.
+
+| Final evaluation on jev-1.13.0 | Exact supported | Required abstentions | API errors | Control |
+|---|---|---|---|---|
+| Main, 40 cases | 28/29 | 11/11 | 0 | pass |
+| Boundaries, 30 cases | 15/16 | 14/14 | 0 | pass |
+| Focused waivers, final run 1 | 12/12 | 10/10 | 0 | pass |
+| Focused waivers, final run 2 | 12/12 | 10/10 | 0 | pass |
+| Weekly decisions, final run 1 | 11/11 | 12/12 | 0 | pass |
+| Weekly decisions, final run 2 | 11/11 | 12/12 | 0 | pass |
+
+The main `roster_other` and boundary `picks_default` phrasings abstained below the
+floor. Earlier tuning runs exposed false abstentions on short names, team selection,
+and a weekly ranking objective; the comparison team question is now separate from
+the existing roster team question. One earlier boundary response failed schema
+validation, and one intervening focused-waiver run abstained on `fa_rb` at 0.75.
+No incorrect route executed in these final evaluations. These are development
+regressions with provider variability, not independent accuracy estimates.
+
+Live strict-QA journeys covered direct lineup, direct and Jev comparisons, and
+direct and Jev weekly waivers. The real Thursday starters retained their exact
+slots and actual scores. Offline direct/Jev parity tests use the same snapshot and
+compare the complete rendered result (excluding QA elapsed time). A rendering
+variable bug found by strict QA and an unknown-timing injury contingency bug both
+have reproduced regression tests and verified fixes.
+
+The live suite passed 9 checks; the optional KTC check skipped because no values
+were returned. Weekly features do not depend on KTC. New live checks exercise the
+cross-provider schedule, fresh projection/player/news shape and roster/matchup
+slot alignment. The schedule/player endpoints are undocumented; unknown timing
+freezes assignments, and unsupported league rules refuse actionable advice.
+
+`make check` passed Ruff, mypy, all 644 offline tests, and the package build.
 `git diff --check` passed. No restart is required.

@@ -240,3 +240,12 @@ def test_roster_id_takes_priority_over_numeric_team_name():
     wrong = Roster(roster_id=2, team_name="1")
     intended = Roster(roster_id=1, team_name="My Team")
     assert _find_roster([wrong, intended], "1", {}) is intended
+
+
+def test_lineup_cannot_label_current_week_facts_as_another_week():
+    from ff.services.llm.dispatcher import dispatch_tool
+    import pytest
+    from ff.contracts import Roster
+    with pytest.raises(ValueError, match="current week"):
+        dispatch_tool("get_lineup", {"team": "1", "week": 8}, {
+            "rosters": [Roster(roster_id=1)], "weekly": object(), "week": 3})

@@ -2,6 +2,22 @@ from __future__ import annotations
 
 TOOL_SCHEMAS = [
     {
+        "name": "get_weekly_waivers",
+        "description": "Rank unrostered players by current-week whole-lineup improvement for one team.",
+        "parameters": {"type": "object", "properties": {
+            "team": {"type": "string"}, "position": {"type": "string"},
+            "limit": {"type": "integer"}, "trending_only": {"type": "boolean"}
+        }}
+    },
+    {
+        "name": "get_player_comparison",
+        "description": "Compare exactly two rostered players for current-week start/sit.",
+        "parameters": {"type": "object", "properties": {
+            "team": {"type": "string"},
+            "player_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}
+        }, "required": ["player_ids"]}
+    },
+    {
         "name": "setup_league",
         "description": "Onboard or set up Sleeper league by username.",
         "parameters": {

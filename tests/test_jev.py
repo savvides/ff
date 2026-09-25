@@ -237,7 +237,7 @@ def test_choose_returns_low_confidence_answers(client):
 
 
 # A fully in-scope answer to every question; tests override only what they probe.
-SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
+SAFE = {"comparison_team": "mine", "weekly_goal": "lineup", "comparison": "start_sit", "parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
         "team": "mine", "position": "all", "limit": "none",
         "action": "read", "availability": "any", "pool": "all"}
 
@@ -423,7 +423,7 @@ def test_league_team_only_for_picks():
     teams.assert_not_called()
 
 
-COMMANDS = {"get_roster": "roster", "get_power_rankings": "power", "get_dynasty_values": "values",
+COMMANDS = {"get_player_comparison": "compare", "get_weekly_waivers": "waivers", "get_roster": "roster", "get_power_rankings": "power", "get_dynasty_values": "values",
             "get_waivers": "waivers", "get_picks": "picks", "get_roster_cleanup": "cleanup", "get_lineup": "lineup"}
 
 
@@ -446,10 +446,11 @@ def test_every_operation_but_picks_reads_every_guard():
     # A restricted question ("my rookies", "last year", "Gibbs or Bijan") must never run
     # unrestricted; the eval's must-abstain cases depend on these guards.
     from ff.services.llm.jev import GUARDS
+    assert set(USES["get_player_comparison"]) == {"parts", "time", "filter", "position", "settings", "action", "comparison_team", "comparison"}
     # Literal, so shrinking GUARDS cannot silently drop the generated cases below.
     assert GUARDS == ("parts", "players", "time", "filter", "position", "settings", "action")
     for operation, used in USES.items():
-        assert set(GUARDS) <= set(used) or operation == "get_picks", operation
+        assert set(GUARDS) <= set(used) or operation in {"get_picks", "get_player_comparison"}, operation
     assert "settings" in USES["get_picks"]
     assert "action" in USES["get_picks"]
 
@@ -562,8 +563,8 @@ def test_fixed_control_question_and_eval_cases_have_valid_routes():
     cases = json.loads((Path(__file__).parents[1] / "evals/jev.json").read_text())
     assert len(cases) == 40
     assert len({c['id'] for c in cases}) == 40
-    assert sum(c['expected'] is not None for c in cases) == 28
-    assert {c['expected']['tool'] for c in cases if c['expected']} == set(OPERATIONS)
+    assert sum(c['expected'] is not None for c in cases) == 29
+    assert {c['expected']['tool'] for c in cases if c['expected']} == set(OPERATIONS) - {"get_weekly_waivers"}
     control = next(c for c in cases if c['id'] == 'control_roster')
     assert control['query'] == 'Show my roster'
     route = interpret(control['query'], ScriptedClient('get_roster'), lambda: [Roster(roster_id=1, owner_id='me')], 'me')

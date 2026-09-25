@@ -18,7 +18,7 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code, suite):
     cases = json.loads(path.read_text())
     expected = {c["query"]: c for c in cases}
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-only")
-    def fake_interpret(query, client, get_rosters, user_id):
+    def fake_interpret(query, client, get_rosters, user_id, get_players=None):
         case = expected[query]
         # Include a transient failure before each valid response, or exhausted retries.
         client.request_count += 3 if mode == "api_error" else 2

@@ -14,6 +14,7 @@ A fast, local command-line tool for managing a Sleeper dynasty fantasy football 
 
 **Data sources (all free, public, read-only):**
 - [Sleeper API](https://docs.sleeper.com/) — league settings, rosters, matchups, transactions, trending adds, injuries, and player news.
+- ESPN scoreboard supplies UTC kickoff times, cross-checked against Sleeper game status.
 - Sleeper Projections (`api.sleeper.com`) — weekly projected stat lines (RotoWire), scored by your league's own rules for the lineup optimizer.
 - [FantasyCalc API](https://fantasycalc.com/) — dynasty values for players **and draft picks**, tagged with `sleeperId` so they join straight onto your roster.
 - [KeepTradeCut](https://keeptradecut.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
@@ -107,14 +108,16 @@ make install                 # create venv + install dependencies + enable pre-c
 
 ### 4. Roster Management & Gameday
 
-- **`ff lineup [team]`** — Lineup optimizer scoring weekly stat projections against your league's exact rules (including TEP), using an optimal laminar greedy assignment algorithm, and providing actionable START/SIT deltas vs your current Sleeper starters.
+- **`ff lineup [team]`** — Lineup optimizer scoring weekly stat projections against your league's exact rules (including TEP), using an optimal laminar greedy assignment algorithm, and showing START/SIT deltas vs your current Sleeper starters. Current-week advice refreshes league rules, starters, injuries and game status, preserves locked slots, and separates actual points from remaining projections. Questionable starters get conditional alternatives and decision deadlines.
   - `team`: Team name search (defaults to your team).
   - `--week N`: Target NFL week (defaults to active/upcoming week).
   - `--season Y`: Target season year.
   ```bash
   ff lineup
-  ff lineup --week 8
+  ff lineup --week 8  # another week is a projection-only scenario, clearly labeled
   ```
+
+- **`ff compare "Nico Collins" "Cooper Kupp"`** — Compare two players on your roster for current-week start/sit. Shows the best whole lineup with each choice, injury conditions and lock constraints. Add `--team "Team Name"` for another roster. Full names, unique names/initials, or Sleeper IDs resolve locally; ambiguity asks for clarification. It can recommend starting both when both fit.
 
 - **`ff cleanup [team]`** — Roster auditor computing active, taxi, and IR capacity, ranking drop candidates (lowest value non-starters first) and highlighting zero-loss taxi stashes to open active roster spots for waiver adds.
   - `team`: Team name search (defaults to your team).
@@ -135,9 +138,11 @@ make install                 # create venv + install dependencies + enable pre-c
   - `--all`: Include currently rostered players (default: unrostered only).
   - `--position RB`: Filter candidates by position before applying the limit.
   - `--trending`: Restrict candidates to the sampled Sleeper trending adds.
-  - Unrostered does not mean immediately claimable. Check waiver claim status in Sleeper. These rankings use dynasty value and depth-chart opportunity, not weekly projected points.
+  - `--weekly`: Rank the full projected unrostered pool by improvement to your current-week lineup, applying the same locks and availability rules. Shows displaced starters, kickoff times and conditional availability. Zero gain means depth only. Gains assume acquisition before kickoff and roster room; no drop is selected.
+  - Unrostered does not mean immediately claimable. Check waiver claim status in Sleeper. Without `--weekly`, rankings use dynasty value and depth-chart opportunity.
   ```bash
   ff waivers --limit 20
+  ff waivers --weekly --position RB --limit 5
   ```
 
 ### 5. Draft Board & AI Assistant
@@ -193,11 +198,13 @@ overrides the tested default, `jev-1.13.0`. No additional dependency is required
 | Waivers | Unrostered players in eligible league positions; optional position and trending-only filters; limit (default 20) |
 | Draft-pick ownership | Known team (default yours) or explicit whole league; the two seasons after the latest draft, league round count |
 | Roster cleanup | Known team (default yours); drop-candidate limit (default 8) |
-| Starting lineup | Known team (default yours); full current-week lineup |
+| Starting lineup | Known team (default yours); full current-week lineup with locks and availability |
+| Start/sit comparison | Exactly two named rostered players; current week, league scoring |
+| Weekly waivers | Explicit this-week objective; known team (default yours), optional position/count/trending; rank by lineup improvement |
 
 Result limits are 1–50, or the entire roster for roster and cleanup requests.
-Trade parsing, setup, draft recommendations, news analysis, player comparisons,
-multiple operations, named players, player filters (such as age, rookies, or a
+Trade parsing, setup, draft recommendations, news analysis, dynasty/trade/add-drop comparisons,
+multiple operations, named players outside start/sit comparisons, player filters (such as age, rookies, or a
 position outside values and waivers), and other weeks or seasons are deferred with
 a direct-command hint, even when Jev is unsure of them; draft-pick requests check
 for multiple requests, the team, and explicit year/round or calculation-setting overrides. Lineup requests for another week use
@@ -210,7 +217,12 @@ league"): use the roster number. Unknown or ambiguous teams request clarificatio
 Requests for a different market (KTC/Dealer), custom scoring, or specific draft
 years/rounds ask for clarification. Supported requests use FantasyCalc values,
 your league's scoring, and the pick seasons shown on the `Interpreted:` line.
-Missing projections produce an unavailable message.
+Missing projections produce an unavailable message. Weekly advice refreshes its small data feeds; the full Sleeper player dictionary remains cached daily.
+
+```bash
+ff ask "Should I start Nico Collins or Cooper Kupp?" --backend jev
+ff ask "Which five available RBs would improve my lineup this week?" --backend jev
+```
 Waiver results distinguish unrostered players from verified free agents: the public
 API does not establish immediate pickup or pending-claim status. Requests requiring
 that distinction ask you to check Sleeper. Requests to submit claims, place bids or
@@ -236,7 +248,7 @@ Only `config set-jev-key` stores the key; questions and responses are not stored
 market-data caching still applies. Automatic backend selection does not enable Jev.
 
 See [the live evaluations](evals/README.md) for the original 40-question gate and
-30 additional phrasing and boundary cases. Some supported phrasings still ask for
+30 additional phrasing and boundary cases, plus focused waiver and weekly-decision sets. Some supported phrasings still ask for
 clarification; naming the operation explicitly, such as "roster", can help.
 
 ### 6. Diagnostics & Utilities
@@ -295,6 +307,7 @@ pytest tests/test_trade.py::test_trade_with_players_and_picks   # run single tes
 
 - **`roster` and `power` value rostered players only**, not draft picks. Whole-team pick ownership is derived from `traded_picks` and tiered by `ff picks` — kept out of roster/power totals so player value and draft capital remain separately legible.
 - **Lineup projections are single-source** (RotoWire, via Sleeper) and exclude K/DEF unless your league starts them. TEP *is* applied here because `lineup` scores raw projected stats with your league's rules — only FantasyCalc *dynasty values* (`values`/`roster`/`trade`) are not TEP-adjusted.
+- **Weekly advice depends on undocumented public feeds.** Unknown game timing freezes existing assignments and excludes affected bench/waiver candidates. Conflicting or unavailable feeds can stop advice; they never fall back to stale injury tags as if fresh. AutoSub leagues, best-ball and unsupported lineup slots refuse actionable advice. Invalid IR eligibility or roster capacity must be resolved in Sleeper. News headlines retain their dates and sources; they do not produce invented injury odds or projection discounts. Actual points for in-progress games exclude the unplayed remainder.
 - **No trade *finder* and no tiers/VORP yet.** `trade` evaluates a deal you specify; it does not scan the league to propose one. Rankings are raw values without tier breaks or league-wide replacement level.
 
 ## Contributing

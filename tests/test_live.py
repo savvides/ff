@@ -121,3 +121,39 @@ def test_ktc_live_maps_values():
     assert values["jahmyr gibbs"] > 0
     assert any(k.startswith("202") for k in values)
 
+
+def test_weekly_live_schedule_and_fresh_player_contracts():
+    from ff.core.http import get_json
+    from ff.projections import ProjectionsClient
+    from ff.services.weekly import game_facts, SCHEDULE, SCOREBOARD
+    sc = SleeperClient()
+    state = sc.state()
+    season = str(state["season"])
+    week = int(state.get("display_week") or state.get("week") or 1)
+    games = game_facts(get_json(f"{SCHEDULE}/{season}", ttl=0),
+                       get_json(SCOREBOARD, params={"dates": season, "seasontype": 2, "week": week}, ttl=0),
+                       season, week)
+    assert games and all(status != "unknown" for status, _ in games.values())
+    projections, meta = ProjectionsClient().snapshot(season, week, fresh=True)
+    assert len(projections) > 100 and len(meta) > 100
+    pid = next(iter(meta))
+    player = sc.player(pid)
+    assert player["player_id"] == pid and "injury_status" in player
+    assert isinstance(sc.player_news(pid), list)
+
+
+def test_weekly_live_roster_matchup_slot_alignment():
+    from ff.sleeper import build_rosters
+    league_id = os.environ.get("FF_LIVE_LEAGUE_ID")
+    if not league_id:
+        pytest.skip("set FF_LIVE_LEAGUE_ID for current roster/matchup alignment")
+    sc = SleeperClient()
+    state = sc.state()
+    week = int(state.get("display_week") or state.get("week") or 1)
+    rosters = build_rosters(sc.rosters(league_id, fresh=True), sc.league_users(league_id))
+    matchups = {m["roster_id"]: m for m in sc.matchups(league_id, week)}
+    assert matchups
+    for roster in rosters:
+        matchup = matchups[roster.roster_id]
+        assert roster.starters == [str(p) if p else "0" for p in matchup["starters"]]
+        assert isinstance(matchup["players_points"], dict)

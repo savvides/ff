@@ -108,8 +108,9 @@
     "id": "waiver_week",
     "query": "Who should I pick up on waivers this week?",
     "expected": {
-      "tool": "get_waivers",
+      "tool": "get_weekly_waivers",
       "kwargs": {
+        "team": "1",
         "limit": 20,
         "free_agents_only": true
       }
