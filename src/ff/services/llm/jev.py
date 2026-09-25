@@ -175,7 +175,8 @@ QUESTIONS = {
     }),
     "position": choice("Which single position filter is requested?", {
         "QB": "Quarterbacks", "RB": "Running backs", "WR": "Wide receivers", "TE": "Tight ends",
-        "all": "No position restriction", "other": "Other position or multiple positions",
+        "all": "No position restriction, including a whole roster or lineup",
+        "other": "A position not listed, or two or more specific positions",
     }),
 }
 EVERY = re.compile(r"\b(all|every|entire|full|whole|complete)\b", re.IGNORECASE)
