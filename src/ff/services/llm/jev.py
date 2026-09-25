@@ -98,9 +98,11 @@ class JevClient:
         self.model = os.environ.get("TYPESAFE_MODEL", "jev-latest").strip() or "jev-latest"
         # In-memory metrics only; no questions, answers, or credentials are logged.
         self.calls: List[Dict[str, Any]] = []
+        self.request_count = 0
 
     def choose(self, state: str, questions: Dict[str, Any]) -> Dict[str, ChoiceAnswer]:
         for delay in (*RETRY_DELAYS, None):
+            self.request_count += 1
             try:
                 response = requests.post(
                     ENDPOINT, headers={"Authorization": f"Bearer {self._key}"},

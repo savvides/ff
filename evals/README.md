@@ -33,3 +33,6 @@ model versions, latency, and token usage. Each abstention names the ff question
 that abstained, ff's own message, and, when it fell below the floor, its
 confidence; each incorrect case shows the locally built route, and each API
 error its message. It excludes credentials and raw replies.
+`api_calls` counts all HTTP attempts, including retries and failed requests;
+`valid_responses` counts responses accepted by the client. Token totals cover
+only those valid responses, so they are not a billing total when calls fail.

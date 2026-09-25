@@ -70,6 +70,7 @@ def test_http_failures_are_safe_and_retried_only_when_transient(client, monkeypa
     assert "private-test-key" not in str(error.value)
     assert "provider body" not in str(error.value)
     assert len(responses.calls) == calls
+    assert client.request_count == calls
     assert sleeps == [1.0, 2.0][:calls - 1]
 
 
@@ -81,6 +82,8 @@ def test_transient_failure_then_success(client, monkeypatch):
     responses.post(ENDPOINT, json=payload(questions, {"op": "a"}))
     assert client.choose("test", questions)["op"].choice == "a"
     assert len(responses.calls) == 2
+    assert client.request_count == 2
+    assert len(client.calls) == 1
 
 
 def test_timeout_and_redirect_policy(client, monkeypatch):
@@ -92,6 +95,7 @@ def test_timeout_and_redirect_policy(client, monkeypatch):
     assert post.call_args.kwargs["timeout"] == 15
     assert post.call_args.kwargs["allow_redirects"] is False
     post.assert_called_once()
+    assert client.request_count == 1
 
 
 @pytest.mark.parametrize("corruption", ["missing", "unknown", "nan", "range", "probabilities", "wrong_winner", "wrong_type", "bad_json"])

@@ -16,9 +16,11 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-only")
     def fake_interpret(query, client, get_rosters, user_id):
         case = expected[query]
-        client.calls.append({"model": "mock-only", "input_tokens": 10, "output_tokens": 1})
+        # Include a transient failure before each valid response, or exhausted retries.
+        client.request_count += 3 if mode == "api_error" else 2
         if mode == "api_error":
             raise JevError("unavailable")
+        client.calls.append({"model": "mock-only", "input_tokens": 10, "output_tokens": 1})
         if mode == "false_abstention" or (mode == "control_fails" and case["id"] == "control_roster"):
             raise Clarification("uncertain", "limit", 0.5)
         if case["expected"] is None:
@@ -34,6 +36,8 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
     assert report["passed"] is (mode == "pass")
     assert report["supported_total"] == 28
     assert report["unsupported_total"] == 12
+    assert report["api_calls"] == (120 if mode == "api_error" else 80)
+    assert report["valid_responses"] == (0 if mode == "api_error" else 40)
     if mode == "api_error":
         assert report["api_errors"] == 40
         assert report["unsupported_abstained"] == 0
