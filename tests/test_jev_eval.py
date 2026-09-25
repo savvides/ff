@@ -37,6 +37,7 @@ def test_live_evaluator_gates(monkeypatch, capsys, mode, exit_code):
     if mode == "api_error":
         assert report["api_errors"] == 40
         assert report["unsupported_abstained"] == 0
+        assert {c["error"] for c in report["cases"]} == {"unavailable"}
     if mode == "control_fails":
         assert report["supported_exact_accuracy"] > 0.90
         assert report["control_passed"] is False

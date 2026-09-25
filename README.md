@@ -207,8 +207,10 @@ Options that resolve to the same argument, such as your team by name and "my tea
 or no count and the default count, count together. A request Jev cannot run as asked
 (low confidence, a deferred or unsupported detail, an unknown team, a stale season,
 or missing projections) prints guidance and exits with code 3. API errors exit with
-code 1; there is no automatic model fallback or retry. This threshold measures
-interpretation confidence, not the chance a fantasy recommendation succeeds.
+code 1. Rate-limit and overload replies (HTTP 429/529) are retried twice after a
+short pause, as TypeSafe recommends; there is no model fallback or other retry.
+This threshold measures interpretation confidence, not the chance a fantasy
+recommendation succeeds.
 
 Jev receives only your question text, in one request per question; team names,
 rosters, and values stay on your machine. Requests consume your API allowance.

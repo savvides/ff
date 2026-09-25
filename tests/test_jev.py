@@ -55,15 +55,32 @@ def test_mispasted_key_is_a_clean_error(monkeypatch, key):
     assert "ts_live" not in str(error.value)
 
 
-@pytest.mark.parametrize("status, message", [(401, "authentication"), (403, "authentication"), (429, "rate limit"), (503, "HTTP 503"), (302, "HTTP 302")])
+@pytest.mark.parametrize("status, message, calls", [
+    (401, "authentication", 1), (403, "authentication", 1), (503, "HTTP 503", 1), (302, "HTTP 302", 1),
+    # Rate limits and overload are retried twice with backoff, as TypeSafe recommends.
+    (429, "rate limit", 3), (529, "HTTP 529", 3),
+])
 @responses.activate
-def test_http_failures_are_safe_and_never_retried(client, status, message):
+def test_http_failures_are_safe_and_retried_only_when_transient(client, monkeypatch, status, message, calls):
+    sleeps = []
+    monkeypatch.setattr("ff.services.llm.jev.time.sleep", sleeps.append)
     responses.post(ENDPOINT, status=status, body="private-test-key secret provider body")
     with pytest.raises(JevError, match=message) as error:
         client.choose("test", {})
     assert "private-test-key" not in str(error.value)
     assert "provider body" not in str(error.value)
-    assert len(responses.calls) == 1
+    assert len(responses.calls) == calls
+    assert sleeps == [1.0, 2.0][:calls - 1]
+
+
+@responses.activate
+def test_transient_failure_then_success(client, monkeypatch):
+    monkeypatch.setattr("ff.services.llm.jev.time.sleep", lambda seconds: None)
+    questions = {"op": choice("Choose", {"a": "A", "b": "B"})}
+    responses.post(ENDPOINT, status=529)
+    responses.post(ENDPOINT, json=payload(questions, {"op": "a"}))
+    assert client.choose("test", questions)["op"].choice == "a"
+    assert len(responses.calls) == 2
 
 
 def test_timeout_and_redirect_policy(client, monkeypatch):

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import requests
@@ -12,6 +13,9 @@ from ff.contracts import Roster
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 CONFIDENCE_FLOOR = 0.80
+# TypeSafe asks clients to back off and retry rate-limit (429) and overload (529) replies.
+RETRY_STATUSES = (429, 529)
+RETRY_DELAYS = (1.0, 2.0)
 OPERATIONS = {
     "get_roster": "Value one team's entire roster; optional top-player display limit.",
     "get_power_rankings": "Rank all league teams by total dynasty player value.",
@@ -95,14 +99,18 @@ class JevClient:
         self.calls: List[Dict[str, Any]] = []
 
     def choose(self, state: str, questions: Dict[str, Any]) -> Dict[str, ChoiceAnswer]:
-        try:
-            response = requests.post(
-                ENDPOINT, headers={"Authorization": f"Bearer {self._key}"},
-                json={"model": self.model, "state": state, "questions": questions},
-                timeout=15, allow_redirects=False,
-            )
-        except requests.RequestException:
-            raise JevError("Jev request failed or timed out. Check your connection and retry.") from None
+        for delay in (*RETRY_DELAYS, None):
+            try:
+                response = requests.post(
+                    ENDPOINT, headers={"Authorization": f"Bearer {self._key}"},
+                    json={"model": self.model, "state": state, "questions": questions},
+                    timeout=15, allow_redirects=False,
+                )
+            except requests.RequestException:
+                raise JevError("Jev request failed or timed out. Check your connection and retry.") from None
+            if response.status_code not in RETRY_STATUSES or delay is None:
+                break
+            time.sleep(delay)
         if response.status_code in (401, 403):
             raise JevError("Jev authentication failed. Check TYPESAFE_API_KEY and account access.")
         if response.status_code == 429:

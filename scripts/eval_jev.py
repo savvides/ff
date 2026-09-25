@@ -49,10 +49,11 @@ def main() -> int:
                 abstained += 1
             outcome = "abstained"
             detail = {"question": exc.question, "confidence": exc.confidence, "message": str(exc)}
-        except JevError:
+        except JevError as exc:
             passed = False
             errors += 1
             outcome = "api_error"
+            detail = {"error": str(exc)}  # ff's fixed message, e.g. the HTTP status
         durations.append(time.perf_counter() - start)
         results.append({"id": case["id"], "passed": passed, "outcome": outcome, **detail})
     accuracy = correct / supported

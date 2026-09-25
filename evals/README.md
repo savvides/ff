@@ -9,7 +9,8 @@ Run from the repo root, with `TYPESAFE_API_KEY` exported in the same terminal:
 This is an opt-in, paid API evaluation. It sends the 40 synthetic questions in
 `jev.json` to TypeSafe, one API call each (40 per run), and matches them to
 synthetic teams locally, without accessing your Sleeper league. Requests have a
-15-second timeout and are not retried. The script prints its report to stdout
+15-second timeout; only rate-limit and overload replies (HTTP 429/529) are retried,
+twice, after a short pause. The script prints its report to stdout
 and does not save responses. Set `TYPESAFE_MODEL` to a supported pinned model ID
 for comparable repeated runs; otherwise the default is `jev-latest`. The report
 records resolved model IDs.
@@ -30,5 +31,5 @@ Exit codes: `0` passes; `1` fails a gate; `2` means the API key is missing.
 The report includes case IDs, exact accuracy, abstentions, API failures, resolved
 model versions, latency, and token usage. Each abstention names the ff question
 that abstained, ff's own message, and, when it fell below the floor, its
-confidence; each incorrect case shows the locally built route. It excludes
-credentials and raw replies.
+confidence; each incorrect case shows the locally built route, and each API
+error its message. It excludes credentials and raw replies.
