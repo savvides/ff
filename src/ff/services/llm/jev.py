@@ -301,6 +301,9 @@ def interpret(query: str, client: JevClient, get_rosters: Callable[[], List[Rost
         confidence = _confidence(answers[name], outcomes.get(name, {}))
         if confidence < CONFIDENCE_FLOOR:
             raise Clarification(LOW_CONFIDENCE, name, confidence)
+    if team == "mine" and target is not None:
+        if any(r.roster_id != target.roster_id for r in found["named"]):
+            raise Clarification(TEAM_HINT, "team")
     if operation == "get_waivers":
         kwargs["free_agents_only"] = True
     return Route(tool=operation, kwargs=kwargs)

@@ -108,6 +108,19 @@ def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
     assert len(responses.calls) == 1
 
 
+@pytest.mark.parametrize("query", ["Show the Gridiron Kings roster", "Show roster 2"])
+@pytest.mark.parametrize("operation", ["get_roster", "get_picks", "get_roster_cleanup", "get_lineup"])
+@responses.activate
+def test_confident_mine_cannot_override_an_explicit_rival(configured, monkeypatch, query, operation):
+    serve(operation, {"team": "mine"})
+    dispatch = Mock()
+    monkeypatch.setattr("ff.cli.dispatch_tool", dispatch)
+    result = runner.invoke(app, ["ask", query, "--backend", "jev"])
+    assert result.exit_code == 3, result.output
+    assert "Interpreted:" not in result.output
+    dispatch.assert_not_called()
+
+
 @pytest.mark.parametrize("operation, arguments", [
     ("trade", {}), ("ambiguous", {}),
     ("get_lineup", {"team": "mine", "time": "other"}),

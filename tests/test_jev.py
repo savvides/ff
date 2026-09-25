@@ -314,7 +314,8 @@ def test_unused_questions_are_ignored():
 def test_interpret_validated_arguments(operation, answers, expected):
     client = ScriptedClient(operation, answers)
     teams = Mock(side_effect=rosters)
-    route = interpret("question for Beta", client, teams, "me")
+    query = "question for Beta" if answers.get("team") == "named" else "question"
+    route = interpret(query, client, teams, "me")
     assert route.tool == operation
     assert route.kwargs == expected
     assert len(client.questions) == 1
