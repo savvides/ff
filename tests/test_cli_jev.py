@@ -26,7 +26,7 @@ def configured(fake_clients, monkeypatch):
 
 
 # A fully in-scope answer to every question; tests override only what they probe.
-SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none",
+SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
         "team": "mine", "position": "all", "limit": "none"}
 
 
@@ -95,7 +95,7 @@ def test_interpreted_line_names_what_runs(configured, query, operation, argument
     assert result.output.splitlines()[0] == line
 
 
-@pytest.mark.parametrize("stage", ["operation", "team", "time"])
+@pytest.mark.parametrize("stage", ["operation", "team", "time", "settings"])
 @responses.activate
 def test_low_confidence_does_not_dispatch(configured, monkeypatch, stage):
     serve("get_lineup", {"team": "mine"}, low_stage=stage)

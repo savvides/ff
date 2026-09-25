@@ -47,6 +47,16 @@ def test_missing_key(monkeypatch):
         JevClient()
 
 
+@pytest.mark.parametrize("model", [None, " "])
+def test_default_model_is_the_live_evaluated_version(monkeypatch, model):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-only")
+    if model is None:
+        monkeypatch.delenv("TYPESAFE_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("TYPESAFE_MODEL", model)
+    assert JevClient().model == "jev-1.13.0"
+
+
 @responses.activate
 def test_environment_key_overrides_saved_key(monkeypatch):
     from ff.services.llm.jev import save_jev_key
@@ -227,7 +237,7 @@ def test_choose_returns_low_confidence_answers(client):
 
 
 # A fully in-scope answer to every question; tests override only what they probe.
-SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none",
+SAFE = {"parts": "one", "players": "none", "time": "current", "filter": "none", "settings": "defaults",
         "team": "mine", "position": "all", "limit": "none"}
 
 
@@ -258,7 +268,7 @@ def rosters():
     return [Roster(roster_id=1, team_name="Alpha", owner_id="me"), Roster(roster_id=2, team_name="Beta")]
 
 
-@pytest.mark.parametrize("stage", ["operation", "parts", "team"])
+@pytest.mark.parametrize("stage", ["operation", "parts", "settings", "team"])
 @pytest.mark.parametrize("confidence, accepted", [(0.79, False), (0.8, True)])
 def test_confidence_floor(stage, confidence, accepted):
     client = ScriptedClient("get_picks", confidence={stage: confidence})
@@ -346,7 +356,7 @@ def test_asking_all_does_not_break_the_default():
 
 
 def test_unused_questions_are_ignored():
-    # Picks read only parts and team; power reads no team or limit. Unread answers,
+    # Picks read only parts, settings and team; power reads no team or limit. Unread answers,
     # however uncertain or abstaining, change nothing.
     picks = ScriptedClient("get_picks", {"time": "other", "position": "RB", "limit": "other"},
                            {"time": 0.1, "position": 0.1, "filter": 0.1, "limit": 0.1})
@@ -435,9 +445,10 @@ def test_every_operation_but_picks_reads_every_guard():
     # unrestricted; the eval's must-abstain cases depend on these guards.
     from ff.services.llm.jev import GUARDS
     # Literal, so shrinking GUARDS cannot silently drop the generated cases below.
-    assert GUARDS == ("parts", "players", "time", "filter", "position")
+    assert GUARDS == ("parts", "players", "time", "filter", "position", "settings")
     for operation, used in USES.items():
         assert set(GUARDS) <= set(used) or operation == "get_picks", operation
+    assert "settings" in USES["get_picks"]
 
 
 @pytest.mark.parametrize("operation", ["get_roster", "get_power_rankings", "get_roster_cleanup", "get_lineup"])

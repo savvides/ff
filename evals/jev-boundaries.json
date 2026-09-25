@@ -1,0 +1,239 @@
+[
+  {
+    "id": "control_roster",
+    "query": "Show my roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "roster_display",
+    "query": "Display my roster",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "roster_number",
+    "query": "Show roster 2",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "2",
+        "limit": 15
+      }
+    }
+  },
+  {
+    "id": "roster_count",
+    "query": "Value my top 8 players",
+    "expected": {
+      "tool": "get_roster",
+      "kwargs": {
+        "team": "1",
+        "limit": 8
+      }
+    }
+  },
+  {
+    "id": "power_order",
+    "query": "Rank the league teams",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "power_different",
+    "query": "Which fantasy teams are strongest by dynasty value?",
+    "expected": {
+      "tool": "get_power_rankings",
+      "kwargs": {}
+    }
+  },
+  {
+    "id": "values_wr",
+    "query": "Top 7 dynasty WRs",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "position": "WR",
+        "limit": 7
+      }
+    }
+  },
+  {
+    "id": "values_te",
+    "query": "Show the top 12 tight ends by dynasty value",
+    "expected": {
+      "tool": "get_dynasty_values",
+      "kwargs": {
+        "position": "TE",
+        "limit": 12
+      }
+    }
+  },
+  {
+    "id": "waivers_te",
+    "query": "Show five available tight ends on waivers",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "position": "TE",
+        "limit": 5,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "waivers_default",
+    "query": "Show waiver targets",
+    "expected": {
+      "tool": "get_waivers",
+      "kwargs": {
+        "limit": 20,
+        "free_agents_only": true
+      }
+    }
+  },
+  {
+    "id": "picks_default",
+    "query": "Show my future picks",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "picks_number",
+    "query": "List roster 2's future draft picks",
+    "expected": {
+      "tool": "get_picks",
+      "kwargs": {
+        "team": "2"
+      }
+    }
+  },
+  {
+    "id": "cleanup_count",
+    "query": "Show five drop candidates",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "1",
+        "limit": 5
+      }
+    }
+  },
+  {
+    "id": "cleanup_room",
+    "query": "Audit my roster capacity",
+    "expected": {
+      "tool": "get_roster_cleanup",
+      "kwargs": {
+        "team": "1",
+        "limit": 8
+      }
+    }
+  },
+  {
+    "id": "lineup_best",
+    "query": "Give me my optimal lineup this week",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "1"
+      }
+    }
+  },
+  {
+    "id": "lineup_number",
+    "query": "Show the best starting lineup for roster 2",
+    "expected": {
+      "tool": "get_lineup",
+      "kwargs": {
+        "team": "2"
+      }
+    }
+  },
+  {
+    "id": "market",
+    "query": "Show top ten dynasty players using KTC values",
+    "expected": null
+  },
+  {
+    "id": "custom_scoring",
+    "query": "Optimize my lineup using custom half-PPR scoring",
+    "expected": null
+  },
+  {
+    "id": "pick_year",
+    "query": "Show my 2028 draft picks",
+    "expected": null
+  },
+  {
+    "id": "pick_round",
+    "query": "Show my future first-round picks only",
+    "expected": null
+  },
+  {
+    "id": "waiver_rookies",
+    "query": "Show rookie waiver targets",
+    "expected": null
+  },
+  {
+    "id": "roster_position",
+    "query": "Show only the running backs on my roster",
+    "expected": null
+  },
+  {
+    "id": "lineup_flex",
+    "query": "Who should I start at FLEX?",
+    "expected": null
+  },
+  {
+    "id": "two_positions",
+    "query": "Show dynasty quarterbacks and tight ends",
+    "expected": null
+  },
+  {
+    "id": "multiple_rosters",
+    "query": "Show the Dynasty Warriors and Gridiron Kings rosters",
+    "expected": null
+  },
+  {
+    "id": "mutation",
+    "query": "Drop the lowest valued player from my Sleeper roster",
+    "expected": null
+  },
+  {
+    "id": "all_free_agents",
+    "query": "List every available free agent",
+    "expected": null
+  },
+  {
+    "id": "zero_count",
+    "query": "Show zero dynasty players",
+    "expected": null
+  },
+  {
+    "id": "numbered_week",
+    "query": "Optimize my lineup for week 12",
+    "expected": null
+  },
+  {
+    "id": "unknown_roster",
+    "query": "Show roster 999",
+    "expected": null
+  }
+]

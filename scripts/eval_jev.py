@@ -5,6 +5,7 @@ Requires a saved key or TYPESAFE_API_KEY. Prints metrics and case IDs, never the
 """
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
 import sys
@@ -57,7 +58,8 @@ def main() -> int:
         durations.append(time.perf_counter() - start)
         results.append({"id": case["id"], "passed": passed, "outcome": outcome, **detail})
     accuracy = correct / supported
-    controls_passed = all(r["passed"] for r in results if r["id"] == "control_roster")
+    controls = [r for r in results if r["id"] == "control_roster"]
+    controls_passed = len(controls) == 1 and controls[0]["passed"]
     passed = accuracy >= 0.90 and abstained == len(cases) - supported and errors == 0 and controls_passed
     print(json.dumps({
         "passed": passed, "models": sorted({c["model"] for c in client.calls}),
@@ -76,4 +78,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cases", type=Path, default=CASES, help="Synthetic evaluation JSON (default: evals/jev.json)")
+    CASES = parser.parse_args().cases
     raise SystemExit(main())
