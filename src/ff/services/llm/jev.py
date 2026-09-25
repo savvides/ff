@@ -163,8 +163,9 @@ QUESTIONS = {
         "other": "Another time: next week, a numbered week, last year, a past season or date",
     }),
     "filter": choice(
-        "Besides one position, a result count, dynasty value, trending or free-agent availability, "
-        "and roster room or taxi eligibility, does the user restrict which players qualify?", {
+        "Besides one position, a result count, ranking words such as top or best, dynasty value, "
+        "trending or free-agent availability, and roster room or taxi eligibility, "
+        "does the user restrict which players qualify?", {
             "none": "No other restriction",
             "other": "Another restriction, such as age, rookies, NFL team, injury status or statistics",
         }),
