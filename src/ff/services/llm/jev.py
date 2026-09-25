@@ -188,7 +188,7 @@ GENERIC = {"unknown", "the", "my", "our", "team", "roster", "league", "dynasty"}
 
 def _limit(query: str) -> Dict[str, Any]:
     criteria = {str(i): f"Exactly {i} results" for i in range(1, 51)}
-    criteria["none"] = "No result count requested"
+    criteria["none"] = "No number of results stated"
     # Offered only when the words ask for it, so "Show my roster" never weighs
     # "all" against the default count.
     if EVERY.search(query):
