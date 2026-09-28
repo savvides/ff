@@ -20,6 +20,8 @@ A fast, local command-line tool for managing a Sleeper dynasty fantasy football 
 - [KeepTradeCut](https://keeptradecut.com/) — crowdsourced secondary market values, joined against FantasyCalc to identify arbitrage opportunities.
 - Local LLM Runners (`agy`, `gemini`, `claude`, `ollama`) — terminal AI agents executing deterministic Python analysis tools for plain-English Q&A.
 
+**Expert references:** Use [CBS weekly rankings](https://www.cbssports.com/fantasy/football/rankings/) for manual start/sit review and [Heath Cummings's dynasty rankings](https://www.cbssports.com/fantasy/football/news/dynasty-fantasy-football-updated-rankings/) for long-term roster decisions. Check the analyst, ranking period, scoring format, and update date before comparing. These references do not feed the CLI's calculations; see the [reference guide](docs/expert-ranking-sources.md).
+
 ## Quickstart
 
 ```bash
