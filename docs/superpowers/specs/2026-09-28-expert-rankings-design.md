@@ -1,7 +1,7 @@
 # Expert rankings for weekly and dynasty decisions
 
 Date: 2026-09-28
-Status: Proposed specification; conversational direction approved, written review pending.
+Status: Written specification approved on 2026-09-28; implementation plan review pending.
 
 ## Purpose and agreed direction
 
