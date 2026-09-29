@@ -121,7 +121,7 @@ make install                 # create venv + install dependencies + enable pre-c
 
 - **`ff compare "Nico Collins" "Cooper Kupp"`** — Compare two players on your roster for current-week start/sit. Shows the best whole lineup with each choice, injury conditions and lock constraints. Add `--team "Team Name"` for another roster. Full names, unique names/initials, or Sleeper IDs resolve locally; ambiguity asks for clarification. It can recommend starting both when both fit.
 
-- **`ff cleanup [team]`** — Roster auditor computing active, taxi, and IR capacity, ranking drop candidates (lowest value non-starters first) and highlighting zero-loss taxi stashes to open active roster spots for waiver adds.
+- **`ff cleanup [team]`** — Roster auditor computing active, taxi, and IR capacity, ranking drop candidates (lowest value non-starters first) and highlighting zero-loss IR moves (players whose designation your league allows on IR) and taxi stashes to open active roster spots for waiver adds.
   - `team`: Team name search (defaults to your team).
   - `--drops N`: How many drop candidates to list (default: 8).
   ```bash

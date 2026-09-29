@@ -7,7 +7,7 @@
     ff values [-p WR]       dynasty rankings for your league format
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
     ff waivers              trending free agents worth grabbing, by value
-    ff cleanup [team]       roster capacity: who to drop / stash on taxi for room
+    ff cleanup [team]       roster capacity: who to drop / move to IR / stash on taxi for room
     ff draft [-p QB] [-r]   live draft board: your picks + best available by value
 """
 
@@ -872,8 +872,9 @@ def cleanup(
     team: Optional[str] = typer.Argument(None, help="Team name; defaults to yours."),
     drops: int = typer.Option(8, help="How many drop candidates to list."),
 ) -> None:
-    """Roster cleanup: capacity vs fill, who to drop, and which young players to
-    stash on taxi so you free active room for a waiver add without losing value."""
+    """Roster cleanup: capacity vs fill, who to drop, who can move to IR, and which
+    young players to stash on taxi so you free active room for a waiver add without
+    losing value."""
     cfg, sc = _load()
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
