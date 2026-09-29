@@ -4,16 +4,18 @@ Pure and deterministic (same input -> same output), so it is gate-tested, not
 evaluated. The one judgment this encodes is the distinction that actually matters
 when you need waiver room: only starter/bench players occupy an *active* slot, so
 dropping a taxi/IR player frees a taxi/IR slot but adds NO room for a waiver add.
-The two levers are therefore surfaced separately:
+The levers are therefore surfaced separately:
   * drop candidates  - non-starters ranked worst-first (each flagged whether the
                        drop frees an active slot)
+  * IR candidates    - active players whose designation the league lets onto IR,
+                       moved there to free an active slot without dropping anyone
   * taxi candidates  - taxi-eligible bench players that could be stashed to free
                        an active slot without dropping anyone
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional
 
 from ff.analysis.depth import (
     opportunity_score,
@@ -26,6 +28,36 @@ from ff.values import ValueBook
 
 # Slots in roster_positions that are not active starting slots.
 _NON_STARTER = {"BN", "TAXI", "IR"}
+
+# Sleeper IR rules, lowercased: designations that may always sit on IR, and the
+# ones each `reserve_allow_*` league setting adds.
+_ALWAYS_IR = {"ir", "injured reserve", "pup", "physically unable to perform"}
+_RESERVE_ALLOW = {"out": {"out"}, "sus": {"sus", "suspended"}, "doubtful": {"doubtful"},
+                  "na": {"na", "inactive"}, "dnr": {"dnr"}, "cov": {"cov"}}
+# Roster statuses that override a player's injury tag as the designation.
+_STATUS_DESIGNATIONS = {"Injured Reserve", "Suspended", "PUP", "Inactive"}
+# IR suggestions go longest-expected-absence first.
+_IR_ORDER = {"ir": 0, "injured reserve": 0, "pup": 0, "physically unable to perform": 0,
+             "sus": 1, "suspended": 1, "na": 2, "inactive": 2, "dnr": 2, "cov": 2,
+             "out": 3, "doubtful": 4}
+
+
+def designation(row: Dict[str, Any]) -> Optional[str]:
+    """A player's current Sleeper designation: the roster status when that is a
+    reserve list (IR, Suspended, PUP, Inactive), else the injury tag."""
+    if row.get("status") in _STATUS_DESIGNATIONS:
+        return row["status"]
+    return row.get("injury_status")
+
+
+def ir_eligible_statuses(settings: Dict[str, Any]) -> FrozenSet[str]:
+    """Lowercased designations this league lets onto IR: IR and PUP always, plus
+    each designation a `reserve_allow_*` setting turns on."""
+    allowed = set(_ALWAYS_IR)
+    for key, statuses in _RESERVE_ALLOW.items():
+        if settings.get("reserve_allow_" + key):
+            allowed |= statuses
+    return frozenset(allowed)
 
 
 def taxi_eligible(
@@ -63,8 +95,12 @@ def audit_roster(
     taxi_years: Optional[int] = None,
     is_superflex: bool = True,
     drop_limit: int = 8,
+    ir_statuses: FrozenSet[str] = frozenset(),
 ) -> RosterAudit:
-    """Categorize every player, compute capacity, and rank drop / taxi moves."""
+    """Categorize every player, compute capacity, and rank drop / IR / taxi moves.
+
+    `ir_statuses` is the league's IR rule (`ir_eligible_statuses(settings)`);
+    empty means no IR suggestions."""
     roster_positions = roster_positions or []
     starter_cap = sum(1 for p in roster_positions if p not in _NON_STARTER)
     bench_cap = roster_positions.count("BN")
@@ -123,6 +159,7 @@ def audit_roster(
             slot=cat,
             taxi_eligible=taxi_eligible(
                 years_exp, allow_vets=taxi_allow_vets, taxi_years=taxi_years),
+            injury_status=designation(m),
         ))
 
     audit = RosterAudit(
@@ -147,10 +184,24 @@ def audit_roster(
     ))
     audit.drop_candidates = non_starters[:drop_limit]
 
+    # IR candidates: active players whose designation the league lets onto IR,
+    # capped at open IR slots. Healthy scratches (Out, "Coach's Decision") are
+    # skipped: that tag flips week to week, and an IR occupant whose designation
+    # clears blocks every add and drop until moved back.
+    ir_eligible = [
+        s for s in slots
+        if s.is_active and (s.injury_status or "").lower() in ir_statuses
+        and (players_meta or {}).get(s.player_id, {}).get("injury_body_part") != "Coach's Decision"
+    ]
+    ir_eligible.sort(key=lambda s: (_IR_ORDER.get((s.injury_status or "").lower(), 5), -s.value, s.name))
+    audit.ir_candidates = ir_eligible[:max(0, audit.ir_open)]
+    ir_ids = {s.player_id for s in audit.ir_candidates}
+
     # Taxi candidates: eligible bench players, best-first, capped at open taxi
     # slots. Stashing them frees an active slot while keeping the player.
     taxi_open = max(0, taxi_slots - len(audit.taxi))
-    eligible_bench = [s for s in slots if s.slot == "BENCH" and s.taxi_eligible]
+    eligible_bench = [s for s in slots if s.slot == "BENCH" and s.taxi_eligible
+                      and s.player_id not in ir_ids]
     eligible_bench.sort(key=lambda s: (-s.value, s.name))
     audit.taxi_candidates = eligible_bench[:taxi_open]
 

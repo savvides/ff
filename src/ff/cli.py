@@ -38,6 +38,7 @@ from ff.analysis import (
     available,
     detect_status,
     find_arbitrage_movers,
+    ir_eligible_statuses,
     my_picks,
     optimal_lineup,
     pick_ledger,
@@ -224,6 +225,8 @@ class _LazyContext(dict):
         elif key == "taxi_years":
             settings = self._get_league().get("settings") or {}
             return settings.get("taxi_years")
+        elif key == "ir_statuses":
+            return ir_eligible_statuses(self._get_league().get("settings") or {})
         raise KeyError(key)
 
 
@@ -893,6 +896,7 @@ def cleanup(
         taxi_years=settings.get("taxi_years"),
         is_superflex=bool(cfg.format.superflex),
         drop_limit=drops,
+        ir_statuses=ir_eligible_statuses(settings),
     )
 
     if audit.active_open < 0:
@@ -909,14 +913,15 @@ def cleanup(
         f"taxi {len(audit.taxi)}/{audit.taxi_cap}   IR {len(audit.ir)}/{audit.ir_cap}",
         title="roster cleanup"))
 
-    # Concrete "how to make room" line: taxi stashes + zero-value bench drops each
-    # open one active slot right now.
-    taxi_ids = {s.player_id for s in audit.taxi_candidates}
-    bench_zeros = [s for s in audit.drop_candidates if s.is_active and s.value == 0 and s.player_id not in taxi_ids]
-    openable = len(audit.taxi_candidates) + len(bench_zeros)
+    # Concrete "how to make room" line: IR moves, taxi stashes, and zero-value
+    # bench drops each open one active slot right now.
+    moved_ids = {s.player_id for s in audit.ir_candidates + audit.taxi_candidates}
+    bench_zeros = [s for s in audit.drop_candidates if s.is_active and s.value == 0 and s.player_id not in moved_ids]
+    openable = len(audit.ir_candidates) + len(audit.taxi_candidates) + len(bench_zeros)
     if audit.active_open <= 0 and openable:
         console.print(f"[bold]make room:[/] up to [bold]{openable}[/] active slot(s) "
-                      f"available now ([green]{len(audit.taxi_candidates)} taxi stash[/], "
+                      f"available now ([green]{len(audit.ir_candidates)} IR move[/], "
+                      f"[green]{len(audit.taxi_candidates)} taxi stash[/], "
                       f"[green]{len(bench_zeros)} zero-value bench drop[/]).")
 
     dt = Table(title="drop candidates - worst value first")
@@ -936,6 +941,17 @@ def cleanup(
         )
     console.print(dt)
 
+    if audit.ir_candidates:
+        it = Table(title="move to IR - frees an active slot, keeps the player")
+        for c in ("player", "pos", "team", "status", "value", "where"):
+            it.add_column(c, justify="right" if c == "value" else "left")
+        for s in audit.ir_candidates:
+            it.add_row(s.name, s.position or "-", s.team or "FA", s.injury_status or "-",
+                       f"{s.value:,}", s.slot)
+        console.print(it)
+        console.print("[dim]If an IR player's designation clears, Sleeper blocks adds and drops "
+                      "until you move that player back to the active roster.[/]")
+
     if audit.taxi_candidates:
         tt = Table(title="stash on taxi - frees an active slot, keeps the player")
         for c in ("player", "pos", "team", "role", "age", "value", "30d"):
@@ -954,7 +970,7 @@ def cleanup(
                       f"bench player to stash.[/]")
 
     console.print("[dim]Dropping a taxi/IR player frees a taxi/IR slot, not an active one; "
-                  "only a bench drop or a taxi stash opens room for a waiver add. "
+                  "only a bench drop, a taxi stash, or an IR move opens room for a waiver add. "
                   "ff is read-only - make the moves in Sleeper.[/]")
     qa_rep = run_qa("cleanup", audit=audit)
     render_qa_footer(qa_rep, console)
@@ -1592,6 +1608,7 @@ def qa_cmd(
             reserve_slots=int(settings.get("reserve_slots") or 0),
             taxi_allow_vets=bool(settings.get("taxi_allow_vets")),
             taxi_years=settings.get("taxi_years"),
+            ir_statuses=ir_eligible_statuses(settings),
         )
         reports.append(run_qa("cleanup", audit=audit))
 

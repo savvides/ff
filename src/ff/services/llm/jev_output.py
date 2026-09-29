@@ -92,6 +92,9 @@ def render_result(route: Route, result: Any, ctx: Dict[str, Any], console: Conso
         _table(console, "Drop candidates", ("player", "pos", "slot", "value", "frees active slot"), (
             (s.name, s.position or "-", s.slot, f"{s.value:,}", "yes" if s.is_active else "no") for s in audit.drop_candidates
         ))
+        _table(console, "IR moves that free active room", ("player", "pos", "status", "value"), (
+            (s.name, s.position or "-", s.injury_status or "-", f"{s.value:,}") for s in audit.ir_candidates
+        ))
         _table(console, "Taxi stashes that free active room", ("player", "pos", "value"), (
             (s.name, s.position or "-", f"{s.value:,}") for s in audit.taxi_candidates
         ))

@@ -366,3 +366,59 @@ def test_audit_roster_empty_meta_and_book(book):
     assert audit.slots[0].value == 0
 
 
+
+
+# --- IR moves --------------------------------------------------------------
+
+def test_ir_eligible_statuses_follow_the_league_flags():
+    from ff.analysis import ir_eligible_statuses
+    always = {"ir", "injured reserve", "pup", "physically unable to perform"}
+    assert ir_eligible_statuses({}) == always
+    assert ir_eligible_statuses({"reserve_allow_out": 1, "reserve_allow_doubtful": 0}) == always | {"out"}
+    assert ir_eligible_statuses({"reserve_allow_sus": 1, "reserve_allow_na": 1}) == (
+        always | {"sus", "suspended", "na", "inactive"})
+
+
+def _injured_audit(book, settings, reserve_slots=4, **kw):
+    """Bench adds a player on the NFL's IR (roster status) to an Out-ankle vet, a
+    healthy scratch, and a Questionable rookie; a starter is Out; the taxi player
+    is Out; one IR slot is already used."""
+    from ff.analysis import ir_eligible_statuses
+    meta = {
+        **META,
+        "5555": {**META["5555"], "injury_status": "Questionable"},
+        "dead1": {**META["dead1"], "injury_status": "Out", "injury_body_part": "Ankle"},
+        "dead2": {**META["dead2"], "injury_status": "Out", "injury_body_part": "Coach's Decision"},
+        "nflir": {"full_name": "Season Ender", "position": "WR", "status": "Injured Reserve"},
+        "9221": {"injury_status": "Out", "injury_body_part": "Knee"},
+        "taxi1": {**META["taxi1"], "injury_status": "Out"},
+    }
+    roster = _roster(player_ids=_roster().player_ids + ["nflir"])
+    params = dict(roster_positions=RPOS, taxi_slots=2, reserve_slots=reserve_slots,
+                  taxi_allow_vets=False, taxi_years=0, ir_statuses=ir_eligible_statuses(settings))
+    params.update(kw)
+    return audit_roster(roster, book, meta, **params)
+
+
+def test_ir_candidates_are_active_players_the_league_lets_on_ir(book):
+    a = _injured_audit(book, {"reserve_allow_out": 1})
+    # NFL IR first (longest absence), then Out players by value. Skipped: the
+    # healthy scratch, the Questionable rookie, and the taxi/IR occupants.
+    assert [s.player_id for s in a.ir_candidates] == ["nflir", "9221", "dead1"]
+    assert {s.player_id: s.injury_status for s in a.ir_candidates} == {
+        "nflir": "Injured Reserve", "9221": "Out", "dead1": "Out"}
+
+
+def test_ir_candidates_respect_flags_and_open_slots(book):
+    assert [s.player_id for s in _injured_audit(book, {}).ir_candidates] == ["nflir"]
+    capped = _injured_audit(book, {"reserve_allow_out": 1}, reserve_slots=2)  # 1 open
+    assert [s.player_id for s in capped.ir_candidates] == ["nflir"]
+    assert audit_roster(_roster(), book, META, roster_positions=RPOS,
+                        reserve_slots=3).ir_candidates == []  # no IR rules passed, no suggestions
+
+
+def test_an_ir_move_is_not_also_offered_as_a_taxi_stash(book):
+    a = _injured_audit(book, {"reserve_allow_out": 1}, taxi_allow_vets=True, taxi_slots=3)
+    ir = {s.player_id for s in a.ir_candidates}
+    assert ir == {"nflir", "9221", "dead1"}
+    assert [s.player_id for s in a.taxi_candidates] == ["5555", "dead2"]

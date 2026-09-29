@@ -269,6 +269,7 @@ class RosterSlot(BaseModel):
     slot: str = "BENCH"  # START | BENCH | TAXI | IR
     taxi_eligible: bool = False
     opportunity_score: Optional[int] = None
+    injury_status: Optional[str] = None  # current Sleeper designation (e.g. Out, IR, Sus)
 
     @property
     def depth_role(self) -> str:
@@ -287,7 +288,7 @@ class RosterSlot(BaseModel):
 
 
 class RosterAudit(BaseModel):
-    """A roster's capacity vs its fill, plus ranked drop and taxi-move
+    """A roster's capacity vs its fill, plus ranked drop, IR-move, and taxi-move
     suggestions - the input to a cleanup decision. Pure, deterministic."""
 
     team_name: str
@@ -302,6 +303,9 @@ class RosterAudit(BaseModel):
     # Taxi-eligible bench players (best first) that could be stashed to free an
     # active slot WITHOUT dropping anyone; capped at the open taxi slots.
     taxi_candidates: List[RosterSlot] = Field(default_factory=list)
+    # Active players the league lets onto IR (longest absence first), which frees
+    # an active slot WITHOUT dropping anyone; capped at the open IR slots.
+    ir_candidates: List[RosterSlot] = Field(default_factory=list)
 
     def _in(self, slot: str) -> List[RosterSlot]:
         return [s for s in self.slots if s.slot == slot]

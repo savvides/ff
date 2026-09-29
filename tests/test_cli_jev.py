@@ -200,6 +200,16 @@ def test_roster_shows_the_requested_players(configured, query, limit, shown, not
 
 
 @responses.activate
+def test_cleanup_lists_ir_moves_the_league_allows(configured, league, players_meta):
+    league["settings"]["reserve_allow_out"] = 1
+    players_meta["9999"]["injury_status"] = "Out"  # the bench kicker
+    serve("get_roster_cleanup", {"team": "mine"})
+    result = runner.invoke(app, ["ask", "make room", "--backend", "jev"])
+    assert result.exit_code == 0, result.output
+    assert re.search(r"IR moves that free active room.*Test Kicker.*Out", result.output, re.DOTALL)
+
+
+@responses.activate
 def test_lineup_missing_projections(configured, monkeypatch):
     serve("get_lineup", {"team": "mine"})
     monkeypatch.setattr("ff.cli.ProjectionsClient", lambda: Mock(week=Mock(return_value={})))

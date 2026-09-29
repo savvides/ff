@@ -243,6 +243,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             taxi_years=ctx.get("taxi_years", None),
             is_superflex=bool(ctx["config"].format.superflex) if ctx.get("config") else True,
             drop_limit=kwargs.get("limit", 8),
+            ir_statuses=ctx.get("ir_statuses", frozenset()),
         )
         return res.model_dump() if hasattr(res, "model_dump") else res
 
