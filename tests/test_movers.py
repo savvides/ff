@@ -43,12 +43,14 @@ def test_find_arbitrage_movers_basic():
     ])
     movers = find_arbitrage_movers(book=book, min_value=1000)
     assert len(movers) == 3
-    # Ranked by abs(diff) descending:
-    # 1. Hype Stud: abs(2000)
-    # 2. Old Producer: abs(-1500)
-    # 3. Consensus Pick: abs(0)
+    # Ranked by abs(diff) descending, with each KTC value restated as the FC value
+    # at the same rank (FC's order is 7000, 5000, 4000, 200):
+    # 1. Hype Stud: KTC rank 2 -> 5000, diff +1000
+    # 2. Old Producer: KTC rank 3 -> 4000, diff -1000
+    # 3. Consensus Pick: KTC rank 1 -> 7000, diff 0
     assert movers[0].asset.name == "Hype Stud"
-    assert movers[0].diff == 2000
+    assert movers[0].diff == 1000
+    assert movers[0].secondary_scaled == 5000
     assert movers[0].fc_value == 4000
     assert movers[0].secondary_value == 6000
     assert movers[0].dealer_value == 6000
@@ -56,7 +58,7 @@ def test_find_arbitrage_movers_basic():
     assert movers[0].market_bias in ("KTC", "Dealer")
 
     assert movers[1].asset.name == "Old Producer"
-    assert movers[1].diff == -1500
+    assert movers[1].diff == -1000
     assert movers[1].fc_value == 5000
     assert movers[1].secondary_value == 3500
     assert movers[1].dealer_value == 3500
@@ -66,6 +68,37 @@ def test_find_arbitrage_movers_basic():
     assert movers[2].asset.name == "Consensus Pick"
     assert movers[2].diff == 0
     assert movers[2].market_bias == "EVEN"
+
+
+def test_arbitrage_compares_ranks_not_raw_scales():
+    """KTC's curve runs hotter than FC's below the top (live in Sept 2026: ~1x above
+    8,000 FC but ~2x around 1,000-1,500), so raw diffs flag nearly every asset.
+    On one scale, only the genuine disagreements stand out."""
+    fcs = [1000 + 200 * i for i in range(50)]
+    assets = [Asset(id=f"p{i}", name=f"Player {i:02d}", position="WR", value=fc,
+                    secondary_value=round(fc * (2.2 - fc / 10000)))  # same order, hotter curve
+              for i, fc in enumerate(fcs)]
+    assets += [
+        Asset(id="hyped", name="Hyped", position="WR", value=3000, secondary_value=13000),
+        Asset(id="faded", name="Faded", position="WR", value=9000, secondary_value=1500),
+    ]
+    movers = find_arbitrage_movers(ValueBook(assets), min_value=0, limit=0)
+
+    assert [m.asset.name for m in movers[:2]] == ["Faded", "Hyped"]
+    assert all(abs(m.diff) <= 400 for m in movers[2:])  # raw diffs here reach +3,600
+    hyped = movers[1]
+    assert hyped.secondary_value == 13000  # the raw KTC number stays for display
+    assert hyped.diff == hyped.secondary_scaled - hyped.fc_value == 7800  # KTC #1 -> FC's top 10800
+
+
+def test_arbitrage_tied_secondary_values_share_one_scaled_value():
+    book = ValueBook([
+        Asset(id="a", name="A", position="WR", value=6000, secondary_value=9000),
+        Asset(id="b", name="B", position="WR", value=4000, secondary_value=9000),
+    ])
+    movers = find_arbitrage_movers(book, min_value=0, limit=0)
+    # both hold KTC ranks 1-2, so both restate as the mean of FC's top two (5000)
+    assert {m.asset.name: m.diff for m in movers} == {"A": -1000, "B": 1000}
 
 
 def test_find_arbitrage_movers_with_rosters():

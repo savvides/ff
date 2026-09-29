@@ -65,6 +65,34 @@ var oneQBPlayers = [];
 </html>"""
 
 
+# KTC's page as of 2026-09-29: the data moved into a JSON script element and the
+# inline literal became `JSON.parse(...)`, which the old regex cannot match.
+CURRENT_HTML = """<!DOCTYPE html>
+<html>
+<body>
+<script type="application/json" id="ktc-players">[
+    {"playerName": "Jahmyr Gibbs", "playerID": 1415, "position": "RB", "team": "DET",
+     "superflexValues": {"value": 9999, "rank": 1}, "oneQBValues": {"value": 9998, "rank": 1}},
+    {"playerName": "2027 Early 1st", "playerID": 2027, "position": "RDP",
+     "superflexValues": {"value": 6200, "rank": 20}, "oneQBValues": {"value": 5900, "rank": 22}}
+]</script>
+<script>
+    var playersArray = JSON.parse(document.getElementById('ktc-players').textContent);
+</script>
+</body>
+</html>"""
+
+
+@responses.activate
+def test_ktc_client_reads_the_ktc_players_script():
+    responses.add(responses.GET, KTC_VALUES_URL, body=CURRENT_HTML, status=200)
+
+    values = KtcClient().fetch_values(Format(superflex=True), use_cache=False)
+
+    assert values["jahmyr gibbs"] == 9999
+    assert values["2027 1 early"] == 6200
+
+
 @responses.activate
 def test_ktc_client_fetch_values_html_superflex():
     responses.add(responses.GET, KTC_VALUES_URL, body=SAMPLE_HTML, status=200)
@@ -143,7 +171,8 @@ def test_ktc_client_exception_fallback():
 
 
 def test_ktc_client_malformed_payload():
-    for malformed in ["<html>no players here</html>", "", "invalid json [", "var playersArray = not_json;"]:
+    for malformed in ["<html>no players here</html>", "", "invalid json [", "var playersArray = not_json;",
+                      '<script type="application/json" id="ktc-players">not json</script>']:
         with patch.object(KtcClient, "_fetch_text", return_value=malformed):
             client = KtcClient()
             values = client.fetch_values(use_cache=False)

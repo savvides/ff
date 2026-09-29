@@ -112,9 +112,14 @@ def test_ktc_live_maps_values():
     # Dual-market merge depends on KeepTradeCut returning values for players and picks.
     # If the page structure drifts, secondary market values silently go missing.
     from ff.values.ktc import KtcClient
-    values = KtcClient().fetch_values(Format(superflex=True))
+    client = KtcClient()
+    values = client.fetch_values(Format(superflex=True), use_cache=False)
     if not values:
-        pytest.skip("KTC returned no values (offline or shape change)")
+        # Offline is a skip; a page that downloads but parses to nothing is the
+        # drift this check exists to catch (it hid KTC's Sept 2026 layout change).
+        if not client._fetch_text(use_cache=False):
+            pytest.skip("KTC unreachable (offline or blocked)")
+        pytest.fail("KTC page downloaded but no values parsed - the page layout changed")
     assert any(" " in k for k in values), "no player/pick name keys in KTC map"
     assert any(v > 0 for v in values.values())
     assert "jahmyr gibbs" in values

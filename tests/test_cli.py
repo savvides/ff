@@ -278,8 +278,23 @@ def test_cli_values_market_flag(fake_clients, league):
     assert "--market must be" in res_inv.output
 
 
-def test_cli_movers_arbitrage(fake_clients, league):
-    """Header-only empty tables must fail: the dual-market book has Gibbs."""
+def test_cli_movers_arbitrage(fake_clients, league, multi_market_book, monkeypatch):
+    """Header-only empty tables must fail: the dual-market book has Gibbs.
+
+    The fixture's KTC values follow FC's order exactly, which is no disagreement
+    once both markets share one scale, so swap two ranks: KTC here puts Gibbs
+    (8,400) above Bijan, FC the reverse."""
+    from ff.values import ValueBook
+    assets = [a.model_copy() for a in multi_market_book.assets]
+    for a in assets:
+        if a.name == "Bijan Robinson":
+            a.secondary_value = 8300
+
+    class SwappedKtc:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True):
+            return ValueBook(assets)
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: SwappedKtc())
     _write_config(league)
     res = runner.invoke(app, ["movers", "--arbitrage"])
     assert res.exit_code == 0, res.output
@@ -296,6 +311,24 @@ def test_cli_movers_arbitrage(fake_clients, league):
     res_sell = runner.invoke(app, ["movers", "--arbitrage", "--sell"])
     assert res_sell.exit_code == 0, res_sell.output
     assert "Bijan Robinson" in res_sell.output
+
+
+def test_ktc_outage_is_reported_not_silent(fake_clients, league, book, monkeypatch):
+    """With no KTC values at all, the default dual-market views say so instead of
+    quietly falling back to FantasyCalc (or claiming there is no arbitrage)."""
+    class FantasyCalcOnly:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True):
+            return book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: FantasyCalcOnly())
+    _write_config(league)
+    outage = "KeepTradeCut values are unavailable right now"
+    for args in (["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson"],
+                 ["values"], ["movers", "--arbitrage"]):
+        res = runner.invoke(app, args)
+        assert res.exit_code == 0, res.output
+        assert outage in res.output, args
+    assert "No market arbitrage opportunities found" not in res.output
 
 
 def test_cli_roster_shows_depth_and_injury(fake_clients, league):

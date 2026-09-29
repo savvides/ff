@@ -508,8 +508,11 @@ class ArbitrageMover(BaseModel):
     asset: Asset
     fc_value: int = 0
     secondary_value: int = 0
-    diff: int = 0  # secondary_value - fc_value
-    pct_diff: float = 0.0  # abs(diff) / max(fc, secondary) * 100.0
+    # The secondary market's view restated on FantasyCalc's scale: the FC value
+    # at the asset's secondary-market rank. None means the raw values are compared.
+    secondary_scaled: Optional[int] = None
+    diff: int = 0  # compared_value - fc_value
+    pct_diff: float = 0.0  # abs(diff) / max(fc, compared_value) * 100.0
     diff_pct: float = 0.0
     roster_id: Optional[int] = None
     team_name: Optional[str] = None
@@ -544,15 +547,20 @@ class ArbitrageMover(BaseModel):
     def dealer_value(self, val: int) -> None:
         self.secondary_value = val
 
+    @property
+    def compared_value(self) -> int:
+        """What `diff` measures against FC: the rank-scaled value when present."""
+        return self.secondary_value if self.secondary_scaled is None else self.secondary_scaled
+
     def model_post_init(self, __context: Any) -> None:
         if self.fc_value == 0 and self.asset.value:
             self.fc_value = self.asset.value
         if self.secondary_value == 0 and self.asset.secondary_value:
             self.secondary_value = self.asset.secondary_value
-        if self.diff == 0 and (self.secondary_value or self.fc_value):
-            self.diff = self.secondary_value - self.fc_value
-        if self.pct_diff == 0.0 and (self.secondary_value or self.fc_value):
-            larger = max(self.fc_value, self.secondary_value)
+        if self.diff == 0 and (self.compared_value or self.fc_value):
+            self.diff = self.compared_value - self.fc_value
+        if self.pct_diff == 0.0 and (self.compared_value or self.fc_value):
+            larger = max(self.fc_value, self.compared_value)
             self.pct_diff = (abs(self.diff) / larger * 100.0) if larger > 0 else 0.0
         if self.diff_pct == 0.0 and self.pct_diff != 0.0:
             self.diff_pct = self.pct_diff
