@@ -208,11 +208,15 @@ def test_lineup_missing_projections(configured, monkeypatch):
     assert "No projections available" in result.output
 
 
+@pytest.mark.parametrize("state", [
+    {"season": "2026", "week": 3, "display_week": 4},
+    {"season": "2026", "week": 4, "display_week": 3},  # Sleeper on a Tuesday, after week 3
+])
 @responses.activate
-def test_lineup_fetch_and_label_use_same_week(configured, monkeypatch):
+def test_lineup_fetch_and_label_use_same_week(configured, monkeypatch, state):
     import ff.cli as cli
     original = cli.SleeperClient()
-    original.state = lambda **kwargs: {"season": "2026", "week": 3, "display_week": 4}
+    original.state = lambda **kwargs: state
     monkeypatch.setattr(cli, "SleeperClient", lambda: original)
     projections = Mock(week=Mock(return_value={"7564": {"rec": 8}}))
     monkeypatch.setattr(cli, "ProjectionsClient", lambda: projections)
