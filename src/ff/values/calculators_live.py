@@ -22,11 +22,11 @@ FC_SITE = "https://fantasycalc.com"
 KTC_SITE = "https://keeptradecut.com"
 
 
-def check_calculators(ktc_html: str = "", fresh: bool = True) -> List[str]:
+def check_calculators(ktc_html: str = "") -> List[str]:
     """Problems that mean ff's calculator ports may no longer match the sites.
     Empty = verified. `ktc_html` is the KTC page ff fetched for values."""
     problems: List[str] = []
-    for label, check in (("FantasyCalc", lambda: _check_fantasycalc(fresh)),
+    for label, check in (("FantasyCalc", _check_fantasycalc),
                          ("KTC", lambda: _check_ktc(ktc_html))):
         try:
             problems += check()
@@ -35,9 +35,9 @@ def check_calculators(ktc_html: str = "", fresh: bool = True) -> List[str]:
     return problems
 
 
-def _check_fantasycalc(fresh: bool) -> List[str]:
+def _check_fantasycalc() -> List[str]:
     fp = FINGERPRINTS["fc"]
-    page = get_text(f"{FC_SITE}/trade-calculator", ttl=0 if fresh else 3600)
+    page = get_text(f"{FC_SITE}/trade-calculator", ttl=0)
     main = re.search(r'src="(main-[A-Z0-9]+\.js)"', page)
     if not main:
         return ["FantasyCalc's calculator page changed (no main bundle found)"]

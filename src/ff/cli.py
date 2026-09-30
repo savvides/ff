@@ -111,9 +111,8 @@ def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True,
           fresh: bool = False) -> ValueBook:
     client = ValuesClient()
     should_include = include_secondary and include_ktc
-    kwargs = {"fresh": True} if fresh else {}
     try:
-        return client.fetch(cfg.format, include_secondary=should_include, **kwargs)
+        return client.fetch(cfg.format, include_secondary=should_include, fresh=fresh)
     except TypeError:
         return client.fetch(cfg.format, include_ktc=should_include)
 
@@ -315,8 +314,6 @@ def _print_offer_rule(evaluation: Any, book: ValueBook) -> None:
         mark = "[bold green]PASS[/]" if v.passes else "[bold red]FAIL[/]"
         console.print(f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%, KTC {v.ktc_pct:.2f}%, "
                       f"KTC site {'Fair' if v.ktc_site_fair else 'Favors one side'}")
-    for note in v.approximations:
-        console.print(f"[dim]  note: {note}[/]")
 
 
 def _print_provenance(book: ValueBook, cfg: Config, include_secondary: bool) -> None:
@@ -712,17 +709,14 @@ def trade(
         table.add_column("FC", justify="right")
     if show_ktc:
         table.add_column("KTC", justify="right")
-    for label, style, side, total, sec_total, raw, sec_raw in (
-            ("You get", "green", evaluation.side_a, evaluation.value_a, evaluation.secondary_value_a,
-             evaluation.raw_value_a, evaluation.raw_secondary_value_a),
-            ("You give", "red", evaluation.side_b, evaluation.value_b, evaluation.secondary_value_b,
-             evaluation.raw_value_b, evaluation.raw_secondary_value_b)):
+    for label, style, side in (("You get", "green", evaluation.side_a),
+                               ("You give", "red", evaluation.side_b)):
         cells = [f"[{style}]{label}[/]", ", ".join(
             _fmt_trade_asset(x, x.value if show_fc else x.secondary_value) for x in side.assets) or "-"]
         if show_fc:
-            cells.append(f"{raw:,}")
+            cells.append(f"{side.total:,}")
         if show_ktc:
-            cells.append(f"{sec_raw:,}" if sec_raw is not None else "-")
+            cells.append(f"{side.secondary_total:,}" if side.secondary_total is not None else "-")
         table.add_row(*cells)
         fc_adj = side.adjustment if show_fc else None
         ktc_adj = side.secondary_adjustment if show_ktc else None
@@ -731,9 +725,10 @@ def trade(
             tot = ["", "[bold]= site total[/]"]
             if show_fc:
                 adj.append(f"+{fc_adj:,}" if fc_adj else "")
-                tot.append(f"[bold]{total:,}[/]")
+                tot.append(f"[bold]{side.adjusted_total:,}[/]")
             if show_ktc:
                 adj.append(f"{ktc_adj:+,}" if ktc_adj else "")
+                sec_total = side.secondary_adjusted_total
                 tot.append(f"[bold]{sec_total:,}[/]" if sec_total is not None else "-")
             table.add_row(*adj)
             table.add_row(*tot)

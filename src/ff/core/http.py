@@ -119,7 +119,9 @@ def get_text(url: str, *, ttl: Optional[float] = 3600.0, timeout: int = DEFAULT_
 
     Sends a browser User-Agent (the calculator sites reject bare clients) and falls
     back to curl on an SSL error: Apple's Command Line Tools Python links LibreSSL
-    2.8.3, which cannot do the TLS 1.3 some of these sites require.
+    2.8.3, which cannot do the TLS 1.3 some of these sites require. No retrying
+    session here: its backoff would spend ~8s retrying a handshake that cannot work
+    before the curl fallback runs.
     """
     cache_path = _cache_file(url, None)
     if _fresh(cache_path, ttl):
@@ -128,7 +130,7 @@ def get_text(url: str, *, ttl: Optional[float] = 3600.0, timeout: int = DEFAULT_
         except (ValueError, OSError):
             pass
     try:
-        resp = _session().get(url, headers={"User-Agent": BROWSER_UA}, timeout=timeout)
+        resp = requests.get(url, headers={"User-Agent": BROWSER_UA}, timeout=timeout)
         resp.raise_for_status()
         body = resp.text
     except requests.exceptions.SSLError:

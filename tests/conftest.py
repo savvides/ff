@@ -188,7 +188,7 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
             return []
 
     class FakeValues:
-        def fetch(self, fmt, include_secondary=True, include_ktc=True):
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
             return multi_market_book if (include_secondary and include_ktc) else book
 
     class FakeProjections:

@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from ff.analysis.calculators import fc_adjustment, ktc_adjustment
 from ff.contracts import Asset, OfferVerdict, TradeEvaluation, TradeSide
 from ff.values import ValueBook
-from ff.values.normalize import normalize_pick
 
 OFFER_THRESHOLD_PCT = 10.0
 
@@ -38,14 +37,6 @@ def _resolve_side(
             unresolved.append(tok)
         else:
             asset = asset.model_copy()
-            # A pick named with its tier ("2028 1st (Early)") is that tier on KTC,
-            # even where FantasyCalc only has the flat round value.
-            key = normalize_pick(tok) if asset.is_pick else None
-            if key and key.endswith((" early", " mid", " late")) and key != asset.id:
-                season, rnd, tier = key.split()
-                tiered = book.pick_at_tier(season, int(rnd), tier)
-                if tiered is not None:
-                    asset = tiered
             if not should_include and asset.secondary_value is not None:
                 asset.secondary_value = None
             if players_meta and not asset.is_pick:
@@ -169,16 +160,13 @@ def offer_verdict(evaluation: TradeEvaluation, threshold_pct: float = OFFER_THRE
                                              or evaluation.side_b.secondary_adjustment is None):
         reasons.append("KTC's adjustment could not be computed")
     reasons.extend(calculator_problems)
-    approximations = [f"{x.name} (priced on KTC by a stand-in)" for x in assets
-                      if x.secondary_source == "approx"]
-    stand_ins = [x.name for x in assets if x.secondary_source == "approx"]
+    stand_ins = [x.name for x in assets if x.secondary_approx]
     if stand_ins:
         # KTC prices future picks only as Early/Mid/Late: a generic pick has no KTC
         # number of its own, so the rule would be judging a guess.
         reasons.append("KTC prices only Early/Mid/Late picks - name the tier for "
                        + ", ".join(stand_ins) + ' (e.g. "2028 1st (Early)")')
-    verdict = OfferVerdict(status="CANNOT_JUDGE", threshold_pct=threshold_pct,
-                           reasons=reasons, approximations=approximations)
+    verdict = OfferVerdict(status="CANNOT_JUDGE", threshold_pct=threshold_pct, reasons=reasons)
     if reasons:
         return verdict
     verdict.fc_pct = evaluation.pct_diff

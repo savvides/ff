@@ -119,7 +119,6 @@ async function loadKtc() {
     tcFilters: { variance: 5, pickVal: 0, leagueSize: 12 },
     adjustment: { side: -1, value: 0, display: false },
     playersArray: [{ value: 9999 }],
-    __hits: new Array(branchCount).fill(0),
     __hit(i) { ctx.__branch.push(i); },
     __branch: [],
   };
@@ -150,7 +149,7 @@ async function loadKtc() {
       branches: ctx.__branch.filter(i => i !== 0),
     };
   }
-  return { version, run, branchCount, js };
+  return { version, run, branchCount, js, page };
 }
 
 // -------------------------------------------------------------------- vectors
@@ -161,8 +160,7 @@ function rng(seed) { // mulberry32
 const randSide = (r, n, lo, hi) => Array.from({ length: n }, () => Math.round(lo + r() * (hi - lo)));
 
 async function generate() {
-  const fc = await loadFantasyCalc();
-  const ktc = await loadKtc();
+  const [fc, ktc] = await Promise.all([loadFantasyCalc(), loadKtc()]);
   const r = rng(20260930);
 
   const fcCases = [[[1446, 1344], [3068]], [[3068], [1446, 1344]], [[5000], [3000, 2000]], [[8000], [3000, 2500, 2000]],
@@ -212,14 +210,13 @@ async function generate() {
       ktc: { version: ktc.version, branch_tags: ktc.branchCount - 1, branch_hits: hits.slice(1), unreached_branches: unreached },
     },
     fc_dynasty: fcVectors,
-    ktc: ktcVectors.map(({ branches, ...v }) => ({ ...v, branches })),
+    ktc: ktcVectors,
   };
 }
 
 async function check(path) {
   const fixture = JSON.parse(readFileSync(path, "utf8"));
-  const fc = await loadFantasyCalc();
-  const ktc = await loadKtc();
+  const [fc, ktc] = await Promise.all([loadFantasyCalc(), loadKtc()]);
   const diffs = [];
   if (fc.chunk !== fixture.meta.fantasycalc.chunk) diffs.push(`FantasyCalc chunk ${fixture.meta.fantasycalc.chunk} -> ${fc.chunk}`);
   if (ktc.version !== fixture.meta.ktc.version) diffs.push(`KTC version ${fixture.meta.ktc.version} -> ${ktc.version}`);
@@ -239,8 +236,7 @@ async function check(path) {
 
 async function evaluate() {
   const input = JSON.parse(readFileSync(0, "utf8"));
-  const fc = await loadFantasyCalc();
-  const ktc = await loadKtc();
+  const [fc, ktc] = await Promise.all([loadFantasyCalc(), loadKtc()]);
   // FantasyCalc values: the same public endpoint the site's client calls.
   const q = new URLSearchParams(input.fc_params || {});
   const fcRows = JSON.parse(await text(`https://api.fantasycalc.com/values/current?${q}`));
@@ -248,7 +244,7 @@ async function evaluate() {
   // KTC values: the page's own payload, prepared by the site's own function. KTC's
   // crowdsourced values move between fetches, so a caller can pass the exact page
   // snapshot it priced from ("ktc_html") to compare like with like.
-  const page = input.ktc_html || await text(`${KTC_SITE}/trade-calculator`);
+  const page = input.ktc_html || ktc.page;
   const payload = JSON.parse(page.match(/<script[^>]*id="ktc-players"[^>]*>([\s\S]*?)<\/script>/)[1]);
   // The page's own globals that its value selection reads, taken from the bundle.
   const pageGlobal = name => Number((ktc.js.match(new RegExp(`\\b${name}=(\\d+)`)) || [])[1]);

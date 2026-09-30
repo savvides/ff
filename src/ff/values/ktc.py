@@ -4,8 +4,8 @@ Fetches crowdsourced dynasty valuations from keeptradecut.com/trade-calculator (
 page whose calculator ff reproduces). Extracts player and draft pick valuations from
 the embedded rankings dataset, picking the same field the page itself uses for the
 league's format and TE-premium tier, with disk caching and graceful degradation if
-the endpoint is offline. The last fetch's top value, bundle version and time are kept
-on the client for the calculator port and the drift check.
+the endpoint is offline. The last fetch's top value, time and page are kept on the
+client for the calculator port and the drift check.
 """
 
 from __future__ import annotations
@@ -13,14 +13,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-import subprocess
-import time
 from typing import Any, Dict, List, Optional, Set
 
-import requests
-
 from ff.contracts import Format
-from ff.core.http import _atomic_write, _cache_file, _fresh
+from ff.core.http import _cache_file, get_text
 from ff.values.normalize import normalize_name, normalize_pick
 
 logger = logging.getLogger(__name__)
@@ -81,68 +77,34 @@ class KtcClient:
         self.url = url
         self.ttl = ttl
         # Set by fetch_values: the most valuable asset in the chosen format/TEP (the
-        # page's playersArray[0].value, an input to KTC's adjustment), the page's
-        # site.min.js version, when the page was fetched, and which keys are
+        # page's playersArray[0].value, an input to KTC's adjustment), when the page
+        # was fetched, and which keys are
         # approximations (KTC prices only Early/Mid/Late picks, so a generic
         # "2028 1st" key holds the Mid value as a stand-in).
         self.last_top: Optional[int] = None
-        self.last_version: Optional[str] = None
         self.last_fetched_at: Optional[float] = None
         self.last_approx_keys: Set[str] = set()
         self.last_html: str = ""
 
     def _fetch_text(self, use_cache: bool = True, fresh: bool = False) -> str:
-        """Page HTML. `fresh` skips a cached copy but still refreshes the cache."""
-        cache_path = _cache_file(self.url, None)
-        if use_cache and not fresh and _fresh(cache_path, self.ttl):
-            try:
-                html = cache_path.read_text()
-                self.last_fetched_at = cache_path.stat().st_mtime
-                return html
-            except (ValueError, OSError):
-                pass
-
-        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-        html = ""
+        """Page HTML ("" when unreachable). `fresh` or `use_cache=False` skips a
+        cached copy; the cache is refreshed either way."""
         try:
-            resp = requests.get(self.url, headers={"User-Agent": ua}, timeout=30)
-            resp.raise_for_status()
-            html = resp.text
-        except requests.exceptions.SSLError:
-            # Apple Command Line Tools Python on macOS is linked to LibreSSL 2.8.3,
-            # which lacks TLS 1.3 support required by keeptradecut.com. Fall back to curl.
-            try:
-                res = subprocess.run(
-                    ["curl", "-s", "--compressed", "-H", "User-Agent: " + ua, self.url],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=True,
-                )
-                html = res.stdout
-            except Exception as err:
-                logger.warning("Failed to fetch KTC values via curl from %s: %s", self.url, err)
-                return ""
+            html = get_text(self.url, ttl=self.ttl if use_cache and not fresh else 0)
+            self.last_fetched_at = _cache_file(self.url, None).stat().st_mtime
         except Exception as err:
             logger.warning("Failed to fetch KTC values from %s: %s", self.url, err)
             return ""
-
-        if html:
-            self.last_fetched_at = time.time()
-        if html and use_cache:
-            _atomic_write(cache_path, html)
         return html
 
     def fetch_values(self, fmt: Optional[Format] = None, use_cache: bool = True,
                      fresh: bool = False) -> Dict[str, int]:
         """Fetch and return KTC values mapped by sleeper_id, normalized name, or pick label."""
-        self.last_top, self.last_version, self.last_approx_keys = None, None, set()
+        self.last_top, self.last_approx_keys = None, set()
         text = self._fetch_text(use_cache=use_cache, fresh=fresh)
         self.last_html = text
         if not text:
             return {}
-        m = re.search(r"site\.min\.js\?v=([\w-]+)", text)
-        self.last_version = m.group(1) if m else None
 
         raw_players = _extract_players(text)
         if not raw_players:

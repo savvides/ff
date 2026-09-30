@@ -81,9 +81,9 @@ class Asset(BaseModel):
     age: Optional[float] = None
     value: int = 0  # FantasyCalc dynasty value (0 if unvalued)
     secondary_value: Optional[int] = None  # Secondary market (Dynasty Dealer / KTC) dynasty value
-    # How secondary_value was matched: "exact", or "approx" when KTC has no such
-    # asset and a stand-in priced it (its Mid pick for a generic one, a name alias).
-    secondary_source: Optional[str] = None
+    # secondary_value is a stand-in: KTC has no such asset, so another priced it
+    # (its Mid pick for a generic one).
+    secondary_approx: bool = False
     overall_rank: Optional[int] = None
     position_rank: Optional[int] = None
     trend_30day: Optional[int] = None  # 30-day value change (+/-)
@@ -603,7 +603,6 @@ class OfferVerdict(BaseModel):
     ktc_site_pct: Optional[float] = None
     ktc_site_fair: Optional[bool] = None
     reasons: List[str] = Field(default_factory=list)
-    approximations: List[str] = Field(default_factory=list)  # assets KTC priced via a stand-in
 
     @property
     def passes(self) -> bool:

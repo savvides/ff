@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any, List, Optional, Set, Tuple
 
 from ff.contracts import (
@@ -21,7 +20,7 @@ from ff.contracts import (
     WaiverTarget,
 )
 from ff.core.config import Config
-from ff.analysis.calculators import fc_adjustment, ktc_adjustment
+from ff.analysis.trade import apply_site_adjustments
 from ff.analysis.waivers import waiver_positions
 from ff.analysis.lineup import SLOT_ELIGIBILITY, game_locked, unavailable
 from ff.contracts.models import PlayerComparison, WeeklyContext, WeeklyPlayer, WeeklyWaivers
@@ -289,29 +288,24 @@ def validate_trade(
     if evaluation.adjusted:
         # Recompute both sites' adjustments from the asset values: the totals must be
         # exactly what the calculator sites would show.
-        a_vals = [a.value for a in evaluation.side_a.assets]
-        b_vals = [a.value for a in evaluation.side_b.assets]
-        expected_fc = fc_adjustment(a_vals, b_vals) if evaluation.is_dynasty else (None, None)
+        redo = evaluation.model_copy(deep=True)
+        for side in (redo.side_a, redo.side_b):
+            side.adjustment = side.secondary_adjustment = None
+        apply_site_adjustments(redo)
+        expected_fc = (redo.side_a.adjustment, redo.side_b.adjustment)
         got_fc = (evaluation.side_a.adjustment, evaluation.side_b.adjustment)
         checks.append(QACheck(
             name="Trade FantasyCalc Adjustment Matches Site",
             passed=got_fc == expected_fc and not (adj_a and adj_b),
             message="" if got_fc == expected_fc else f"FantasyCalc adjustment {got_fc} != site formula {expected_fc}",
         ))
-        if (evaluation.side_a.secondary_complete and evaluation.side_b.secondary_complete
-                and evaluation.secondary_top):
-            res = ktc_adjustment([a.secondary_value or 0 for a in evaluation.side_a.assets],
-                                 [a.secondary_value or 0 for a in evaluation.side_b.assets],
-                                 evaluation.secondary_top)
-            expected_k = ((int(res.adj1), int(res.adj2))
-                          if res is not None and math.isfinite(res.adj1) and math.isfinite(res.adj2)
-                          else (None, None))
-            got_k = (evaluation.side_a.secondary_adjustment, evaluation.side_b.secondary_adjustment)
-            checks.append(QACheck(
-                name="Trade KTC Adjustment Matches Site",
-                passed=got_k == expected_k,
-                message="" if got_k == expected_k else f"KTC adjustment {got_k} != site formula {expected_k}",
-            ))
+        expected_k = (redo.side_a.secondary_adjustment, redo.side_b.secondary_adjustment)
+        got_k = (evaluation.side_a.secondary_adjustment, evaluation.side_b.secondary_adjustment)
+        checks.append(QACheck(
+            name="Trade KTC Adjustment Matches Site",
+            passed=got_k == expected_k,
+            message="" if got_k == expected_k else f"KTC adjustment {got_k} != site formula {expected_k}",
+        ))
 
     all_trade_assets = evaluation.side_a.assets + evaluation.side_b.assets
     assets_valid = all(bool(a.id) and bool(a.name) and a.value >= 0 for a in all_trade_assets)
