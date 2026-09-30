@@ -141,6 +141,17 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
     return seasons, rounds_n
 
 
+def _current_week(state: Dict[str, Any]) -> int:
+    """The NFL week whose lineup is still open: the later of Sleeper's `week` and
+    `display_week`, never below 1.
+
+    The two flip at different times around the turn of a week, in either order
+    (Sleeper returned week 4 / display_week 3 on Tuesday 2026-09-29, after week 3
+    ended; its docs example shows week 2 / display_week 3), so neither is safe alone.
+    """
+    return max(1, int(state.get("week") or 0), int(state.get("display_week") or 0))
+
+
 class _LazyContext(dict):
     """Lazy evaluation context for LLM dispatcher tools to avoid eager network/cache reads."""
 
@@ -211,7 +222,7 @@ class _LazyContext(dict):
             return self._get_pick_window()[1]
         elif key == "week":
             state = self._get_state()
-            return int(state.get("display_week") or state.get("week") or 1)
+            return _current_week(state)
         elif key == "taxi_slots":
             settings = self._get_league().get("settings") or {}
             return int(settings.get("taxi_slots") or 0)
@@ -237,7 +248,7 @@ def _prepare_weekly(ctx: _LazyContext, team: Optional[str]) -> Roster:
     cfg, sc = ctx._cfg, ctx._sc
     ctx._cache["_state"] = state = sc.state(fresh=True) or {}
     ctx._cache["_league"] = sc.league(cfg.league_id, fresh=True)
-    ctx["week"] = int(state.get("display_week") or state.get("week") or 1)
+    ctx["week"] = _current_week(state)
     if str(state.get("season")) != str(cfg.season):
         raise Clarification("The configured season is not current. Run `ff setup <username>`.")
     if ctx._get_league().get("season_type", "regular") != "regular":
@@ -1084,7 +1095,7 @@ def lineup(
 
     state = sc.state(fresh=True) or {}
     season = season or str(cfg.season)
-    week = week or state.get("display_week") or state.get("week") or 1
+    week = week or _current_week(state)
     if week < 1:
         week = 1
 
@@ -1095,7 +1106,7 @@ def lineup(
     players_meta = sc.players()
 
     weekly = None
-    if season == str(state.get("season")) and week == int(state.get("display_week") or state.get("week") or 1):
+    if season == str(state.get("season")) and week == _current_week(state):
         if league.get("season_type", "regular") != "regular":
             _fail("Weekly advice supports regular-season leagues only.")
         weekly, players_meta = load_weekly(sc, cfg.league_id, target, season, week, league, players_meta)

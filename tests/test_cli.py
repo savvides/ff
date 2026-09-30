@@ -169,6 +169,43 @@ def test_lineup_command(fake_clients, league):
     assert "Chase" in result.output  # WR slot filled by the projected starter
 
 
+# Sleeper flips `week` and `display_week` at different times, in either order:
+# on Tuesday 2026-09-29 it returned week 4 / display_week 3 (week 3 was over),
+# while its docs example shows week 2 / display_week 3.
+@pytest.mark.parametrize("state", [
+    {"season": "2026", "week": 4, "display_week": 3},
+    {"season": "2026", "week": 3, "display_week": 4},
+])
+@pytest.mark.parametrize("args", [[], ["--week", "4"]])
+def test_lineup_plans_the_open_week(fake_clients, league, monkeypatch, state, args):
+    from unittest.mock import Mock
+
+    import ff.cli as cli
+    sleeper = cli.SleeperClient()
+    sleeper.state = lambda *a, **k: state
+    monkeypatch.setattr(cli, "SleeperClient", lambda *a, **k: sleeper)
+    projections = Mock(week=Mock(return_value={"7564": {"rec": 8, "rec_yd": 100, "rec_td": 1}}))
+    monkeypatch.setattr(cli, "ProjectionsClient", lambda *a, **k: projections)
+    _write_config(league)
+    result = runner.invoke(app, ["lineup", *args])
+    assert result.exit_code == 0, result.output
+    projections.week.assert_called_once_with("2026", 4, fresh=True)
+    assert "2026 week 4" in result.output
+    # the open week gets current injuries and game locks, not a projection-only scenario
+    assert "Projection-only scenario" not in result.output
+
+
+@pytest.mark.parametrize("state, week", [
+    ({}, 1),
+    ({"week": 0, "display_week": 0}, 1),
+    ({"week": None, "display_week": 5}, 5),
+    ({"week": 7}, 7),
+])
+def test_current_week_falls_back_and_never_drops_below_one(state, week):
+    from ff.cli import _current_week
+    assert _current_week(state) == week
+
+
 def test_draft_command_resolves_pick_ownership(fake_clients, league):
     """Regression: pick ownership needs slot_to_roster_id, which only the single
     /draft endpoint returns - not the /drafts list. So 'your picks' must populate."""

@@ -7,6 +7,7 @@ import os
 
 import pytest
 
+from ff.cli import _current_week
 from ff.contracts import Format
 from ff.sleeper import SleeperClient
 from ff.values import ValuesClient
@@ -134,7 +135,7 @@ def test_weekly_live_schedule_and_fresh_player_contracts():
     sc = SleeperClient()
     state = sc.state()
     season = str(state["season"])
-    week = int(state.get("display_week") or state.get("week") or 1)
+    week = _current_week(state)
     games = game_facts(get_json(f"{SCHEDULE}/{season}", ttl=0),
                        get_json(SCOREBOARD, params={"dates": season, "seasontype": 2, "week": week}, ttl=0),
                        season, week)
@@ -154,7 +155,7 @@ def test_weekly_live_roster_matchup_slot_alignment():
         pytest.skip("set FF_LIVE_LEAGUE_ID for current roster/matchup alignment")
     sc = SleeperClient()
     state = sc.state()
-    week = int(state.get("display_week") or state.get("week") or 1)
+    week = _current_week(state)
     rosters = build_rosters(sc.rosters(league_id, fresh=True), sc.league_users(league_id))
     matchups = {m["roster_id"]: m for m in sc.matchups(league_id, week)}
     assert matchups
