@@ -208,3 +208,21 @@ def test_a_named_pick_tier_is_priced_at_that_exact_tier_on_ktc():
     assert (pick.name, pick.value, pick.secondary_value, pick.secondary_source) == (
         "2028 1st (Early)", 2200, 5000, "exact")
     assert offer_verdict(ev).status in ("PASS", "FAIL")  # judged, not guessed
+
+
+def test_a_generic_pick_resolved_to_fantasycalcs_mid_tier_cannot_be_judged():
+    """When FantasyCalc prices a year only as Early/Mid/Late, a generic ask resolves
+    to Mid. KTC's Mid is an exact key, but the tier is still ff's guess."""
+    from ff.analysis import offer_verdict
+    from ff.values import ValueBook
+    tiers = [Asset(id=f"2027 1 {t}", name=f"2027 1st ({t.capitalize()})", kind="pick", position="PICK",
+                   value=v, secondary_value=v, secondary_source="exact")
+             for t, v in (("early", 2600), ("mid", 2200), ("late", 1800))]
+    player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=2200)
+    book = ValueBook(tiers + [player], secondary_top=9999,
+                     secondary_map={"2027 1 early": 2600, "2027 1 mid": 2200, "2027 1 late": 1800})
+    ev, _ = analyze_trade(["2027 1st"], ["Some Player"], book)
+    verdict = offer_verdict(ev)
+    assert verdict.status == "CANNOT_JUDGE"
+    assert "name the tier for 2027 1st (Mid)" in verdict.reasons[0]
+    assert book.resolve("2027 1st (Mid)").secondary_source == "exact"  # a named Mid is still judged

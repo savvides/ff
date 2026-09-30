@@ -163,12 +163,16 @@ class ValueBook:
                 return self.picks[f"{m.group(1)} {m.group(2)}"]
             # tier fallback both ways: a tiered ask without a tiered entry drops
             # to the flat round value; a flat ask with only tiered entries takes
-            # mid, the neutral assumption when the slot is unknown.
+            # mid, the neutral assumption when the slot is unknown. That Mid is a
+            # guess, so its KTC price is flagged as a stand-in, never an exact match.
             m = re.match(r"(20\d{2} [1-9]) (?:early|mid|late)$", pk)
             if m and m.group(1) in self.picks:
                 return self.picks[m.group(1)]
             if f"{pk} mid" in self.picks:
-                return self.picks[f"{pk} mid"]
+                mid = self.picks[f"{pk} mid"].model_copy()
+                if mid.secondary_value is not None:
+                    mid.secondary_source = "approx"
+                return mid
             return None
 
         # a player, by exact normalized name then fuzzy
