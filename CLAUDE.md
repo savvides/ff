@@ -25,7 +25,7 @@ venv-based, Python 3.9.
 - Run the CLI: `./.venv/bin/ff <command>` (entry point `ff = ff.cli:app`).
 - Snapshot a real league for inspection: `./.venv/bin/python scripts/record_fixtures.py <league_id>` (writes to `samples/`, does not touch gate fixtures).
 - Calculator oracle (Node 18+, no npm; prints only): `node scripts/calculator_oracle.mjs --check tests/fixtures/calculator_vectors.json` runs FantasyCalc's and KTC's own live trade-calculator code against the fixture vectors. `--generate > tests/fixtures/calculator_vectors.json` rebuilds them (after a site changes its calculator; then update `FINGERPRINTS`), and `--eval` prices JSON trades the way the sites do.
-- Find offers that pass the offer rule from live data: `./.venv/bin/python scripts/find_offers.py --sell "<asset>" --to <sleeper username>` (repeatable flags).
+- Find offers that pass the offer rule from live data: `./.venv/bin/python scripts/find_offers.py --sell "<asset>" --to <sleeper username>` (repeatable flags; `--years` sets the pick window, default 3). It ranks passing packages by roster fit: young value that starts for you or fills a below-median position, excluding surplus and flagged pieces, then lineup gain. Each incoming piece prints its role (the lineup slot it would start in, a need it fills, or surplus and who it sits behind) and flags (injury, a 30-day value drop of 300+, Sleeper's top drops).
 
 ## Architecture
 

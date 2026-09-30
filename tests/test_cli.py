@@ -431,7 +431,7 @@ def test_cli_trade_shows_depth_and_injury(fake_clients, league):
     res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "fc"])
     assert res.exit_code == 0, res.output
     assert "Bijan Robinson [RB1]" in res.output
-    assert "Jahmyr Gibbs [RB1 [Q - Hamstring]]" in res.output
+    assert "Jahmyr Gibbs [RB1] [Q - Hamstring]" in res.output
 
 
 def test_cli_news_command(fake_clients, league):

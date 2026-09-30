@@ -691,7 +691,7 @@ def trade(
     )
 
     def _fmt_trade_asset(a: Asset, val: Optional[int]) -> str:
-        lbl = f" [{a.status_label}]" if a.status_label else ""
+        lbl = (f" [{a.depth_tag}]" if a.depth_tag else "") + (f" {a.injury_tag}" if a.injury_tag else "")
         val_str = f"{val:,}" if val is not None else "unpriced"
         return f"{a.name}{lbl} ({val_str})"
 

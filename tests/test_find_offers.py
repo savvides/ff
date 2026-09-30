@@ -62,3 +62,50 @@ def test_ledger_picks_are_priced_at_their_projected_tier_and_labeled_by_origin()
     assert [(a.name, a.value, a.secondary_value, a.secondary_source) for a in assets] == [
         ("2028 4th (Late)", 800, 1300, "exact")]  # the duplicate collapsed
     assert origins == {"2028 4th (Late)": "from roster 7"}
+
+
+RPOS = ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN", "BN"]
+MY_PLAYERS = [  # a weak QB room, two strong TEs
+    SALE.model_copy(update={"position": "WR"}),
+    Asset(id="m1", name="My QB", position="QB", age=30, value=500, secondary_value=1200),
+    Asset(id="m2", name="My TE1", position="TE", age=23, value=6000, secondary_value=7000),
+    Asset(id="m3", name="My TE2", position="TE", age=24, value=5000, secondary_value=6000),
+    Asset(id="m4", name="My RB", position="RB", age=24, value=4000, secondary_value=5500),
+    Asset(id="m5", name="My RB2", position="RB", age=25, value=3500, secondary_value=5000),
+    Asset(id="m6", name="My WR", position="WR", age=24, value=4500, secondary_value=6000),
+]
+
+
+def test_a_young_starter_at_a_need_outranks_a_surplus_piece_of_equal_value():
+    theirs = [
+        Asset(id="q", name="Young QB", position="QB", age=24, value=3000, secondary_value=5000),
+        Asset(id="t", name="Young TE", position="TE", age=23, value=3000, secondary_value=5000),
+    ]
+    rows = find_offers.search([SALE], theirs, [], top=TOP, my_players=MY_PLAYERS,
+                              roster_positions=RPOS, needs={"QB"}, limit=50)
+    singles = [r for r in rows if len(r["get"]) == 1]
+    assert [r["get"] for r in singles] == [["Young QB"], ["Young TE"]]  # both pass; the QB fills the need
+    assert singles[0]["roles"]["Young QB"] == "starts at QB"
+    assert singles[1]["roles"]["Young TE"] == "surplus TE, behind My TE1, My TE2"  # TE2 starts at FLEX
+    assert singles[1]["net_youth"] == 0  # a surplus piece is not counted as gained young value
+
+
+def test_warnings_for_injured_falling_or_dropped_pieces():
+    hurt = Asset(id="f", name="Hurt TE", position="TE", age=23, value=1800, secondary_value=3600,
+                 injury_status="Questionable", injury_body_part="Ankle", trend_30day=-715)
+    warn = find_offers.flags(hurt, dropped={"f"})
+    assert warn[0].startswith("Q") and "value -715 in 30 days" in warn
+    assert "among Sleeper's most-dropped players today" in warn
+
+
+def test_a_flagged_starter_is_not_counted_as_young_value():
+    theirs = [
+        Asset(id="q", name="Young QB", position="QB", age=24, value=3000, secondary_value=5000),
+        Asset(id="f", name="Hurt QB", position="QB", age=24, value=3000, secondary_value=5000,
+              injury_status="Questionable", injury_body_part="Ankle"),
+    ]
+    rows = find_offers.search([SALE], theirs, [], top=TOP, my_players=MY_PLAYERS,
+                              roster_positions=RPOS, needs={"QB"}, dropped=set(), limit=50)
+    singles = [r for r in rows if len(r["get"]) == 1]
+    assert [r["get"] for r in singles] == [["Young QB"], ["Hurt QB"]]
+    assert singles[1]["roles"]["Hurt QB"] == "starts at QB" and singles[1]["net_youth"] == 0
