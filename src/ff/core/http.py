@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -108,3 +109,31 @@ def get_json(
     if use_cache:
         _atomic_write(cache_path, json.dumps(data))
     return data
+
+
+BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+
+
+def get_text(url: str, *, ttl: Optional[float] = 3600.0, timeout: int = DEFAULT_TIMEOUT) -> str:
+    """GET `url` as text (HTML/JS) with the same disk cache as get_json.
+
+    Sends a browser User-Agent (the calculator sites reject bare clients) and falls
+    back to curl on an SSL error: Apple's Command Line Tools Python links LibreSSL
+    2.8.3, which cannot do the TLS 1.3 some of these sites require.
+    """
+    cache_path = _cache_file(url, None)
+    if _fresh(cache_path, ttl):
+        try:
+            return cache_path.read_text()
+        except (ValueError, OSError):
+            pass
+    try:
+        resp = _session().get(url, headers={"User-Agent": BROWSER_UA}, timeout=timeout)
+        resp.raise_for_status()
+        body = resp.text
+    except requests.exceptions.SSLError:
+        res = subprocess.run(["curl", "-sfL", "--compressed", "-A", BROWSER_UA, url],
+                             capture_output=True, text=True, timeout=timeout, check=True)
+        body = res.stdout
+    _atomic_write(cache_path, body)
+    return body

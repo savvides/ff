@@ -114,6 +114,9 @@ def test_ktc_client_fetch_values_html_superflex():
     # Nickname alias (Kenneth -> Kenny)
     assert values["kenneth gainwell"] == 3000
     assert values["kenny gainwell"] == 3000
+    # An alias is the same player; only a generic pick holding the Mid value is a stand-in
+    assert "kenny gainwell" not in client.last_approx_keys
+    assert "2027 1" in client.last_approx_keys
 
 
 @responses.activate

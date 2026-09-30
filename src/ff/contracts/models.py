@@ -6,6 +6,8 @@ players and draft picks, because in dynasty a trade is a basket of both.
 
 from __future__ import annotations
 
+import math
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -22,21 +24,38 @@ class Format(BaseModel):
     num_qbs: int = 1
     num_teams: int = 12
     ppr: float = 1.0
-    # Tight-end premium, detected from the league for reference only. FantasyCalc's
-    # public /values/current does NOT expose a TEP param (verified: passing one is a
-    # no-op), so values are not TEP-adjusted; TE values run slightly conservative in
-    # TEP leagues. Surfaced in the format label so the gap is visible, never hidden.
+    # Tight-end premium (Sleeper `bonus_rec_te`) and dedicated TE starting slots.
+    # Both markets price TEs up in TE-premium leagues: FantasyCalc through its `tep`
+    # param ('te+'/'te++'; a number like 0.5 is a 404), KTC through its TE+/TE++ tiers.
     tep: float = 0.0
+    te_slots: int = 1
+
+    def fantasycalc_tep(self) -> Optional[str]:
+        """FantasyCalc's own league mapping (its `Ie()`): 2+ starting TEs or a premium
+        above 1.0 is 'te++', a premium of at least 0.5 is 'te+', otherwise none."""
+        if self.te_slots >= 2 or self.tep > 1:
+            return "te++"
+        if self.tep >= 0.5:
+            return "te+"
+        return None
+
+    def ktc_tep_tier(self) -> int:
+        """KTC's TEP tier (0 none, 1 TE+, 2 TE++), on FantasyCalc's cut points so both
+        markets price the same league the same way."""
+        return {"te+": 1, "te++": 2}.get(self.fantasycalc_tep() or "", 0)
 
     def fantasycalc_params(self) -> Dict[str, str]:
-        """Map to FantasyCalc's /values/current query params. (TEP is omitted
-        because FantasyCalc does not support it; see the `tep` field note.)"""
-        return {
+        """Map to FantasyCalc's /values/current query params."""
+        params = {
             "isDynasty": "true" if self.is_dynasty else "false",
             "numQbs": str(self.num_qbs),
             "numTeams": str(self.num_teams),
             "ppr": str(self.ppr),
         }
+        tep = self.fantasycalc_tep()
+        if tep:
+            params["tep"] = tep
+        return params
 
     def label(self) -> str:
         kind = "Dynasty" if self.is_dynasty else "Redraft"
@@ -62,6 +81,9 @@ class Asset(BaseModel):
     age: Optional[float] = None
     value: int = 0  # FantasyCalc dynasty value (0 if unvalued)
     secondary_value: Optional[int] = None  # Secondary market (Dynasty Dealer / KTC) dynasty value
+    # How secondary_value was matched: "exact", or "approx" when KTC has no such
+    # asset and a stand-in priced it (its Mid pick for a generic one, a name alias).
+    secondary_source: Optional[str] = None
     overall_rank: Optional[int] = None
     position_rank: Optional[int] = None
     trend_30day: Optional[int] = None  # 30-day value change (+/-)
@@ -350,13 +372,38 @@ class RosterAudit(BaseModel):
 
 class TradeSide(BaseModel):
     assets: List[Asset] = Field(default_factory=list)
+    # The package adjustments the calculator sites add to this side before judging
+    # (FantasyCalc's "Waiver Adjustment", KTC's "Value Adjustment"), set by
+    # analysis.trade.analyze_trade. None = not computed; totals then stay raw.
+    adjustment: Optional[int] = None
+    secondary_adjustment: Optional[int] = None
 
     @property
     def total(self) -> int:
+        """Raw FantasyCalc sum, before any adjustment."""
         return sum(a.value for a in self.assets)
 
     @property
+    def adjusted_total(self) -> int:
+        """What fantasycalc.com shows as this side's total."""
+        return self.total + (self.adjustment or 0)
+
+    @property
+    def secondary_complete(self) -> bool:
+        """Every asset has a KTC value (KTC's adjustment needs them all)."""
+        return bool(self.assets) and all(a.secondary_value is not None for a in self.assets)
+
+    @property
+    def secondary_adjusted_total(self) -> Optional[int]:
+        """What KTC's verdict uses for this side (clamped at 0 like the site), or None
+        when any asset lacks a KTC value."""
+        if not self.secondary_complete:
+            return None
+        return max(0, (self.secondary_total or 0) + (self.secondary_adjustment or 0))
+
+    @property
     def secondary_total(self) -> Optional[int]:
+        """Raw KTC sum (unpriced assets count 0), or None when none are priced."""
         if not any(a.secondary_value is not None for a in self.assets):
             return None
         return sum(a.secondary_value or 0 for a in self.assets)
@@ -371,19 +418,36 @@ class TradeSide(BaseModel):
 
 
 class TradeEvaluation(BaseModel):
-    """Result of analyzing a proposed trade between two sides."""
+    """Result of analyzing a proposed trade between two sides.
+
+    `value_*` / `secondary_value_*` are the totals each calculator site would show,
+    i.e. raw sums plus the side's adjustment (see `TradeSide`); `raw_*` are the
+    plain sums. side_a is the site's Team 1."""
 
     side_a: TradeSide
     side_b: TradeSide
     label_a: str = "Side A"
     label_b: str = "Side B"
+    adjusted: bool = False  # analyze_trade applied both sites' adjustments
+    is_dynasty: bool = True
+    secondary_top: Optional[int] = None  # KTC's top value used for its adjustment
+    secondary_hidden: bool = False  # KTC counts its adjustment but its page hides it
+    unresolved: List[str] = Field(default_factory=list)
 
     @property
     def value_a(self) -> int:
-        return self.side_a.total
+        return self.side_a.adjusted_total
 
     @property
     def value_b(self) -> int:
+        return self.side_b.adjusted_total
+
+    @property
+    def raw_value_a(self) -> int:
+        return self.side_a.total
+
+    @property
+    def raw_value_b(self) -> int:
         return self.side_b.total
 
     @property
@@ -399,11 +463,27 @@ class TradeEvaluation(BaseModel):
 
     @property
     def secondary_value_a(self) -> Optional[int]:
-        return self.side_a.secondary_total
+        return self.side_a.secondary_adjusted_total
 
     @property
     def secondary_value_b(self) -> Optional[int]:
+        return self.side_b.secondary_adjusted_total
+
+    @property
+    def raw_secondary_value_a(self) -> Optional[int]:
+        return self.side_a.secondary_total
+
+    @property
+    def raw_secondary_value_b(self) -> Optional[int]:
         return self.side_b.secondary_total
+
+    @property
+    def secondary_site_pct(self) -> Optional[float]:
+        """KTC's own verdict percentage: gap as a share of BOTH sides combined."""
+        if self.secondary_value_a is None or self.secondary_value_b is None:
+            return None
+        both = self.secondary_value_a + self.secondary_value_b
+        return 0.0 if both == 0 else min(100.0, abs(self.secondary_value_a - self.secondary_value_b) / both * 100.0)
 
     @property
     def secondary_delta(self) -> Optional[int]:
@@ -460,9 +540,13 @@ class TradeEvaluation(BaseModel):
         return self.pct_diff <= threshold_pct
 
     def secondary_is_fair(self, threshold_pct: float = 5.0) -> bool:
-        if self.secondary_pct_diff is None:
+        """KTC's own "Fair Trade" rule: its percentage (a share of both sides),
+        rounded to 0.1 the way the page rounds it, is at most `threshold_pct`
+        (the page's variance slider, default 5)."""
+        pct = self.secondary_site_pct
+        if pct is None:
             return False
-        return self.secondary_pct_diff <= threshold_pct
+        return math.floor(10 * pct + 0.5) / 10 <= threshold_pct
 
     def ktc_is_fair(self, threshold_pct: float = 5.0) -> bool:
         return self.secondary_is_fair(threshold_pct)
@@ -505,6 +589,25 @@ class TradeEvaluation(BaseModel):
     def dealer_arbitrage_label(self, threshold_pct: float = 5.0) -> Optional[str]:
         return self.secondary_arbitrage_label(threshold_pct)
 
+
+class OfferVerdict(BaseModel):
+    """The offer rule: the gap on the site-adjusted totals is under `threshold_pct`
+    of the larger side in BOTH FantasyCalc and KTC, and KTC's own verdict is
+    "Fair Trade". CANNOT_JUDGE lists why (missing prices, redraft, drifted site
+    code...), so a verdict is never reported on numbers the sites would not show."""
+
+    status: str  # "PASS" | "FAIL" | "CANNOT_JUDGE"
+    threshold_pct: float = 10.0
+    fc_pct: Optional[float] = None
+    ktc_pct: Optional[float] = None
+    ktc_site_pct: Optional[float] = None
+    ktc_site_fair: Optional[bool] = None
+    reasons: List[str] = Field(default_factory=list)
+    approximations: List[str] = Field(default_factory=list)  # assets KTC priced via a stand-in
+
+    @property
+    def passes(self) -> bool:
+        return self.status == "PASS"
 
 class ArbitrageMover(BaseModel):
     """An asset with valuation discrepancies across FantasyCalc and secondary market (Dynasty Dealer / KTC)."""

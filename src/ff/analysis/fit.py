@@ -61,6 +61,17 @@ def detect_status(power_rank: Optional[int], num_teams: int) -> str:
     return "balanced"
 
 
+def starting_assets(assets: List[Asset], roster_positions: List[str]) -> List[Tuple[str, Asset]]:
+    """(slot, asset) for the optimal starting lineup, scored by dynasty value (the
+    laminar greedy assignment from `lineup`)."""
+    starting = starting_slots(roster_positions)
+    by_id = {a.id: a for a in assets}
+    positions = {a.id: a.position for a in assets}
+    scores = {a.id: float(a.value) for a in assets}
+    chosen = _assign(positions, scores, starting)
+    return [(starting[i], by_id[pid]) for i, pid in chosen.items() if pid is not None]
+
+
 def startable_value(assets: List[Asset],
                     roster_positions: List[str]) -> Tuple[int, Dict[str, int]]:
     """Optimal starting-lineup value over `assets`, scored by dynasty value.
@@ -69,17 +80,9 @@ def startable_value(assets: List[Asset],
     laminar greedy assignment from `lineup`, so a WR filling a FLEX still counts
     under WR.
     """
-    starting = starting_slots(roster_positions)
-    by_id = {a.id: a for a in assets}
-    positions = {a.id: a.position for a in assets}
-    scores = {a.id: float(a.value) for a in assets}
-    chosen = _assign(positions, scores, starting)
     total = 0
     by_pos: Dict[str, int] = {}
-    for pid in chosen.values():
-        if pid is None:
-            continue
-        a = by_id[pid]
+    for _, a in starting_assets(assets, roster_positions):
         total += a.value
         pos = a.position or "?"
         by_pos[pos] = by_pos.get(pos, 0) + a.value

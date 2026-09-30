@@ -23,7 +23,8 @@ class DynastyDealerClient(KtcClient):
     def __init__(self, url: str = DEALER_VALUES_URL, ttl: float = DEALER_VALUES_TTL) -> None:
         super().__init__(url=url, ttl=ttl)
 
-    def fetch_values(self, fmt: Optional[Format] = None, use_cache: bool = True) -> Dict[str, int]:
+    def fetch_values(self, fmt: Optional[Format] = None, use_cache: bool = True,
+                     fresh: bool = False) -> Dict[str, int]:
         """Fetch values, supporting get_json mocking for backward compatibility."""
         try:
             data = get_json(self.url, ttl=self.ttl)
@@ -37,7 +38,7 @@ class DynastyDealerClient(KtcClient):
         if isinstance(data, (dict, list)):
             return self._parse_from_data(data, fmt=fmt)
 
-        return super().fetch_values(fmt=fmt, use_cache=use_cache)
+        return super().fetch_values(fmt=fmt, use_cache=use_cache, fresh=fresh)
 
     def _parse_from_data(self, data: Any, fmt: Optional[Format] = None) -> Dict[str, int]:
         if isinstance(data, dict):

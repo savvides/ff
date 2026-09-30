@@ -89,7 +89,7 @@ make install                 # create venv + install dependencies + enable pre-c
 
 ### 3. Trading & Market Arbitrage
 
-- **`ff trade --give <assets> --get <assets>`** — Multi-market trade analyzer supporting players and draft picks. Evaluates net values, fairness thresholds, positional balance swings, and market arbitrage opportunities.
+- **`ff trade --give <assets> --get <assets>`** — Multi-market trade analyzer supporting players and draft picks. Prices each side exactly as fantasycalc.com and keeptradecut.com would, including both sites' package adjustments for uneven deals (and KTC's for 1-for-1s), on live values, and shows the offer rule (under 10% gap in both markets, and KTC's own verdict Fair), fairness, positional swings, market arbitrage, and where the numbers came from. If either site has changed its calculator code since ff's port was verified, the rule says "cannot judge" instead of guessing.
   - `--give ASSETS`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
   - `--get ASSETS`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
   - `-m, --market MARKET`: Valuation model: `both` (default), `fc`, or `ktc`.
@@ -308,9 +308,9 @@ pytest tests/test_trade.py::test_trade_with_players_and_picks   # run single tes
 ## Limits (by design)
 
 - **`roster` and `power` value rostered players only**, not draft picks. Whole-team pick ownership is derived from `traded_picks` and tiered by `ff picks` — kept out of roster/power totals so player value and draft capital remain separately legible.
-- **Lineup projections are single-source** (RotoWire, via Sleeper) and exclude K/DEF unless your league starts them. TEP *is* applied here because `lineup` scores raw projected stats with your league's rules — only FantasyCalc *dynasty values* (`values`/`roster`/`trade`) are not TEP-adjusted.
+- **Lineup projections are single-source** (RotoWire, via Sleeper) and exclude K/DEF unless your league starts them. TEP is applied here because `lineup` scores raw projected stats with your league's rules; dynasty values are TEP-adjusted in both markets too (FantasyCalc `te+`/`te++`, KTC TE+/TE++).
 - **Weekly advice depends on undocumented public feeds.** Unknown game timing freezes existing assignments and excludes affected bench/waiver candidates. Conflicting or unavailable feeds can stop advice; they never fall back to stale injury tags as if fresh. AutoSub leagues, best-ball and unsupported lineup slots refuse actionable advice. Invalid IR eligibility or roster capacity must be resolved in Sleeper. News headlines retain their dates and sources; they do not produce invented injury odds or projection discounts. Actual points for in-progress games exclude the unplayed remainder.
-- **No trade *finder* and no tiers/VORP yet.** `trade` evaluates a deal you specify; it does not scan the league to propose one. Rankings are raw values without tier breaks or league-wide replacement level.
+- **No trade *finder* command and no tiers/VORP yet.** `trade` evaluates a deal you specify; `scripts/find_offers.py` is a developer script that searches a manager's roster for packages passing the offer rule, ranked by roster fit (young pieces that start for you or fill a need first), with a reason and warning flags for each incoming piece. Rankings are raw values without tier breaks or league-wide replacement level.
 
 ## Contributing
 

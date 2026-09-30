@@ -25,6 +25,7 @@ from ff.contracts.models import (
     TradeSide,
     WaiverTarget,
     NewsItem,
+    OfferVerdict,
 )
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "Asset",
     "Format",
     "NewsItem",
+    "OfferVerdict",
     "Roster",
     "RosterSlot",
     "RosterAudit",

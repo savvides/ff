@@ -6,6 +6,7 @@ from ff.analysis import (
     secondary_position_deltas,
 )
 from ff.contracts import Asset
+from ff.analysis.calculators import ktc_adjustment
 from ff.values import ValueBook
 
 
@@ -67,14 +68,15 @@ def test_trade_with_dual_market():
     assert eval.secondary_delta is not None
     assert eval.ktc_delta is not None
     assert eval.dealer_delta is not None
-    assert eval.secondary_value_a == 2500
-    assert eval.dealer_value_a == 2500
-    assert eval.ktc_value_a == 2500
+    # Raw KTC sums are kept; the totals are what keeptradecut.com shows, which adds
+    # its value adjustment even to a 1-for-1 (to the side with the better asset).
+    assert eval.raw_secondary_value_a == 2500 and eval.raw_secondary_value_b == 1200
+    k = ktc_adjustment([2500], [1200], book.secondary_top)
+    assert eval.secondary_value_a == 2500 + k.adj1 == eval.ktc_value_a == eval.dealer_value_a
+    assert eval.secondary_value_b == 1200 + k.adj2
     assert eval.arbitrage_label() in ["Consensus Win", "Hype Arbitrage", "Value Arbitrage", "Consensus Loss", "Fair"]
-    assert eval.delta == 500
-    assert eval.secondary_delta == 1300
-    assert eval.dealer_delta == 1300
-    assert eval.ktc_delta == 1300
+    assert eval.delta == 500  # FantasyCalc does not adjust equal piece counts
+    assert eval.secondary_delta == eval.dealer_delta == eval.ktc_delta == (2500 + k.adj1) - (1200 + k.adj2)
     assert eval.arbitrage_label() == "Consensus Win"
 
 
@@ -87,8 +89,8 @@ def test_evaluate_trade_parameter_aliases():
     # Test positional (give_inputs, get_inputs, book)
     e3 = evaluate_trade(["Player B"], ["Player A"], book)
     assert e1.delta == e2.delta == e3.delta == 500
-    assert e1.secondary_delta == e2.secondary_delta == e3.secondary_delta == 1300
-    assert e1.ktc_delta == e2.ktc_delta == e3.ktc_delta == 1300
+    assert e1.secondary_delta == e2.secondary_delta == e3.secondary_delta
+    assert e1.ktc_delta == e2.ktc_delta == e3.ktc_delta == e1.secondary_delta
 
 
 def test_evaluate_trade_include_secondary_false():
@@ -178,3 +180,49 @@ def test_evaluate_trade_string_inputs(book):
     assert eval_res.value_b == 9500
     assert eval_res.delta == 2500
 
+
+
+def _pick_book():
+    from ff.values import ValueBook
+    # FantasyCalc has only a flat 2028 1st; KTC prices Early/Mid/Late, and ff's KTC map
+    # keeps the Mid value under the generic key as a flagged stand-in.
+    pick = Asset(id="2028 1", name="2028 1st", kind="pick", position="PICK", value=2200,
+                 secondary_value=4600, secondary_source="approx")
+    player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=4600)
+    return ValueBook([pick, player], secondary_top=9999,
+                     secondary_map={"2028 1 early": 5000, "2028 1 mid": 4600, "2028 1": 4600})
+
+
+def test_a_generic_future_pick_cannot_be_judged_on_ktc():
+    from ff.analysis import offer_verdict
+    ev, _ = analyze_trade(["2028 1st"], ["Some Player"], _pick_book())
+    verdict = offer_verdict(ev)
+    assert verdict.status == "CANNOT_JUDGE"
+    assert "name the tier for 2028 1st" in verdict.reasons[0]
+
+
+def test_a_named_pick_tier_is_priced_at_that_exact_tier_on_ktc():
+    from ff.analysis import offer_verdict
+    ev, _ = analyze_trade(["2028 1st (Early)"], ["Some Player"], _pick_book())
+    pick = ev.side_a.assets[0]
+    assert (pick.name, pick.value, pick.secondary_value, pick.secondary_source) == (
+        "2028 1st (Early)", 2200, 5000, "exact")
+    assert offer_verdict(ev).status in ("PASS", "FAIL")  # judged, not guessed
+
+
+def test_a_generic_pick_resolved_to_fantasycalcs_mid_tier_cannot_be_judged():
+    """When FantasyCalc prices a year only as Early/Mid/Late, a generic ask resolves
+    to Mid. KTC's Mid is an exact key, but the tier is still ff's guess."""
+    from ff.analysis import offer_verdict
+    from ff.values import ValueBook
+    tiers = [Asset(id=f"2027 1 {t}", name=f"2027 1st ({t.capitalize()})", kind="pick", position="PICK",
+                   value=v, secondary_value=v, secondary_source="exact")
+             for t, v in (("early", 2600), ("mid", 2200), ("late", 1800))]
+    player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=2200)
+    book = ValueBook(tiers + [player], secondary_top=9999,
+                     secondary_map={"2027 1 early": 2600, "2027 1 mid": 2200, "2027 1 late": 1800})
+    ev, _ = analyze_trade(["2027 1st"], ["Some Player"], book)
+    verdict = offer_verdict(ev)
+    assert verdict.status == "CANNOT_JUDGE"
+    assert "name the tier for 2027 1st (Mid)" in verdict.reasons[0]
+    assert book.resolve("2027 1st (Mid)").secondary_source == "exact"  # a named Mid is still judged

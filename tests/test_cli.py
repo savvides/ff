@@ -276,6 +276,41 @@ def test_cli_trade_dual_market_output(fake_clients, league):
     assert "Consensus Win" in result.output
 
 
+def test_cli_trade_shows_site_adjustments_rule_and_provenance(fake_clients, league):
+    # 1-for-2: FantasyCalc credits the single-asset side (Gibbs, 8000) with the other
+    # side's cheapest piece, floor(min(2027 1st * 0.6982, 753)); ff prints that row,
+    # the site totals, the offer rule, and where the values came from.
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st"])
+    assert result.exit_code == 0, result.output
+    assert "+ site package adjustment" in result.output and "= site total" in result.output
+    assert "offer rule: FAIL" in result.output
+    assert "values: FantasyCalc" in result.output and "KTC" in result.output
+
+
+def test_cli_trade_ktc_mode_without_ktc_shows_the_fantasycalc_numbers_it_judges(fake_clients, league,
+                                                                              book, monkeypatch):
+    class FantasyCalcOnly:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
+            return book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: FantasyCalcOnly())
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "ktc"])
+    assert result.exit_code == 0, result.output
+    assert "verdict (FantasyCalc - KTC cannot price this)" in result.output
+    assert "FC" in result.output and "8,000" in result.output  # Gibbs' FantasyCalc value is shown
+
+
+def test_cli_trade_cannot_judge_when_a_calculator_changed(fake_clients, league, monkeypatch):
+    monkeypatch.setattr("ff.cli.check_calculators", lambda *a, **k: ["KTC adjustPackageNew() changed"])
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson"])
+    assert result.exit_code == 0, result.output
+    assert "offer rule: cannot judge" in result.output
+    assert "KTC adjustPackageNew() changed" in result.output
+
+
 def test_cli_trade_market_flag(fake_clients, league):
     _write_config(league)
     # --market fc should only show single market
@@ -396,7 +431,7 @@ def test_cli_trade_shows_depth_and_injury(fake_clients, league):
     res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "fc"])
     assert res.exit_code == 0, res.output
     assert "Bijan Robinson [RB1]" in res.output
-    assert "Jahmyr Gibbs [RB1 [Q - Hamstring]]" in res.output
+    assert "Jahmyr Gibbs [RB1] [Q - Hamstring]" in res.output
 
 
 def test_cli_news_command(fake_clients, league):

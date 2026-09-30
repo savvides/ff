@@ -13,8 +13,10 @@ def test_detect_format_superflex_ppr_dynasty(league):
     assert fmt.num_teams == 12
     assert fmt.ppr == 1.0
     assert fmt.is_dynasty is True
+    # the fixture league scores +0.5 per TE catch, so FantasyCalc prices TE+ values
+    assert fmt.tep == 0.5 and fmt.te_slots == 1
     assert fmt.fantasycalc_params() == {
-        "isDynasty": "true", "numQbs": "2", "numTeams": "12", "ppr": "1.0"
+        "isDynasty": "true", "numQbs": "2", "numTeams": "12", "ppr": "1.0", "tep": "te+"
     }
 
 
@@ -40,6 +42,18 @@ def test_fantasycalc_params_track_format():
     assert sf["numQbs"] == "2" and one["numQbs"] == "1"
     assert sf["numTeams"] == "12" and one["numTeams"] == "10"
     assert sf["ppr"] == "1.0" and one["ppr"] == "0.5"
+
+
+def test_te_premium_follows_fantasycalcs_league_mapping():
+    # Port of FantasyCalc's own Ie(): 2+ starting TEs or a premium above 1 -> te++,
+    # a premium of at least 0.5 -> te+; KTC's tier uses the same cut points.
+    from ff.contracts import Format
+    cases = [(0.0, 1, None, 0), (0.25, 1, None, 0), (0.5, 1, "te+", 1), (1.0, 1, "te+", 1),
+             (1.5, 1, "te++", 2), (0.0, 2, "te++", 2)]
+    for tep, slots, fc, ktc in cases:
+        f = Format(tep=tep, te_slots=slots)
+        assert (f.fantasycalc_tep(), f.ktc_tep_tier()) == (fc, ktc), (tep, slots)
+        assert f.fantasycalc_params().get("tep") == fc
 
 
 def test_format_label_shows_tep_when_present():
