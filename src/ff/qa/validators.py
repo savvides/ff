@@ -519,9 +519,20 @@ def validate_cleanup(audit: RosterAudit) -> List[QACheck]:
         message="" if taxi_are_bench else "Taxi stash candidate is not an active bench player",
     ))
 
+    active_pids = {s.player_id for s in audit.starters + audit.bench}
+    ir_valid = (
+        all(s.is_active and s.player_id in active_pids and s.injury_status for s in audit.ir_candidates)
+        and len(audit.ir_candidates) <= max(0, audit.ir_open)
+    )
+    checks.append(QACheck(
+        name="Cleanup IR Candidates Are Designated And Fit",
+        passed=ir_valid,
+        message="" if ir_valid else "IR candidate is not an active, designated player within the open IR slots",
+    ))
+
     slots_to_check = list(audit.slots)
     seen_ids = {s.player_id for s in slots_to_check}
-    for s in (audit.drop_candidates + audit.taxi_candidates):
+    for s in (audit.drop_candidates + audit.taxi_candidates + audit.ir_candidates):
         if s.player_id not in seen_ids:
             slots_to_check.append(s)
             seen_ids.add(s.player_id)

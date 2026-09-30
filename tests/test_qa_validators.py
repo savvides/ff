@@ -271,6 +271,18 @@ def test_validate_cleanup_valid():
     assert all(c.passed for c in checks)
 
 
+def test_validate_cleanup_checks_ir_candidates_are_designated_and_fit():
+    hurt = RosterSlot(player_id="1", name="Hurt", position="WR", slot="BENCH", injury_status="Out")
+    healthy = RosterSlot(player_id="2", name="Fine", position="WR", slot="BENCH")
+    name = "Cleanup IR Candidates Are Designated And Fit"
+    ok = RosterAudit(team_name="T", ir_cap=1, slots=[hurt], ir_candidates=[hurt])
+    assert all(c.passed for c in validate_cleanup(ok))
+    no_room = RosterAudit(team_name="T", ir_cap=0, slots=[hurt], ir_candidates=[hurt])
+    assert [c.name for c in validate_cleanup(no_room) if not c.passed] == [name]
+    undesignated = RosterAudit(team_name="T", ir_cap=1, slots=[healthy], ir_candidates=[healthy])
+    assert [c.name for c in validate_cleanup(undesignated) if not c.passed] == [name]
+
+
 def test_validate_waivers_valid():
     a1 = Asset(id="1", name="Free Agent", value=1500, position="RB")
     wt = WaiverTarget(asset=a1, add_count=500, is_rostered=False)

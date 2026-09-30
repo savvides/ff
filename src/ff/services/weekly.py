@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from ff.analysis.cleanup import designation, ir_eligible_statuses
 from ff.contracts import Roster, NewsItem
 from ff.contracts.models import WeeklyContext, WeeklyPlayer
 from ff.core.http import get_json
@@ -86,9 +87,7 @@ def build_weekly(roster: Roster, meta: Dict[str, Any], games: Dict[str, tuple],
     for pid, row in meta.items():
         team = _team(row.get("team") or "")
         status, kickoff = games.get(team, ("bye", None)) if team else ("unknown", None)
-        injury = row.get("injury_status")
-        if row.get("status") in {"Injured Reserve", "Suspended", "PUP", "Inactive"}:
-            injury = row["status"]
+        injury = designation(row)
         context.players[pid] = WeeklyPlayer(
             game_status=status, kickoff=kickoff, injury_status=injury,
             actual=(matchup.get("players_points") or {}).get(pid),
@@ -98,11 +97,7 @@ def build_weekly(roster: Roster, meta: Dict[str, Any], games: Dict[str, tuple],
         if pid not in context.players:
             context.players[pid] = WeeklyPlayer()
     # A now-healthy IR occupant can block *all* roster changes on Sleeper.
-    ir_allowed = {"ir", "injured reserve", "pup", "physically unable to perform"}
-    for key, statuses in {"out": {"out"}, "sus": {"sus", "suspended"}, "doubtful": {"doubtful"},
-                          "na": {"na", "inactive"}, "dnr": {"dnr"}, "cov": {"cov"}}.items():
-        if settings.get("reserve_allow_" + key):
-            ir_allowed |= statuses
+    ir_allowed = ir_eligible_statuses(settings)
     for pid in roster.reserve:
         if (context.players[pid].injury_status or "").lower() not in ir_allowed:
             context.blocked_reason = "IR eligibility is unverified or invalid; resolve the roster lock in Sleeper first"

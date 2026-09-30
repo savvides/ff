@@ -120,6 +120,19 @@ def test_cleanup_command(fake_clients, league):
     assert "active slot" in result.output
 
 
+def test_cleanup_offers_ir_for_out_players_when_the_league_allows_it(fake_clients, league,
+                                                                     players_meta):
+    league["settings"]["reserve_allow_out"] = 1
+    players_meta["9999"]["injury_status"] = "Out"  # the bench kicker
+    _write_config(league)
+    result = runner.invoke(app, ["cleanup"])
+    assert result.exit_code == 0, result.output
+    assert "move to IR" in result.output
+    assert re.search(r"Test Kicker\s.*\sOut\s", result.output)
+    assert "or an IR move opens room" in result.output
+    assert "Sleeper blocks adds and drops" in result.output
+
+
 def test_waivers_command(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["waivers"])
