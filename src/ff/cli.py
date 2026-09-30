@@ -265,6 +265,20 @@ def _signed(n: int) -> str:
     return f"+{n:,}" if n > 0 else f"{n:,}"
 
 
+_KTC_DOWN = "KeepTradeCut values are unavailable right now"
+
+
+def _has_ktc(book: ValueBook) -> bool:
+    return any(a.secondary_value is not None for a in book.assets)
+
+
+def _ktc_missing(book: ValueBook) -> str:
+    """Why a KTC number is missing, so a FantasyCalc-only fallback is never silent."""
+    if _has_ktc(book):
+        return "KeepTradeCut has no value for part of this; showing FantasyCalc only."
+    return f"{_KTC_DOWN}; showing FantasyCalc only."
+
+
 # --- setup ---------------------------------------------------------------
 
 @app.command()
@@ -574,6 +588,8 @@ def values(
                       f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
                       _signed(a.trend_30day) if a.trend_30day else "-")
     console.print(t)
+    if market != "fc" and not has_secondary:
+        console.print(f"[yellow]{_ktc_missing(book)}[/]")
     qa_rep = run_qa("values", assets=assets, position=position, market=market)
     render_qa_footer(qa_rep, console)
 
@@ -654,6 +670,8 @@ def trade(
                   ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
                   f"[bold]{evaluation.value_b:,}[/]")
     console.print(t)
+    if market != "fc" and not has_secondary:
+        console.print(f"[yellow]{_ktc_missing(book)}[/]")
 
     if dual_market:
         net_fc = evaluation.delta
@@ -999,8 +1017,8 @@ def movers(
             kind = "market discrepancies (FC vs KTC)"
 
         t = Table(title=f"arbitrage movers - {kind} - {cfg.format.label()}")
-        right_arb: Set[str] = {"FC", "KTC", "diff", "gap%", "age"}
-        for c in ("player", "pos", "owner", "FC", "KTC", "diff", "gap%", "bias"):
+        right_arb: Set[str] = {"FC", "KTC", "KTC@FC", "diff", "gap%", "age"}
+        for c in ("player", "pos", "owner", "FC", "KTC", "KTC@FC", "diff", "gap%", "bias"):
             t.add_column(c, justify="right" if c in right_arb else "left")
         for m in arb_movers:
             a = m.asset
@@ -1012,15 +1030,20 @@ def movers(
                 owner,
                 f"{m.fc_value:,}",
                 f"{m.secondary_value:,}",
+                f"{m.compared_value:,}",
                 _signed(m.diff),
                 f"{m.pct_diff:.0f}%",
                 bias_color,
             )
         console.print(t)
-        if not arb_movers:
+        if not _has_ktc(book):
+            console.print(f"[yellow]{_KTC_DOWN}; there is nothing to compare.[/]")
+        elif not arb_movers:
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")
         else:
-            console.print("[dim]diff = KTC - FC. Bias indicates which market prices the player higher.[/]")
+            console.print("[dim]KTC@FC = FantasyCalc's value at the asset's KTC rank, since the two "
+                          "markets use different scales. diff = KTC@FC - FC; bias = the market that "
+                          "ranks the asset higher.[/]")
         qa_rep = run_qa("movers", movers=arb_movers, mode="arbitrage")
         render_qa_footer(qa_rep, console)
         return

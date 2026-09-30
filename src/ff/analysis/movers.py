@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import groupby
 from typing import Dict, List, Optional, Tuple, Union
 
 from ff.contracts import ArbitrageMover, Asset, Roster
@@ -43,6 +44,25 @@ def top_movers(book: ValueBook, buy: bool = False, limit: int = 20,
     return scored[:limit]
 
 
+def _on_fc_scale(priced: List[Tuple[Asset, int]]) -> List[int]:
+    """Each asset's secondary value restated on FantasyCalc's scale: the FC value
+    at the same rank among `priced`, averaged across tied secondary values.
+
+    The two markets draw different curves (live KTC ran ~1x FC above 8,000 but ~2x
+    around FC 1,000-1,500 in Sept 2026), so raw values are not comparable; ranks
+    are. Aligned with `priced`.
+    """
+    fc_desc = sorted((a.value for a, _ in priced), reverse=True)
+    order = sorted(range(len(priced)), key=lambda i: -priced[i][1])  # stable on ties
+    out = [0] * len(priced)
+    for _, tied in groupby(enumerate(order), key=lambda rank_i: priced[rank_i[1]][1]):
+        group = list(tied)
+        share = round(sum(fc_desc[rank] for rank, _ in group) / len(group))
+        for _, i in group:
+            out[i] = share
+    return out
+
+
 def find_arbitrage_movers(
     rosters: Optional[Union[List[Roster], ValueBook]] = None,
     book: Optional[ValueBook] = None,
@@ -82,25 +102,23 @@ def find_arbitrage_movers(
     scored: List[ArbitrageMover] = []
     norm_market = market.lower() if market else None
 
-    for a in actual_book.assets:
-        if a.secondary_value is None:
-            continue
+    priced = [(a, a.secondary_value) for a in actual_book.assets if a.secondary_value is not None]
+    for (a, sec_val), scaled in zip(priced, _on_fc_scale(priced)):
         fc_val = a.value
-        sec_val = a.secondary_value
 
         if min_value > 0 and max(fc_val, sec_val) < min_value:
             continue
 
-        diff = sec_val - fc_val
+        diff = scaled - fc_val
 
         if norm_market in ("dealer", "ktc") and diff <= 0:
             continue
         if norm_market == "fc" and diff >= 0:
             continue
 
-        larger = max(fc_val, sec_val)
+        larger = max(fc_val, scaled)
         pct_diff = (abs(diff) / larger * 100.0) if larger > 0 else 0.0
-        diff_pct = ((sec_val - fc_val) / fc_val * 100.0) if fc_val > 0 else 0.0
+        diff_pct = (diff / fc_val * 100.0) if fc_val > 0 else 0.0
 
         r_info = owner_map.get(a.id)
         roster_id, team_name = r_info if r_info else (None, None)
@@ -109,6 +127,7 @@ def find_arbitrage_movers(
             asset=a,
             fc_value=fc_val,
             secondary_value=sec_val,
+            secondary_scaled=scaled,
             diff=diff,
             pct_diff=pct_diff,
             diff_pct=diff_pct,

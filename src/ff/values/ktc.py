@@ -47,6 +47,19 @@ def _extract_players(text: str) -> List[Dict[str, Any]]:
         except (json.JSONDecodeError, ValueError):
             pass
 
+    # Current page (seen 2026-09-29): the rankings ship as JSON inside
+    # <script type="application/json" id="ktc-players">, and the page's own JS
+    # reads them with `playersArray = JSON.parse(...)`.
+    m = re.search(r"<script[^>]*\bid=[\"']ktc-players[\"'][^>]*>(.*?)</script>", text, re.DOTALL)
+    if m:
+        try:
+            parsed = json.loads(m.group(1))
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Older page: an inline `var playersArray = [...]` literal.
     m = re.search(r"var\s+playersArray\s*=\s*(\[.*?\])\s*;", text, re.DOTALL)
     if not m:
         return []

@@ -209,6 +209,18 @@ def test_validate_movers_arbitrage_valid():
     assert all(c.passed for c in checks)
 
 
+def test_validate_movers_arbitrage_checks_diff_against_the_scaled_value():
+    # KTC's raw 8000 restates as 6000 on FC's scale, so diff must be 6000 - 5000.
+    a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=8000)
+    good = ArbitrageMover(asset=a1, fc_value=5000, secondary_value=8000,
+                          secondary_scaled=6000, diff=1000, market_bias="KTC")
+    raw = ArbitrageMover(asset=a1, fc_value=5000, secondary_value=8000,
+                         secondary_scaled=6000, diff=3000, market_bias="KTC")
+    assert all(c.passed for c in validate_movers([good], mode="arbitrage"))
+    failed = [c.name for c in validate_movers([raw], mode="arbitrage") if not c.passed]
+    assert failed == ["Arbitrage Diff Calculation"]
+
+
 def test_validate_movers_arbitrage_invalid_bias():
     a1 = Asset(id="1", name="Player 1", value=5000, secondary_value=5500)
     mover = ArbitrageMover(
