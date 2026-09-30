@@ -60,8 +60,18 @@ def test_ledger_picks_are_priced_at_their_projected_tier_and_labeled_by_origin()
     assets = find_offers._roster_assets(book, [], picks, lambda rid: "late",
                                         lambda rid: f"from roster {rid}", origins)
     assert [(a.name, a.value, a.secondary_value, a.secondary_source) for a in assets] == [
-        ("2028 4th (Late)", 800, 1300, "exact")]  # the duplicate collapsed
-    assert origins == {"2028 4th (Late)": "from roster 7"}
+        ("2028 4th (Late)", 800, 1300, "exact"), ("2028 4th (Late) #2", 800, 1300, "exact")]
+    assert origins == {"2028 4th (Late)": "from roster 7", "2028 4th (Late) #2": "from roster 8"}
+
+
+def test_two_picks_at_the_same_tier_can_both_be_asked_for_and_are_not_listed_twice():
+    pick = Asset(id="2028 2 late", name="2028 2nd (Late)", kind="pick", position="PICK",
+                 value=3000, secondary_value=5000)
+    twin = pick.model_copy(update={"name": "2028 2nd (Late) #2"})
+    assert [r["get"] for r in find_offers.search([SALE], [pick, twin], [], top=TOP)] == [["2028 2nd (Late)"]]
+    other = Asset(id="1b", name="Vet WR", position="WR", age=33, value=3000, secondary_value=5000)
+    assert [r["get"] for r in find_offers.search([SALE, other], [pick, twin], [], top=TOP)] == [
+        ["2028 2nd (Late)", "2028 2nd (Late) #2"]]
 
 
 RPOS = ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN", "BN"]

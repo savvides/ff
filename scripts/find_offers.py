@@ -103,7 +103,13 @@ def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[A
     needs = needs or set()
     give_options = [tuple(sale)] + [tuple(sale) + (b,) for b in balancers if b.id not in {s.id for s in sale}]
     pool = [a for a in theirs if a.is_pick or (a.age or 99) <= max_age]
-    get_options = [(a,) for a in pool] + list(itertools.combinations(pool, 2))
+    # Separately owned picks at the same tier price identically; ask for each package once.
+    get_options, seen = [], set()
+    for get in [(a,) for a in pool] + list(itertools.combinations(pool, 2)):
+        key = tuple(sorted((a.id, a.value, a.secondary_value or 0) for a in get))
+        if key not in seen:
+            seen.add(key)
+            get_options.append(get)
     rows: List[Dict[str, object]] = []
     for give in give_options:
         for get in get_options:
@@ -144,15 +150,17 @@ def _roster_assets(book: ValueBook, player_ids: Sequence[str], picks: Sequence[o
     """A roster's priced players plus the picks it owns. Each pick is priced at the
     tier ff projects from its ORIGINAL team's power rank (as `ff picks` does), on
     both sites, so KTC's number is its value for that exact Early/Mid/Late pick.
-    Picks that would price identically collapse to one; `origins` records whose
-    pick each name is, so an offer says which one to ask for."""
+    A second pick at the same tier is named "#2" (and so on); `origins` records
+    whose pick each name is, so an offer says which one to ask for."""
     assets = [a for a in (book.value_for_sleeper_id(p) for p in player_ids) if a is not None]
-    seen = set()
     for p in picks:
         pick = book.pick_at_tier(p.season, p.round, tier_of(p.original_roster_id))  # type: ignore[attr-defined]
-        if pick is None or pick.name in seen:
+        if pick is None:
             continue
-        seen.add(pick.name)
+        base, n = pick.name, 1
+        while pick.name in origins:
+            n += 1
+            pick.name = f"{base} #{n}"
         origins[pick.name] = origin_of(p.original_roster_id)  # type: ignore[attr-defined]
         assets.append(pick)
     return [a for a in assets if a.secondary_value is not None and a.value > 0]
