@@ -276,6 +276,27 @@ def test_cli_trade_dual_market_output(fake_clients, league):
     assert "Consensus Win" in result.output
 
 
+def test_cli_trade_shows_site_adjustments_rule_and_provenance(fake_clients, league):
+    # 1-for-2: FantasyCalc credits the single-asset side (Gibbs, 8000) with the other
+    # side's cheapest piece, floor(min(2027 1st * 0.6982, 753)); ff prints that row,
+    # the site totals, the offer rule, and where the values came from.
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st"])
+    assert result.exit_code == 0, result.output
+    assert "+ site package adjustment" in result.output and "= site total" in result.output
+    assert "offer rule: FAIL" in result.output
+    assert "values: FantasyCalc" in result.output and "KTC" in result.output
+
+
+def test_cli_trade_cannot_judge_when_a_calculator_changed(fake_clients, league, monkeypatch):
+    monkeypatch.setattr("ff.cli.check_calculators", lambda *a, **k: ["KTC adjustPackageNew() changed"])
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson"])
+    assert result.exit_code == 0, result.output
+    assert "offer rule: cannot judge" in result.output
+    assert "KTC adjustPackageNew() changed" in result.output
+
+
 def test_cli_trade_market_flag(fake_clients, league):
     _write_config(league)
     # --market fc should only show single market

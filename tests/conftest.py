@@ -23,6 +23,14 @@ def ff_home(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def verified_calculators(monkeypatch):
+    """`ff trade` checks the calculator sites' live code for drift; the gate stays
+    offline, so CLI runs treat the ported math as verified. Tests of the check
+    itself exercise ff.values.calculators_live directly with mocked HTTP."""
+    monkeypatch.setattr("ff.cli.check_calculators", lambda *a, **k: [])
+
+
 @pytest.fixture
 def fc_entries():
     return load("fantasycalc_sf")

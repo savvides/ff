@@ -20,11 +20,13 @@ from ff.analysis import (
     evaluate_trade,
     find_arbitrage_movers,
     ktc_position_deltas,
+    offer_verdict,
     pick_ledger,
     pick_tier,
     position_deltas,
     price_pick,
 )
+from ff.analysis.calculators import ktc_adjustment
 from ff.cli import app
 from ff.contracts import Asset, Format, FuturePick, Roster, TradeEvaluation, TradeSide
 from ff.core.config import Config, save_config
@@ -50,18 +52,21 @@ def test_e2e_multi_market_trade_evaluation_mixed_assets(multi_market_book):
     )
 
     assert not unresolved
-    # FC values
-    assert evaluation.value_a == 9000 + 4200  # 13200
-    assert evaluation.value_b == 8000 + 4000 + 1400  # 13400
-    assert evaluation.delta == -200
-    assert round(evaluation.pct_diff, 2) == round(200 / 13400 * 100, 2)
+    # FC values: 2-for-3, so side A (fewer pieces) gets the waiver adjustment for the
+    # other side's cheapest piece: floor(min(1400 * 0.6982, 753)) = 753.
+    assert (evaluation.raw_value_a, evaluation.raw_value_b) == (13200, 13400)
+    assert evaluation.value_a == 13200 + 753
+    assert evaluation.value_b == 13400
+    assert evaluation.delta == 553
+    assert round(evaluation.pct_diff, 2) == round(553 / 13953 * 100, 2)
     assert evaluation.is_fair(threshold_pct=5.0) is True
 
-    # KTC values
-    assert evaluation.ktc_value_a == 8900 + 4500  # 13400
-    assert evaluation.ktc_value_b == 8400 + 4100 + 1450  # 13950
-    assert evaluation.ktc_delta == -550
-    assert round(evaluation.ktc_pct_diff, 2) == round(550 / 13950 * 100, 2)
+    # KTC values: raw sums, plus KTC's value adjustment (from the site's own formula)
+    assert (evaluation.raw_secondary_value_a, evaluation.raw_secondary_value_b) == (13400, 13950)
+    k = ktc_adjustment([8900, 4500], [8400, 4100, 1450], multi_market_book.secondary_top)
+    assert evaluation.ktc_value_a == 13400 + k.adj1
+    assert evaluation.ktc_value_b == 13950 + k.adj2
+    assert evaluation.ktc_delta == evaluation.ktc_value_a - evaluation.ktc_value_b
 
     # Position deltas
     fc_deltas = position_deltas(evaluation)
@@ -72,8 +77,11 @@ def test_e2e_multi_market_trade_evaluation_mixed_assets(multi_market_book):
     assert ktc_deltas["RB"] == 8900 - 8400  # +500
     assert ktc_deltas["PICK"] == 4500 - (4100 + 1450)  # -1050
 
-    # Both markets within 5% threshold -> Fair
-    assert evaluation.arbitrage_label() == "Fair"
+    # FantasyCalc calls it close (553 on 13953, 4.0%), but KTC credits the side with
+    # the best asset (Bijan) +3025 for consolidating, so on KTC side A wins by 8.2% of
+    # both sides: the markets disagree -> Hype Arbitrage.
+    assert evaluation.is_fair() and not evaluation.secondary_is_fair()
+    assert evaluation.arbitrage_label() == "Hype Arbitrage"
 
 
 def test_e2e_multi_market_evaluate_trade_helper(multi_market_book):
@@ -83,8 +91,10 @@ def test_e2e_multi_market_evaluate_trade_helper(multi_market_book):
         get=["Ja'Marr Chase"],  # FC 9500, KTC 9600
         book=multi_market_book,
     )
-    assert eval_res.delta == 2500  # 9500 - 7000
-    assert eval_res.ktc_delta == 2400  # 9600 - 7200
+    assert eval_res.delta == 2500  # 9500 - 7000 (FantasyCalc leaves 1-for-1s alone)
+    assert eval_res.raw_secondary_value_a - eval_res.raw_secondary_value_b == 2400  # 9600 - 7200
+    k = ktc_adjustment([9600], [7200], multi_market_book.secondary_top)
+    assert eval_res.ktc_delta == 2400 + k.adj1 - k.adj2  # KTC adjusts even a 1-for-1
     assert eval_res.winner() == "You get"
     assert eval_res.arbitrage_label() == "Consensus Win"
 
@@ -187,14 +197,19 @@ def test_unmapped_assets_in_trade_evaluation():
         get=["Mapped Player A", "Unmapped Player B"],
         book=book,
     )
-    assert eval_res.value_a == 8000
-    assert eval_res.value_b == 7000
-    assert eval_res.delta == 1000
-    # KTC totals: Side A includes mapped (5500), Side B has (6800)
-    assert eval_res.ktc_value_a == 5500
-    assert eval_res.ktc_value_b == 6800
-    assert eval_res.ktc_delta == -1300
-    assert eval_res.arbitrage_label() == "Value Arbitrage"  # FC win (+1000), KTC loss (-1300)
+    # FantasyCalc: 2-for-1, so the single-asset side B is credited
+    # floor(min(3000 * 0.6982, 753)) = 753, exactly like fantasycalc.com.
+    assert (eval_res.raw_value_a, eval_res.raw_value_b) == (8000, 7000)
+    assert eval_res.value_a == 8000 and eval_res.value_b == 7000 + 753
+    assert eval_res.delta == 247
+    # KTC cannot price Unmapped Player B, so KTC gives no verdict at all rather than
+    # counting B as 0 (which would skew both its adjustment and the gap).
+    assert eval_res.raw_secondary_value_a == 5500
+    assert eval_res.ktc_value_a is None and eval_res.ktc_delta is None
+    assert eval_res.arbitrage_label() is None
+    verdict = offer_verdict(eval_res)
+    assert verdict.status == "CANNOT_JUDGE"
+    assert verdict.reasons == ["KTC has no value for Unmapped Player B"]
 
 
 def test_completely_unmapped_side_returns_none_for_ktc():
@@ -358,7 +373,9 @@ def test_arbitrage_threshold_boundary_precision():
     eval_uneven = TradeEvaluation(side_a=side_a, side_b=side_b_uneven)
     assert eval_uneven.pct_diff > 5.0
     assert eval_uneven.is_fair(threshold_pct=5.0) is False
-    assert eval_uneven.arbitrage_label(threshold_pct=5.0) == "Consensus Win"
+    # KTC judges by its own share-of-both measure: 101 / 3899 = 2.6%, a Fair Trade
+    assert eval_uneven.secondary_is_fair(threshold_pct=5.0) is True
+    assert eval_uneven.arbitrage_label(threshold_pct=5.0) == "Value Arbitrage"
 
 
 # =============================================================================

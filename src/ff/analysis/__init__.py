@@ -25,9 +25,11 @@ from ff.analysis.picks import pick_ledger, pick_tier, price_pick
 from ff.analysis.roster import value_all_rosters, value_roster
 from ff.analysis.trade import (
     analyze_trade,
+    apply_site_adjustments,
     dealer_position_deltas,
     evaluate_trade,
     ktc_position_deltas,
+    offer_verdict,
     position_deltas,
     secondary_position_deltas,
 )
@@ -38,6 +40,8 @@ __all__ = [
     "value_roster",
     "value_all_rosters",
     "analyze_trade",
+    "apply_site_adjustments",
+    "offer_verdict",
     "evaluate_trade",
     "position_deltas",
     "secondary_position_deltas",

@@ -6,6 +6,7 @@ from ff.analysis import (
     secondary_position_deltas,
 )
 from ff.contracts import Asset
+from ff.analysis.calculators import ktc_adjustment
 from ff.values import ValueBook
 
 
@@ -67,14 +68,15 @@ def test_trade_with_dual_market():
     assert eval.secondary_delta is not None
     assert eval.ktc_delta is not None
     assert eval.dealer_delta is not None
-    assert eval.secondary_value_a == 2500
-    assert eval.dealer_value_a == 2500
-    assert eval.ktc_value_a == 2500
+    # Raw KTC sums are kept; the totals are what keeptradecut.com shows, which adds
+    # its value adjustment even to a 1-for-1 (to the side with the better asset).
+    assert eval.raw_secondary_value_a == 2500 and eval.raw_secondary_value_b == 1200
+    k = ktc_adjustment([2500], [1200], book.secondary_top)
+    assert eval.secondary_value_a == 2500 + k.adj1 == eval.ktc_value_a == eval.dealer_value_a
+    assert eval.secondary_value_b == 1200 + k.adj2
     assert eval.arbitrage_label() in ["Consensus Win", "Hype Arbitrage", "Value Arbitrage", "Consensus Loss", "Fair"]
-    assert eval.delta == 500
-    assert eval.secondary_delta == 1300
-    assert eval.dealer_delta == 1300
-    assert eval.ktc_delta == 1300
+    assert eval.delta == 500  # FantasyCalc does not adjust equal piece counts
+    assert eval.secondary_delta == eval.dealer_delta == eval.ktc_delta == (2500 + k.adj1) - (1200 + k.adj2)
     assert eval.arbitrage_label() == "Consensus Win"
 
 
@@ -87,8 +89,8 @@ def test_evaluate_trade_parameter_aliases():
     # Test positional (give_inputs, get_inputs, book)
     e3 = evaluate_trade(["Player B"], ["Player A"], book)
     assert e1.delta == e2.delta == e3.delta == 500
-    assert e1.secondary_delta == e2.secondary_delta == e3.secondary_delta == 1300
-    assert e1.ktc_delta == e2.ktc_delta == e3.ktc_delta == 1300
+    assert e1.secondary_delta == e2.secondary_delta == e3.secondary_delta
+    assert e1.ktc_delta == e2.ktc_delta == e3.ktc_delta == e1.secondary_delta
 
 
 def test_evaluate_trade_include_secondary_false():

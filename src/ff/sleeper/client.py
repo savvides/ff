@@ -144,6 +144,7 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
         num_teams=int(league.get("total_rosters") or 12),
         ppr=ppr,
         tep=float(scoring.get("bonus_rec_te", 0.0) or 0.0),
+        te_slots=positions.count("TE"),
     )
 
 

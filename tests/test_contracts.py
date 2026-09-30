@@ -122,16 +122,18 @@ def test_trade_evaluation_no_secondary_returns_none():
 
 
 def test_trade_evaluation_secondary_is_fair():
-    # 3% difference -> fair at default 5%
+    # KTC's own measure is a share of BOTH sides: 30 / 1970 = 1.52%, rounded to 1.5
     side_a = TradeSide(assets=[Asset(id="1", name="A", value=1000, secondary_value=1000)])
     side_b = TradeSide(assets=[Asset(id="2", name="B", value=1000, secondary_value=970)])
     eval = TradeEvaluation(side_a=side_a, side_b=side_b)
+    assert round(eval.secondary_site_pct, 2) == 1.52
     assert eval.secondary_is_fair() is True
     assert eval.ktc_is_fair() is True
     assert eval.dealer_is_fair() is True
-    assert eval.secondary_is_fair(threshold_pct=2.0) is False
-    assert eval.ktc_is_fair(threshold_pct=2.0) is False
-    assert eval.dealer_is_fair(threshold_pct=2.0) is False
+    assert eval.secondary_is_fair(threshold_pct=1.5) is True  # rounds to 1.5, like the page
+    assert eval.secondary_is_fair(threshold_pct=1.0) is False
+    assert eval.ktc_is_fair(threshold_pct=1.0) is False
+    assert eval.dealer_is_fair(threshold_pct=1.0) is False
 
 
 def test_arbitrage_classifications():

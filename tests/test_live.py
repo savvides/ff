@@ -3,7 +3,11 @@ Sleeper + FantasyCalc APIs). Run on demand with `pytest -m live` to confirm the
 upstream payload shapes haven't drifted.
 """
 
+import json
 import os
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -163,3 +167,73 @@ def test_weekly_live_roster_matchup_slot_alignment():
         matchup = matchups[roster.roster_id]
         assert roster.starters == [str(p) if p else "0" for p in matchup["starters"]]
         assert isinstance(matchup["players_points"], dict)
+
+
+# --- calculator parity: ff's trade math must equal the sites' own ---------------
+
+REPO = Path(__file__).resolve().parent.parent
+LEAGUE_FMT = Format(is_dynasty=True, superflex=True, num_qbs=2, num_teams=12, ppr=0.5, tep=0.5)
+
+
+def test_calculator_code_unchanged_live():
+    # The same check `ff trade` runs: a failure means a site changed its calculator
+    # since ff's port was verified; regenerate the vectors and re-verify the port.
+    from ff.values.calculators_live import check_calculators
+    from ff.values.ktc import KtcClient
+    html = KtcClient()._fetch_text(use_cache=False)
+    assert check_calculators(html) == []
+
+
+def test_calculator_vectors_still_match_the_site_code_live():
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    res = subprocess.run(["node", str(REPO / "scripts/calculator_oracle.mjs"), "--check",
+                          str(REPO / "tests/fixtures/calculator_vectors.json")],
+                         capture_output=True, text=True, timeout=300)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_trade_numbers_match_the_sites_on_live_data():
+    """End to end on today's values: each asset priced as the sites price it (the
+    oracle looks values up itself, KTC through the page's own field selection), and
+    the sites' own code producing the adjustments and totals ff reports."""
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    from ff.analysis import analyze_trade
+    book = ValuesClient().fetch(LEAGUE_FMT, fresh=True)
+    trades = [  # (ff tokens get, ff tokens give, site names get, site names give)
+        (["Quinshon Judkins"], ["Kirk Cousins", "Michael Pittman"],
+         [("Quinshon Judkins", "Quinshon Judkins")], [("Kirk Cousins", "Kirk Cousins"), ("Michael Pittman", "Michael Pittman")]),
+        (["Kenyon Sadiq"], ["Tee Higgins"], [("Kenyon Sadiq", "Kenyon Sadiq")], [("Tee Higgins", "Tee Higgins")]),
+        (["2027 2nd (Early)", "Brock Bowers"], ["Kirk Cousins"],
+         [("2027 2nd (Early)", "2027 Early 2nd"), ("Brock Bowers", "Brock Bowers")], [("Kirk Cousins", "Kirk Cousins")]),
+    ]
+    # Same KTC page snapshot ff priced from: KTC's values move between fetches.
+    payload = {"fc_params": LEAGUE_FMT.fantasycalc_params(), "ktc_tep": LEAGUE_FMT.ktc_tep_tier(), "ktc_format": 2,
+               "ktc_html": book.secondary_html,
+               "trades": [{"side1": [{"fc": f, "ktc": k} for f, k in get_sites],
+                           "side2": [{"fc": f, "ktc": k} for f, k in give_sites]}
+                          for _, _, get_sites, give_sites in trades]}
+    res = subprocess.run(["node", str(REPO / "scripts/calculator_oracle.mjs"), "--eval"],
+                         input=json.dumps(payload), capture_output=True, text=True, timeout=300)
+    assert res.returncode == 0, res.stderr
+    site = json.loads(res.stdout)["results"]
+    for (get, give, _, _), s in zip(trades, site):
+        ev, missing = analyze_trade(get, give, book)
+        assert not missing
+        assert [[a.value for a in ev.side_a.assets], [a.value for a in ev.side_b.assets]] == s["fc_values"]
+        assert [[a.secondary_value for a in ev.side_a.assets],
+                [a.secondary_value for a in ev.side_b.assets]] == s["ktc_values"]
+        assert ev.secondary_top == s["ktc_top"]
+        assert (ev.value_a, ev.value_b) == (s["fc"]["total1"], s["fc"]["total2"])
+        assert (ev.secondary_value_a, ev.secondary_value_b) == (s["ktc"]["total1"], s["ktc"]["total2"])
+        assert ev.secondary_is_fair() == s["ktc"]["fair"]
+
+
+def test_te_premium_reaches_both_markets_live():
+    plain = ValuesClient().fetch(Format(is_dynasty=True, superflex=True, num_qbs=2, num_teams=12, ppr=0.5))
+    tep = ValuesClient().fetch(LEAGUE_FMT, fresh=True)
+    bowers_plain, bowers_tep = plain.resolve("Brock Bowers"), tep.resolve("Brock Bowers")
+    assert bowers_tep.value > bowers_plain.value  # FantasyCalc tep=te+
+    assert bowers_tep.secondary_value > bowers_plain.secondary_value  # KTC TE+ tier
+    assert tep.resolve("Kirk Cousins").value == plain.resolve("Kirk Cousins").value  # non-TEs unchanged

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Dict, List, Optional
+import time
+from typing import Dict, List, Optional, Set
 
 from ff.contracts import Asset, Format
-from ff.core.http import get_json
+from ff.core.http import _cache_file, get_json
 from ff.values.ktc import KtcClient
 from ff.values.normalize import normalize_name, normalize_pick
 
@@ -27,6 +28,7 @@ def _asset_from_entry(
     secondary_map: Optional[Dict[str, int]] = None,
     dealer_map: Optional[Dict[str, int]] = None,
     ktc_map: Optional[Dict[str, int]] = None,
+    approx_keys: Optional[Set[str]] = None,
 ) -> Asset:
     p = entry.get("player", {})
     position = p.get("position")
@@ -39,22 +41,24 @@ def _asset_from_entry(
 
     sec_map = secondary_map if secondary_map is not None else (dealer_map if dealer_map is not None else ktc_map)
     sec_val: Optional[int] = None
+    sec_key: Optional[str] = None
     if sec_map:
         if is_pick:
             norm_pk = normalize_pick(name)
-            if norm_pk and norm_pk in sec_map:
-                sec_val = sec_map[norm_pk]
-            elif ident in sec_map:
-                sec_val = sec_map[ident]
+            for key in (norm_pk, ident):
+                if key and key in sec_map:
+                    sec_key = key
+                    break
         else:
             sleeper_id = p.get("sleeperId")
-            norm_name = normalize_name(name)
-            if sleeper_id is not None and str(sleeper_id) in sec_map:
-                sec_val = sec_map[str(sleeper_id)]
-            elif norm_name in sec_map:
-                sec_val = sec_map[norm_name]
-            elif ident in sec_map:
-                sec_val = sec_map[ident]
+            for key in (str(sleeper_id) if sleeper_id is not None else None,
+                        normalize_name(name), ident):
+                if key and key in sec_map:
+                    sec_key = key
+                    break
+        if sec_key is not None:
+            sec_val = sec_map[sec_key]
+    sec_source = None if sec_key is None else ("approx" if sec_key in (approx_keys or set()) else "exact")
 
     return Asset(
         id=ident,
@@ -65,6 +69,7 @@ def _asset_from_entry(
         age=p.get("maybeAge"),
         value=int(entry.get("value", 0) or 0),
         secondary_value=sec_val,
+        secondary_source=sec_source,
         overall_rank=entry.get("overallRank"),
         position_rank=entry.get("positionRank"),
         trend_30day=entry.get("trend30Day"),
@@ -74,10 +79,28 @@ def _asset_from_entry(
 
 
 class ValueBook:
-    """An indexed snapshot of FantasyCalc values for one league format."""
+    """An indexed snapshot of FantasyCalc values for one league format.
 
-    def __init__(self, assets: List[Asset]) -> None:
+    `secondary_top` is KTC's most valuable asset in the same format/TEP (an input to
+    KTC's trade adjustment); it defaults to the largest KTC value in the book. The
+    fetch metadata (`format`, `fetched_at`, `secondary_fetched_at`,
+    `secondary_version`, `secondary_html`) lets `ff trade` say where its numbers
+    came from and check the KTC calculator code for drift."""
+
+    def __init__(self, assets: List[Asset], *, secondary_top: Optional[int] = None,
+                 fmt: Optional[Format] = None, fetched_at: Optional[float] = None,
+                 secondary_fetched_at: Optional[float] = None,
+                 secondary_version: Optional[str] = None, secondary_html: str = "") -> None:
         self.assets = assets
+        if secondary_top is None:
+            priced = [a.secondary_value for a in assets if a.secondary_value is not None]
+            secondary_top = max(priced) if priced else None
+        self.secondary_top = secondary_top
+        self.format = fmt
+        self.fetched_at = fetched_at
+        self.secondary_fetched_at = secondary_fetched_at
+        self.secondary_version = secondary_version
+        self.secondary_html = secondary_html
         self.by_sleeper_id: Dict[str, Asset] = {}
         self.by_name: Dict[str, Asset] = {}
         self.by_surname: Dict[str, List[Asset]] = {}
@@ -195,14 +218,39 @@ class ValuesClient:
         fmt: Format,
         include_secondary: bool = True,
         include_ktc: bool = True,
+        fresh: bool = False,
     ) -> ValueBook:
-        data = get_json(self.url, params=fmt.fantasycalc_params(), ttl=VALUES_TTL)
+        """`fresh` fetches both markets live (and refreshes the cache) instead of
+        using a copy up to VALUES_TTL old; `ff trade` uses it so its numbers match
+        what the sites show right now."""
+        params = fmt.fantasycalc_params()
+        data = get_json(self.url, params=params, ttl=0 if fresh else VALUES_TTL)
+        try:
+            fetched_at: Optional[float] = _cache_file(self.url, params).stat().st_mtime
+        except OSError:
+            fetched_at = time.time()
         secondary_map: Dict[str, int] = {}
         should_include = include_secondary and include_ktc
         if should_include:
             try:
-                secondary_map = self.ktc_client.fetch_values(fmt) or {}
+                secondary_map = self.ktc_client.fetch_values(fmt, fresh=fresh) or {}
             except Exception:
                 secondary_map = {}
-        return ValueBook([_asset_from_entry(e, secondary_map=secondary_map) for e in (data if isinstance(data, list) else [])])
+
+        def meta(attr: str, kind: type) -> object:
+            v = getattr(self.ktc_client, attr, None) if should_include else None
+            return v if isinstance(v, kind) else None
+
+        approx = meta("last_approx_keys", set) or set()
+        assets = [_asset_from_entry(e, secondary_map=secondary_map, approx_keys=approx)  # type: ignore[arg-type]
+                  for e in (data if isinstance(data, list) else [])]
+        return ValueBook(
+            assets,
+            secondary_top=meta("last_top", int) if secondary_map else None,  # type: ignore[arg-type]
+            fmt=fmt,
+            fetched_at=fetched_at,
+            secondary_fetched_at=meta("last_fetched_at", float),  # type: ignore[arg-type]
+            secondary_version=meta("last_version", str),  # type: ignore[arg-type]
+            secondary_html=(meta("last_html", str) or "") if secondary_map else "",  # type: ignore[arg-type]
+        )
 

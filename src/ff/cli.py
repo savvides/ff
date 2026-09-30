@@ -19,6 +19,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime
 from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple
 
 import requests
@@ -34,6 +35,7 @@ from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
     analyze_trade,
+    offer_verdict,
     audit_roster,
     available,
     detect_status,
@@ -64,6 +66,7 @@ from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
 from ff.services.weekly import load_weekly
 from ff.sleeper import SleeperClient, build_rosters, detect_format, player_name
 from ff.values import ValueBook, ValuesClient, normalize_name
+from ff.values.calculators_live import check_calculators
 
 app = typer.Typer(add_completion=False, help="Manage a Sleeper dynasty league with free data.")
 config_app = typer.Typer(help="Manage configuration settings.")
@@ -104,11 +107,13 @@ def _load() -> Tuple[Config, SleeperClient]:
     return load_config(), SleeperClient()
 
 
-def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True) -> ValueBook:
+def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True,
+          fresh: bool = False) -> ValueBook:
     client = ValuesClient()
     should_include = include_secondary and include_ktc
+    kwargs = {"fresh": True} if fresh else {}
     try:
-        return client.fetch(cfg.format, include_secondary=should_include)
+        return client.fetch(cfg.format, include_secondary=should_include, **kwargs)
     except TypeError:
         return client.fetch(cfg.format, include_ktc=should_include)
 
@@ -284,6 +289,48 @@ _KTC_DOWN = "KeepTradeCut values are unavailable right now"
 
 def _has_ktc(book: ValueBook) -> bool:
     return any(a.secondary_value is not None for a in book.assets)
+
+
+def _ktc_site_verdict(evaluation: Any) -> str:
+    """KTC's own verdict wording: 'Fair Trade', or who it favors, on its measure (the
+    gap as a share of both sides, fair at 5% or less)."""
+    site_pct = evaluation.secondary_site_pct or 0.0
+    larger = evaluation.secondary_pct_diff or 0.0
+    if evaluation.secondary_is_fair():
+        return f"[bold yellow]Fair Trade[/] ({site_pct:.1f}% of both sides)"
+    who = "you" if (evaluation.secondary_delta or 0) > 0 else "them"
+    color = "green" if who == "you" else "red"
+    return (f"[bold {color}]favors {who}[/] by {abs(evaluation.secondary_delta or 0):,} "
+            f"({larger:.1f}% of the larger side; {site_pct:.1f}% of both)")
+
+
+def _print_offer_rule(evaluation: Any, book: ValueBook) -> None:
+    """The offer rule on site-matching numbers, or why it cannot be judged."""
+    problems = check_calculators(book.secondary_html)
+    v = offer_verdict(evaluation, calculator_problems=problems)
+    rule = f"under {v.threshold_pct:g}% in FantasyCalc and KTC, and KTC says Fair"
+    if v.status == "CANNOT_JUDGE":
+        console.print(f"[bold yellow]offer rule: cannot judge[/] ({rule}): " + "; ".join(v.reasons))
+    else:
+        mark = "[bold green]PASS[/]" if v.passes else "[bold red]FAIL[/]"
+        console.print(f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%, KTC {v.ktc_pct:.2f}%, "
+                      f"KTC site {'Fair' if v.ktc_site_fair else 'Favors one side'}")
+    for note in v.approximations:
+        console.print(f"[dim]  note: {note}[/]")
+
+
+def _print_provenance(book: ValueBook, cfg: Config, include_secondary: bool) -> None:
+    """Where the numbers came from, so nobody has to go check the sites."""
+    def at(ts: Optional[float]) -> str:
+        return datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "?"
+    fmt = cfg.format
+    fc_tep = fmt.fantasycalc_tep()
+    parts = [f"FantasyCalc {at(book.fetched_at)} ({fmt.label()}" + (f", tep={fc_tep}" if fc_tep else "") + ")"]
+    if include_secondary and book.secondary_top:
+        tier = ["", " TE+", " TE++"][fmt.ktc_tep_tier()]
+        parts.append(f"KTC {at(book.secondary_fetched_at)} ({'SF' if fmt.superflex else '1QB'}{tier}, "
+                     f"top {book.secondary_top:,})")
+    console.print("[dim]values: " + " | ".join(parts) + "[/]")
 
 
 def _ktc_missing(book: ValueBook) -> str:
@@ -625,7 +672,8 @@ def trade(
 
     cfg, sc = _load()
     include_secondary = market != "fc"
-    book = _book(cfg, include_secondary=include_secondary)
+    # Live values for both markets: a verdict should match what the sites show now.
+    book = _book(cfg, include_secondary=include_secondary, fresh=True)
     give_tokens = [t for t in give.split(",") if t.strip()]
     get_tokens = [t for t in get.split(",") if t.strip()]
     # Surface any non-exact (fuzzy/surname) match so a substitution is never silent.
@@ -653,39 +701,46 @@ def trade(
     )
     dual_market = market == "both" and has_secondary
 
-    t = Table(title="trade")
-    if dual_market:
-        for c in ("side", "assets", "FC", "KTC"):
-            t.add_column(c, justify="right" if c in ("FC", "KTC") else "left")
-        t.add_row("[green]You get[/]",
-                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
-                  f"[bold]{evaluation.value_a:,}[/]",
-                  f"[bold]{evaluation.secondary_value_a:,}[/]")
-        t.add_row("[red]You give[/]",
-                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
-                  f"[bold]{evaluation.value_b:,}[/]",
-                  f"[bold]{evaluation.secondary_value_b:,}[/]")
-    elif market in ("dealer", "ktc") and has_secondary:
-        for c in ("side", "assets", "KTC"):
-            t.add_column(c, justify="right" if c == "KTC" else "left")
-        t.add_row("[green]You get[/]",
-                  ", ".join(_fmt_trade_asset(a, a.secondary_value) for a in evaluation.side_a.assets) or "-",
-                  f"[bold]{evaluation.secondary_value_a:,}[/]")
-        t.add_row("[red]You give[/]",
-                  ", ".join(_fmt_trade_asset(a, a.secondary_value) for a in evaluation.side_b.assets) or "-",
-                  f"[bold]{evaluation.secondary_value_b:,}[/]")
-    else:
-        for c in ("side", "assets", "value"):
-            t.add_column(c, justify="right" if c == "value" else "left")
-        t.add_row("[green]You get[/]",
-                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_a.assets) or "-",
-                  f"[bold]{evaluation.value_a:,}[/]")
-        t.add_row("[red]You give[/]",
-                  ", ".join(_fmt_trade_asset(a, a.value) for a in evaluation.side_b.assets) or "-",
-                  f"[bold]{evaluation.value_b:,}[/]")
-    console.print(t)
+    show_fc = market in ("fc", "both")
+    show_ktc = market != "fc" and has_secondary
+    table = Table(title="trade")
+    table.add_column("side")
+    table.add_column("assets")
+    if show_fc:
+        table.add_column("FC", justify="right")
+    if show_ktc:
+        table.add_column("KTC", justify="right")
+    for label, style, side, total, sec_total, raw, sec_raw in (
+            ("You get", "green", evaluation.side_a, evaluation.value_a, evaluation.secondary_value_a,
+             evaluation.raw_value_a, evaluation.raw_secondary_value_a),
+            ("You give", "red", evaluation.side_b, evaluation.value_b, evaluation.secondary_value_b,
+             evaluation.raw_value_b, evaluation.raw_secondary_value_b)):
+        cells = [f"[{style}]{label}[/]", ", ".join(
+            _fmt_trade_asset(x, x.value if show_fc else x.secondary_value) for x in side.assets) or "-"]
+        if show_fc:
+            cells.append(f"{raw:,}")
+        if show_ktc:
+            cells.append(f"{sec_raw:,}" if sec_raw is not None else "-")
+        table.add_row(*cells)
+        fc_adj = side.adjustment if show_fc else None
+        ktc_adj = side.secondary_adjustment if show_ktc else None
+        if fc_adj or ktc_adj:
+            adj = ["", "[dim]+ site package adjustment[/]"]
+            tot = ["", "[bold]= site total[/]"]
+            if show_fc:
+                adj.append(f"+{fc_adj:,}" if fc_adj else "")
+                tot.append(f"[bold]{total:,}[/]")
+            if show_ktc:
+                adj.append(f"{ktc_adj:+,}" if ktc_adj else "")
+                tot.append(f"[bold]{sec_total:,}[/]" if sec_total is not None else "-")
+            table.add_row(*adj)
+            table.add_row(*tot)
+    console.print(table)
     if market != "fc" and not has_secondary:
         console.print(f"[yellow]{_ktc_missing(book)}[/]")
+    if show_ktc and evaluation.secondary_hidden:
+        console.print("[dim]KTC counts its value adjustment in the verdict but hides it on its "
+                      "page, where the team totals show the raw sums.[/]")
 
     if dual_market:
         net_fc = evaluation.delta
@@ -698,13 +753,7 @@ def trade(
             verdict_fc = f"[bold red]you lose[/] by {_signed(net_fc)} ({pct_fc:.0f}%)"
 
         sec_net = evaluation.secondary_delta or 0
-        sec_pct = evaluation.secondary_pct_diff or 0.0
-        if sec_pct <= 5.0:
-            verdict_sec = f"[bold yellow]fair[/] - within {sec_pct:.0f}%"
-        elif sec_net > 0:
-            verdict_sec = f"[bold green]you win[/] by {_signed(sec_net)} ({sec_pct:.0f}%)"
-        else:
-            verdict_sec = f"[bold red]you lose[/] by {_signed(sec_net)} ({sec_pct:.0f}%)"
+        verdict_sec = _ktc_site_verdict(evaluation)
 
         arb_label = evaluation.secondary_arbitrage_label()
         banner_lines = [
@@ -720,15 +769,9 @@ def trade(
         ))
     elif market in ("dealer", "ktc") and has_secondary:
         net = evaluation.secondary_delta or 0
-        pct = evaluation.secondary_pct_diff or 0.0
-        if pct <= 5.0:
-            verdict = f"[bold yellow]fair[/] - within {pct:.0f}%"
-        elif net > 0:
-            verdict = f"[bold green]you win[/] by {_signed(net)} ({pct:.0f}%)"
-        else:
-            verdict = f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
         console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {verdict}", title="verdict (KTC)"))
+            f"net {_signed(net)} value to you   |   {_ktc_site_verdict(evaluation)}",
+            title="verdict (KTC)"))
     else:
         net = evaluation.delta  # >0 = in your favor
         pct = evaluation.pct_diff
@@ -741,6 +784,12 @@ def trade(
         console.print(Panel.fit(
             f"net {_signed(net)} value to you   |   {verdict}", title="verdict"))
 
+    if market == "both":
+        _print_offer_rule(evaluation, book)
+    else:
+        console.print("[dim]offer rule: needs both markets - run without --market to judge it.[/]")
+    _print_provenance(book, cfg, include_secondary)
+
     if market in ("dealer", "ktc") and has_secondary:
         deltas = secondary_position_deltas(evaluation)
     else:
@@ -749,7 +798,7 @@ def trade(
         line = "   ".join(f"{p} {_signed(v)}" for p, v in
                           sorted(deltas.items(), key=lambda x: abs(x[1]), reverse=True) if v)
         if line:
-            console.print(f"[dim]positional swing:[/] {line}")
+            console.print(f"[dim]positional swing (raw, before package adjustments):[/] {line}")
     for tok, name in subs:
         console.print(f"[dim]matched '{tok}' -> {name}[/]")
     if unresolved:
@@ -1379,7 +1428,9 @@ def draft(
     right = ("fit#", "mkt#", "FitScore", "value", "30d", "posrk")
     for c in ("fit#", "player", "pos", "posrk", "mkt#", "FitScore", "value", "30d", "why"):
         at.add_column(c, justify="right" if c in right else "left")
-    tep_on = cfg.format.tep > 0
+    # FantasyCalc prices TE premium only as te+/te++; flag TEs when the league's
+    # premium is one it cannot express (e.g. +0.25), so the gap stays visible.
+    tep_on = cfg.format.tep > 0 and cfg.format.fantasycalc_tep() is None
     for i, f in enumerate(fits, 1):
         a = f.asset
         pos = (a.position or "-") + ("*" if tep_on and a.position == "TE" else "")
@@ -1389,9 +1440,9 @@ def draft(
                    _signed(a.trend_30day) if a.trend_30day else "-", f.why)
     console.print(at)
     if tep_on:
-        console.print(f"[dim]* TE value runs conservative: FantasyCalc has no TEP "
-                      f"param, but your league scores +{cfg.format.tep:g} TEP, so TEs "
-                      f"are worth a bit more than shown.[/]")
+        console.print(f"[dim]* TE value runs conservative: FantasyCalc's TE premium "
+                      f"starts at +0.5, but your league scores +{cfg.format.tep:g} TEP, "
+                      f"so TEs are worth a bit more than shown.[/]")
     console.print("[dim]FitScore = market value adjusted for YOUR roster fit + "
                   "win-now/rebuild horizon. mkt# is the raw dynasty-value rank. "
                   "The pick call is yours.[/]")
