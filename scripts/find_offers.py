@@ -117,6 +117,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "round 1, each worth no more than what you sell)")
     ap.add_argument("--max-age", type=float, default=26, help="oldest player you would take back")
     ap.add_argument("--limit", type=int, default=5)
+    ap.add_argument("--years", type=int, default=3,
+                    help="future draft years whose picks can be traded (both sites price three)")
     args = ap.parse_args(argv)
 
     cfg = load_config()
@@ -129,7 +131,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rosters = build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
     league = sc.league(cfg.league_id) or {}
     ranks = {v.roster_id: v.power_rank for v in value_all_rosters(rosters, book, sc.players())}
-    seasons, rounds = _pick_window(sc, cfg, league)
+    seasons, rounds = _pick_window(sc, cfg, league, years=args.years)
     ledger = {tp.roster_id: tp.picks for tp in pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
                                                            ranks, seasons=seasons, rounds=rounds)}
     names = _usernames(cfg.league_id)
