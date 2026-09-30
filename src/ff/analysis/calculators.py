@@ -292,25 +292,11 @@ def ktc_adjustment(side1: Sequence[int], side2: Sequence[int], top: int,
     return KtcAdjustment(adj1=adj1, adj2=adj2, side=side, shown=shown)
 
 
-def ktc_site_pct(total1: float, total2: float) -> float:
-    """KTC's verdict percentage: |t-r| / (t+r) * 100 on the adjusted totals, each
-    clamped at 0 (evaluateTrade). A share of the COMBINED total, not the larger side."""
-    t = _max(0, total1)
-    r = _max(0, total2)
-    return _min(100, _div(abs(t - r), t + r) * 100)
-
-
-def ktc_site_fair(total1: float, total2: float, variance: int = KTC_VARIANCE) -> bool:
-    """KTC's "Fair Trade" verdict: the percentage rounded to 0.1 is at most `variance`."""
-    return not (js_round(10 * ktc_site_pct(total1, total2)) / 10 > variance)
-
-
 # --- site-code fingerprints (drift detection) ---------------------------------
 
-# Verified against the live bundles (scripts/calculator_oracle.mjs) on the date below. The bundle names
+# Verified against the live bundles (scripts/calculator_oracle.mjs) on 2026-09-30. The bundle names
 # are content-hashed, so an unchanged name means unchanged code.
 FINGERPRINTS: Dict[str, Dict[str, Any]] = {
-    "verified": {"date": "2026-09-30"},
     "fc": {
         "main": "main-QU22HJEG.js",
         "chunk": "chunk-F4CNOEUX.js",
@@ -338,10 +324,6 @@ FINGERPRINTS: Dict[str, Dict[str, Any]] = {
         },
     },
 }
-
-FC_FUNCTIONS = ("getValueAdjustment", "updateWaiverAdjustments", "calculate")
-KTC_FUNCTIONS = ("adjustPackageNew", "processVNew", "reverseAdjustNew", "solveForX",
-                 "checkEquality", "evaluateTrade", "updateSingleDynastyAsset", "processTeam")
 
 _TOKEN = re.compile(
     r'"(?:\\.|[^"\\])*"'  # double-quoted string
@@ -418,8 +400,11 @@ def normalized_hash(source: str) -> str:
 def function_hashes(js: str, functions: Sequence[str]) -> Dict[str, str]:
     """Normalized hash per function name (all definitions concatenated); '' when
     the function is gone from the bundle."""
-    return {fn: normalized_hash("".join(extract_functions(js, fn))) if extract_functions(js, fn) else ""
-            for fn in functions}
+    out: Dict[str, str] = {}
+    for fn in functions:
+        defs = extract_functions(js, fn)
+        out[fn] = normalized_hash("".join(defs)) if defs else ""
+    return out
 
 
 def fc_constants(chunk_js: str) -> Optional[Dict[str, float]]:
@@ -453,19 +438,15 @@ def fingerprint_problems(site: str, bundle_js: str) -> List[str]:
     ('fc' chunk or 'ktc' site.min.js). Empty list = the ported math still applies."""
     fp = FINGERPRINTS[site]
     label = "FantasyCalc" if site == "fc" else "KTC"
-    live_consts: Dict[str, Optional[float]]
-    if site == "fc":
-        live_consts = dict(fc_constants(bundle_js) or {})
-        live = function_hashes(bundle_js, FC_FUNCTIONS)
-    else:
-        live_consts = ktc_constants(bundle_js)
-        live = function_hashes(bundle_js, KTC_FUNCTIONS)
+    live_consts: Dict[str, Optional[float]] = (dict(fc_constants(bundle_js) or {}) if site == "fc"
+                                                else ktc_constants(bundle_js))
+    hashes: Dict[str, str] = fp["hashes"]
+    live = function_hashes(bundle_js, list(hashes))
     expected: Dict[str, float] = fp["constants"]
     problems: List[str] = []
     if any(live_consts.get(k) is None or float(live_consts[k] or 0) != float(v)
            for k, v in expected.items()):
         problems.append(f"{label} calculator constants changed: {live_consts}")
-    hashes: Dict[str, str] = fp["hashes"]
     for fn, h in hashes.items():
         if live.get(fn) != h:
             problems.append(f"{label} {fn}() changed")

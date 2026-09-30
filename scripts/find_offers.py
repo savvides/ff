@@ -26,15 +26,13 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
 import sys
-import urllib.request
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
-from ff.analysis.fit import positional_standing, starting_assets
+from ff.analysis.fit import positional_standing, startable_value, starting_assets
 from ff.cli import _pick_window
-from ff.contracts import Asset, OfferVerdict, TradeEvaluation, TradeSide
+from ff.contracts import Asset, FuturePick, OfferVerdict, TradeEvaluation, TradeSide
 from ff.core.config import load_config
 from ff.sleeper import SleeperClient, build_rosters
 from ff.values import ValueBook, ValuesClient
@@ -64,9 +62,8 @@ def roles(get: Sequence[Asset], give: Sequence[Asset], my_players: Sequence[Asse
     """What each incoming piece does for you, and the change in your starting
     lineup's value (scored like the draft board, `fit.starting_assets`)."""
     give_ids = {a.id for a in give}
-    before = [a for a in my_players]
     after = [a for a in my_players if a.id not in give_ids] + [a for a in get if not a.is_pick]
-    base = sum(a.value for _, a in starting_assets(before, list(roster_positions)))
+    base, _ = startable_value(list(my_players), list(roster_positions))
     new_start = starting_assets(after, list(roster_positions))
     slot_of = {a.id: slot for slot, a in new_start}
     out: Dict[str, str] = {}
@@ -126,7 +123,6 @@ def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[A
                 "fc_totals": (ev.value_b, ev.value_a), "ktc_totals": (ev.secondary_value_b, ev.secondary_value_a),
                 "net_youth": sum(a.value for a in helps) - sum(a.value for a in give if _young(a)),
                 "their_winnow": sum(a.redraft_value or 0 for a in give) - sum(a.redraft_value or 0 for a in get),
-                "notes": verdict.approximations,
             })
     rows.sort(key=lambda r: (-int(r["net_youth"]), -int(r["lineup_gain"]),  # type: ignore[call-overload]
                              -int(r["their_winnow"]),  # type: ignore[call-overload]
@@ -134,34 +130,25 @@ def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[A
     return rows[:limit]
 
 
-def _usernames(league_id: str) -> Dict[str, str]:
-    def get(url: str) -> object:
-        return json.load(urllib.request.urlopen(url, timeout=30))
-    out = {}
-    for u in get(f"https://api.sleeper.app/v1/league/{league_id}/users"):  # type: ignore[union-attr]
-        full = get(f"https://api.sleeper.app/v1/user/{u['user_id']}")
-        out[u["user_id"]] = full.get("username") or u.get("display_name")  # type: ignore[union-attr]
-    return out
-
-
-def _roster_assets(book: ValueBook, player_ids: Sequence[str], picks: Sequence[object],
+def _roster_assets(book: ValueBook, players: Sequence[Asset], picks: Sequence[FuturePick],
                    tier_of: Callable[[int], str], origin_of: Callable[[int], str],
                    origins: Dict[str, str]) -> List[Asset]:
-    """A roster's priced players plus the picks it owns. Each pick is priced at the
-    tier ff projects from its ORIGINAL team's power rank (as `ff picks` does), on
-    both sites, so KTC's number is its value for that exact Early/Mid/Late pick.
+    """A roster's priced players (its valuation's assets) plus the picks it owns.
+    Each pick is priced at the tier ff projects from its ORIGINAL team's power rank
+    (as `ff picks` does), on both sites, so KTC's number is its value for that exact
+    Early/Mid/Late pick.
     A second pick at the same tier is named "#2" (and so on); `origins` records
     whose pick each name is, so an offer says which one to ask for."""
-    assets = [a for a in (book.value_for_sleeper_id(p) for p in player_ids) if a is not None]
+    assets = list(players)
     for p in picks:
-        pick = book.pick_at_tier(p.season, p.round, tier_of(p.original_roster_id))  # type: ignore[attr-defined]
+        pick = book.pick_at_tier(p.season, p.round, tier_of(p.original_roster_id))
         if pick is None:
             continue
         base, n = pick.name, 1
         while pick.name in origins:
             n += 1
             pick.name = f"{base} #{n}"
-        origins[pick.name] = origin_of(p.original_roster_id)  # type: ignore[attr-defined]
+        origins[pick.name] = origin_of(p.original_roster_id)
         assets.append(pick)
     return [a for a in assets if a.secondary_value is not None and a.value > 0]
 
@@ -186,27 +173,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if problems:
         print("cannot judge any offer: " + "; ".join(problems))
         return 1
-    rosters = build_rosters(sc.rosters(cfg.league_id), sc.league_users(cfg.league_id))
+    users = sc.league_users(cfg.league_id)
+    rosters = build_rosters(sc.rosters(cfg.league_id), users)
     league = sc.league(cfg.league_id) or {}
     meta = sc.players()
-    valuations = value_all_rosters(rosters, book, meta)
+    valuations = value_all_rosters(rosters, book, meta)  # players priced, with injury/depth status
+    val_of = {v.roster_id: v for v in valuations}
     ranks = {v.roster_id: v.power_rank for v in valuations}
     roster_positions = league.get("roster_positions") or []
     seasons, rounds = _pick_window(sc, cfg, league, years=args.years)
     ledger = {tp.roster_id: tp.picks for tp in pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
                                                            ranks, seasons=seasons, rounds=rounds)}
-    names = _usernames(cfg.league_id)
+    # League users carry display names only; the username is on each user record.
+    names = {u["user_id"]: (sc.user(u["user_id"]) or {}).get("username") or u.get("display_name")
+             for u in users}
     user_of = {r.roster_id: names.get(r.owner_id or "", f"roster {r.roster_id}") for r in rosters}
 
     def tier_of(original_roster_id: int) -> str:
         return pick_tier(ranks.get(original_roster_id), len(rosters))
 
     mine = next(r for r in rosters if r.owner_id == cfg.user_id)
-    my_val = next(v for v in valuations if v.roster_id == mine.roster_id)
-    needs = {s.position for s in positional_standing(my_val, valuations, roster_positions) if s.gap < 0}
+    my_val = val_of[mine.roster_id]
+    needs = {s.position for s in positional_standing(my_val, valuations, roster_positions) if s.is_hole}
     dropped = {str(t.get("player_id")) for t in sc.trending(kind="drop", limit=50)}
     my_origins: Dict[str, str] = {}
-    my_assets = _roster_assets(book, mine.player_ids, ledger.get(mine.roster_id, []), tier_of,
+    my_assets = _roster_assets(book, my_val.assets, ledger.get(mine.roster_id, []), tier_of,
                                lambda rid: "your own" if rid == mine.roster_id else f"from {user_of[rid]}",
                                my_origins)
 
@@ -234,16 +225,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             (not a.is_pick and (a.age or 0) >= 27) or (a.is_pick and a.id.split()[1] not in ("1", "pick")))]
     balancers = list({a.id: a for a in balancers}.values())
 
-    def with_status(assets: List[Asset]) -> List[Asset]:
-        out = []
-        for a in assets:
-            a = a.model_copy()
-            if not a.is_pick:
-                a.fill_from_meta(meta.get(a.id))
-            out.append(a)
-        return out
-
-    my_players = [a for a in with_status(my_assets) if not a.is_pick]
+    my_players = [a for a in my_assets if not a.is_pick]
     print(f"values live: FantasyCalc + KTC (top {book.secondary_top:,}); calculators verified; "
           f"rule: under 10% in both markets and KTC says Fair; your needs: "
           f"{', '.join(sorted(needs)) or 'none below the league median'}")
@@ -253,10 +235,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\nno manager named {username}")
             continue
         their_origins: Dict[str, str] = {}
-        theirs = with_status(_roster_assets(
-            book, roster.player_ids, ledger.get(roster.roster_id, []), tier_of,
+        theirs = _roster_assets(
+            book, val_of[roster.roster_id].assets, ledger.get(roster.roster_id, []), tier_of,
             lambda rid, r=roster: "their own" if rid == r.roster_id else f"theirs, from {user_of[rid]}",
-            their_origins))
+            their_origins)
         rows = search(sale, theirs, balancers, top=book.secondary_top,
                       is_dynasty=cfg.format.is_dynasty, max_age=args.max_age, limit=args.limit,
                       my_players=my_players, roster_positions=roster_positions, needs=needs,
@@ -277,8 +259,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]  # type: ignore[union-attr]
             if picks:
                 print("      picks: " + "; ".join(picks) + " (tier projected from the original team's power rank)")
-            for n in r["notes"]:  # type: ignore[union-attr]
-                print(f"      note: {n}")
     return 0
 
 

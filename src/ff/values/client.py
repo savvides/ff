@@ -58,7 +58,6 @@ def _asset_from_entry(
                     break
         if sec_key is not None:
             sec_val = sec_map[sec_key]
-    sec_source = None if sec_key is None else ("approx" if sec_key in (approx_keys or set()) else "exact")
 
     return Asset(
         id=ident,
@@ -69,7 +68,7 @@ def _asset_from_entry(
         age=p.get("maybeAge"),
         value=int(entry.get("value", 0) or 0),
         secondary_value=sec_val,
-        secondary_source=sec_source,
+        secondary_approx=sec_key in (approx_keys or set()),
         overall_rank=entry.get("overallRank"),
         position_rank=entry.get("positionRank"),
         trend_30day=entry.get("trend30Day"),
@@ -83,14 +82,13 @@ class ValueBook:
 
     `secondary_top` is KTC's most valuable asset in the same format/TEP (an input to
     KTC's trade adjustment); it defaults to the largest KTC value in the book. The
-    fetch metadata (`format`, `fetched_at`, `secondary_fetched_at`,
-    `secondary_version`, `secondary_html`) lets `ff trade` say where its numbers
-    came from and check the KTC calculator code for drift."""
+    fetch metadata (`format`, `fetched_at`, `secondary_fetched_at`, `secondary_html`)
+    lets `ff trade` say where its numbers came from and check the KTC calculator
+    code for drift."""
 
     def __init__(self, assets: List[Asset], *, secondary_top: Optional[int] = None,
                  fmt: Optional[Format] = None, fetched_at: Optional[float] = None,
-                 secondary_fetched_at: Optional[float] = None,
-                 secondary_version: Optional[str] = None, secondary_html: str = "",
+                 secondary_fetched_at: Optional[float] = None, secondary_html: str = "",
                  secondary_map: Optional[Dict[str, int]] = None) -> None:
         self.assets = assets
         # KTC's own values by key, so a pick can be priced at the tier a trade names
@@ -103,7 +101,6 @@ class ValueBook:
         self.format = fmt
         self.fetched_at = fetched_at
         self.secondary_fetched_at = secondary_fetched_at
-        self.secondary_version = secondary_version
         self.secondary_html = secondary_html
         self.by_sleeper_id: Dict[str, Asset] = {}
         self.by_name: Dict[str, Asset] = {}
@@ -137,9 +134,8 @@ class ValueBook:
         ordinal = {1: "1st", 2: "2nd", 3: "3rd"}.get(round_, f"{round_}th")
         out = fc.model_copy()
         out.name = f"{season} {ordinal} ({tier.capitalize()})"
-        ktc = self.secondary_map.get(f"{season} {round_} {tier}")
-        out.secondary_value = ktc
-        out.secondary_source = "exact" if ktc is not None else None
+        out.secondary_value = self.secondary_map.get(f"{season} {round_} {tier}")
+        out.secondary_approx = False
         return out
 
     def value_for_sleeper_id(self, sleeper_id: str) -> Optional[Asset]:
@@ -162,16 +158,16 @@ class ValueBook:
             if m and f"{m.group(1)} {m.group(2)}" in self.picks:
                 return self.picks[f"{m.group(1)} {m.group(2)}"]
             # tier fallback both ways: a tiered ask without a tiered entry drops
-            # to the flat round value; a flat ask with only tiered entries takes
-            # mid, the neutral assumption when the slot is unknown. That Mid is a
-            # guess, so its KTC price is flagged as a stand-in, never an exact match.
-            m = re.match(r"(20\d{2} [1-9]) (?:early|mid|late)$", pk)
-            if m and m.group(1) in self.picks:
-                return self.picks[m.group(1)]
+            # to the flat round value on FantasyCalc and is that exact tier on KTC;
+            # a flat ask with only tiered entries takes mid, the neutral assumption
+            # when the slot is unknown. That Mid is a guess, so its KTC price is
+            # flagged as a stand-in, never an exact match.
+            m = re.match(r"(20\d{2}) ([1-9]) (early|mid|late)$", pk)
+            if m:
+                return self.pick_at_tier(m.group(1), int(m.group(2)), m.group(3))
             if f"{pk} mid" in self.picks:
                 mid = self.picks[f"{pk} mid"].model_copy()
-                if mid.secondary_value is not None:
-                    mid.secondary_source = "approx"
+                mid.secondary_approx = mid.secondary_value is not None
                 return mid
             return None
 
@@ -273,7 +269,6 @@ class ValuesClient:
             fmt=fmt,
             fetched_at=fetched_at,
             secondary_fetched_at=meta("last_fetched_at", float),  # type: ignore[arg-type]
-            secondary_version=meta("last_version", str),  # type: ignore[arg-type]
             secondary_html=(meta("last_html", str) or "") if secondary_map else "",  # type: ignore[arg-type]
             secondary_map=secondary_map,
         )

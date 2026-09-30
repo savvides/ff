@@ -48,19 +48,19 @@ def test_a_raw_even_two_for_one_fails_once_the_sites_adjust_it():
 
 
 def test_ledger_picks_are_priced_at_their_projected_tier_and_labeled_by_origin():
-    from types import SimpleNamespace
+    from ff.contracts import FuturePick
     from ff.values import ValueBook
     flat = Asset(id="2028 4", name="2028 4th", kind="pick", position="PICK", value=800,
-                 secondary_value=1600, secondary_source="approx")
+                 secondary_value=1600, secondary_approx=True)
     book = ValueBook([flat], secondary_top=9999,
                      secondary_map={"2028 4 early": 1900, "2028 4 mid": 1600, "2028 4 late": 1300})
-    picks = [SimpleNamespace(season="2028", round=4, original_roster_id=7),
-             SimpleNamespace(season="2028", round=4, original_roster_id=8)]  # both project Late
+    picks = [FuturePick(season="2028", round=4, original_roster_id=7),
+             FuturePick(season="2028", round=4, original_roster_id=8)]  # both project Late
     origins = {}
     assets = find_offers._roster_assets(book, [], picks, lambda rid: "late",
                                         lambda rid: f"from roster {rid}", origins)
-    assert [(a.name, a.value, a.secondary_value, a.secondary_source) for a in assets] == [
-        ("2028 4th (Late)", 800, 1300, "exact"), ("2028 4th (Late) #2", 800, 1300, "exact")]
+    assert [(a.name, a.value, a.secondary_value, a.secondary_approx) for a in assets] == [
+        ("2028 4th (Late)", 800, 1300, False), ("2028 4th (Late) #2", 800, 1300, False)]
     assert origins == {"2028 4th (Late)": "from roster 7", "2028 4th (Late) #2": "from roster 8"}
 
 

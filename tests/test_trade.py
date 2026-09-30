@@ -187,7 +187,7 @@ def _pick_book():
     # FantasyCalc has only a flat 2028 1st; KTC prices Early/Mid/Late, and ff's KTC map
     # keeps the Mid value under the generic key as a flagged stand-in.
     pick = Asset(id="2028 1", name="2028 1st", kind="pick", position="PICK", value=2200,
-                 secondary_value=4600, secondary_source="approx")
+                 secondary_value=4600, secondary_approx=True)
     player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=4600)
     return ValueBook([pick, player], secondary_top=9999,
                      secondary_map={"2028 1 early": 5000, "2028 1 mid": 4600, "2028 1": 4600})
@@ -205,8 +205,8 @@ def test_a_named_pick_tier_is_priced_at_that_exact_tier_on_ktc():
     from ff.analysis import offer_verdict
     ev, _ = analyze_trade(["2028 1st (Early)"], ["Some Player"], _pick_book())
     pick = ev.side_a.assets[0]
-    assert (pick.name, pick.value, pick.secondary_value, pick.secondary_source) == (
-        "2028 1st (Early)", 2200, 5000, "exact")
+    assert (pick.name, pick.value, pick.secondary_value, pick.secondary_approx) == (
+        "2028 1st (Early)", 2200, 5000, False)
     assert offer_verdict(ev).status in ("PASS", "FAIL")  # judged, not guessed
 
 
@@ -216,7 +216,7 @@ def test_a_generic_pick_resolved_to_fantasycalcs_mid_tier_cannot_be_judged():
     from ff.analysis import offer_verdict
     from ff.values import ValueBook
     tiers = [Asset(id=f"2027 1 {t}", name=f"2027 1st ({t.capitalize()})", kind="pick", position="PICK",
-                   value=v, secondary_value=v, secondary_source="exact")
+                   value=v, secondary_value=v)
              for t, v in (("early", 2600), ("mid", 2200), ("late", 1800))]
     player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=2200)
     book = ValueBook(tiers + [player], secondary_top=9999,
@@ -225,4 +225,4 @@ def test_a_generic_pick_resolved_to_fantasycalcs_mid_tier_cannot_be_judged():
     verdict = offer_verdict(ev)
     assert verdict.status == "CANNOT_JUDGE"
     assert "name the tier for 2027 1st (Mid)" in verdict.reasons[0]
-    assert book.resolve("2027 1st (Mid)").secondary_source == "exact"  # a named Mid is still judged
+    assert not book.resolve("2027 1st (Mid)").secondary_approx  # a named Mid is still judged

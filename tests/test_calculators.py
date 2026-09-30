@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 
 from ff.analysis import calculators as C
+from ff.contracts import Asset, TradeEvaluation, TradeSide
 
 VECTORS = json.loads((Path(__file__).parent / "fixtures" / "calculator_vectors.json").read_text())
 
@@ -21,6 +22,14 @@ def _same(py, js):
     return py == js
 
 
+def _site_fair(side1, side2, adj1, adj2, variance=C.KTC_VARIANCE):
+    """KTC's "Fair Trade" verdict as ff computes it (TradeEvaluation.secondary_is_fair)."""
+    def side(values, adj):
+        return TradeSide(assets=[Asset(id=str(i), name=str(i), secondary_value=x) for i, x in enumerate(values)],
+                         secondary_adjustment=int(adj))
+    return TradeEvaluation(side_a=side(side1, adj1), side_b=side(side2, adj2)).secondary_is_fair(variance)
+
+
 def _ktc_mismatch(v):
     got = C.ktc_adjustment(v["side1"], v["side2"], v["top"], v["variance"])
     if v["error"]:
@@ -29,10 +38,11 @@ def _ktc_mismatch(v):
         return "no result"
     t1 = sum(v["side1"]) + got.adj1
     t2 = sum(v["side2"]) + got.adj2
+    fair = _site_fair(v["side1"], v["side2"], got.adj1, got.adj2, v["variance"])
     ok = (_same(got.adj1, v["adj1"]) and _same(got.adj2, v["adj2"]) and got.side == v["side"]
-          and got.shown == v["shown"] and C.ktc_site_fair(t1, t2, v["variance"]) == v["fair"]
+          and got.shown == v["shown"] and fair == v["fair"]
           and _same(C._max(0, t1), v["total1"]) and _same(C._max(0, t2), v["total2"]))
-    return None if ok else f"got {got} fair={C.ktc_site_fair(t1, t2, v['variance'])}"
+    return None if ok else f"got {got} fair={fair}"
 
 
 # One test per market (not one per vector) keeps the gate fast; every mismatch is
@@ -55,7 +65,7 @@ def test_the_screenshot_trade():
     assert C.fc_adjustment([1446, 1344], [3068]) == (0, 753)
     ktc = C.ktc_adjustment([2484, 2815], [4736], top=9999)
     assert (ktc.adj1, ktc.adj2, ktc.shown) == (0, 3186, True)
-    assert not C.ktc_site_fair(2484 + 2815, 4736 + 3186)
+    assert not _site_fair([2484, 2815], [4736], 0, 3186)
 
 
 def test_equal_counts_and_empty_sides():
