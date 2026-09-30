@@ -180,3 +180,31 @@ def test_evaluate_trade_string_inputs(book):
     assert eval_res.value_b == 9500
     assert eval_res.delta == 2500
 
+
+
+def _pick_book():
+    from ff.values import ValueBook
+    # FantasyCalc has only a flat 2028 1st; KTC prices Early/Mid/Late, and ff's KTC map
+    # keeps the Mid value under the generic key as a flagged stand-in.
+    pick = Asset(id="2028 1", name="2028 1st", kind="pick", position="PICK", value=2200,
+                 secondary_value=4600, secondary_source="approx")
+    player = Asset(id="p", name="Some Player", position="WR", age=24, value=2200, secondary_value=4600)
+    return ValueBook([pick, player], secondary_top=9999,
+                     secondary_map={"2028 1 early": 5000, "2028 1 mid": 4600, "2028 1": 4600})
+
+
+def test_a_generic_future_pick_cannot_be_judged_on_ktc():
+    from ff.analysis import offer_verdict
+    ev, _ = analyze_trade(["2028 1st"], ["Some Player"], _pick_book())
+    verdict = offer_verdict(ev)
+    assert verdict.status == "CANNOT_JUDGE"
+    assert "name the tier for 2028 1st" in verdict.reasons[0]
+
+
+def test_a_named_pick_tier_is_priced_at_that_exact_tier_on_ktc():
+    from ff.analysis import offer_verdict
+    ev, _ = analyze_trade(["2028 1st (Early)"], ["Some Player"], _pick_book())
+    pick = ev.side_a.assets[0]
+    assert (pick.name, pick.value, pick.secondary_value, pick.secondary_source) == (
+        "2028 1st (Early)", 2200, 5000, "exact")
+    assert offer_verdict(ev).status in ("PASS", "FAIL")  # judged, not guessed

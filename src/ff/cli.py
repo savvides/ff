@@ -701,7 +701,9 @@ def trade(
     )
     dual_market = market == "both" and has_secondary
 
-    show_fc = market in ("fc", "both")
+    # With KTC unable to price the trade, fall back to FantasyCalc's columns so the
+    # table always shows the numbers the verdict below is computed from.
+    show_fc = market in ("fc", "both") or not has_secondary
     show_ktc = market != "fc" and has_secondary
     table = Table(title="trade")
     table.add_column("side")
@@ -781,8 +783,8 @@ def trade(
             verdict = f"[bold green]you win[/] by {_signed(net)} ({pct:.0f}%)"
         else:
             verdict = f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
-        console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {verdict}", title="verdict"))
+        title = "verdict (FantasyCalc - KTC cannot price this)" if market in ("dealer", "ktc") else "verdict"
+        console.print(Panel.fit(f"net {_signed(net)} value to you   |   {verdict}", title=title))
 
     if market == "both":
         _print_offer_rule(evaluation, book)

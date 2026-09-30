@@ -288,6 +288,20 @@ def test_cli_trade_shows_site_adjustments_rule_and_provenance(fake_clients, leag
     assert "values: FantasyCalc" in result.output and "KTC" in result.output
 
 
+def test_cli_trade_ktc_mode_without_ktc_shows_the_fantasycalc_numbers_it_judges(fake_clients, league,
+                                                                              book, monkeypatch):
+    class FantasyCalcOnly:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
+            return book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: FantasyCalcOnly())
+    _write_config(league)
+    result = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "-m", "ktc"])
+    assert result.exit_code == 0, result.output
+    assert "verdict (FantasyCalc - KTC cannot price this)" in result.output
+    assert "FC" in result.output and "8,000" in result.output  # Gibbs' FantasyCalc value is shown
+
+
 def test_cli_trade_cannot_judge_when_a_calculator_changed(fake_clients, league, monkeypatch):
     monkeypatch.setattr("ff.cli.check_calculators", lambda *a, **k: ["KTC adjustPackageNew() changed"])
     _write_config(league)

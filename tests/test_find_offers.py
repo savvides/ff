@@ -45,3 +45,20 @@ def test_a_raw_even_two_for_one_fails_once_the_sites_adjust_it():
     assert verdict.status == "FAIL" and round(verdict.fc_pct, 1) == 20.1
     rows = find_offers.search([SALE], _theirs(), [], top=TOP, limit=50)
     assert ["Half A", "Half B"] not in [r["get"] for r in rows]
+
+
+def test_ledger_picks_are_priced_at_their_projected_tier_and_labeled_by_origin():
+    from types import SimpleNamespace
+    from ff.values import ValueBook
+    flat = Asset(id="2028 4", name="2028 4th", kind="pick", position="PICK", value=800,
+                 secondary_value=1600, secondary_source="approx")
+    book = ValueBook([flat], secondary_top=9999,
+                     secondary_map={"2028 4 early": 1900, "2028 4 mid": 1600, "2028 4 late": 1300})
+    picks = [SimpleNamespace(season="2028", round=4, original_roster_id=7),
+             SimpleNamespace(season="2028", round=4, original_roster_id=8)]  # both project Late
+    origins = {}
+    assets = find_offers._roster_assets(book, [], picks, lambda rid: "late",
+                                        lambda rid: f"from roster {rid}", origins)
+    assert [(a.name, a.value, a.secondary_value, a.secondary_source) for a in assets] == [
+        ("2028 4th (Late)", 800, 1300, "exact")]  # the duplicate collapsed
+    assert origins == {"2028 4th (Late)": "from roster 7"}

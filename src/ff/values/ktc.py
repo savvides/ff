@@ -83,7 +83,8 @@ class KtcClient:
         # Set by fetch_values: the most valuable asset in the chosen format/TEP (the
         # page's playersArray[0].value, an input to KTC's adjustment), the page's
         # site.min.js version, when the page was fetched, and which keys are
-        # approximations (a Mid pick standing in for a generic one, a name alias).
+        # approximations (KTC prices only Early/Mid/Late picks, so a generic
+        # "2028 1st" key holds the Mid value as a stand-in).
         self.last_top: Optional[int] = None
         self.last_version: Optional[str] = None
         self.last_fetched_at: Optional[float] = None
@@ -200,7 +201,6 @@ class KtcClient:
                     values[norm] = val
                     if norm in ALIASES:
                         values[ALIASES[norm]] = val
-                        self.last_approx_keys.add(ALIASES[norm])
                 if sleeper_id is not None:
                     values[str(sleeper_id)] = val
 

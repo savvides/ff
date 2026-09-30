@@ -90,8 +90,12 @@ class ValueBook:
     def __init__(self, assets: List[Asset], *, secondary_top: Optional[int] = None,
                  fmt: Optional[Format] = None, fetched_at: Optional[float] = None,
                  secondary_fetched_at: Optional[float] = None,
-                 secondary_version: Optional[str] = None, secondary_html: str = "") -> None:
+                 secondary_version: Optional[str] = None, secondary_html: str = "",
+                 secondary_map: Optional[Dict[str, int]] = None) -> None:
         self.assets = assets
+        # KTC's own values by key, so a pick can be priced at the tier a trade names
+        # (KTC has Early/Mid/Late for every year; FantasyCalc only near-season).
+        self.secondary_map: Dict[str, int] = dict(secondary_map or {})
         if secondary_top is None:
             priced = [a.secondary_value for a in assets if a.secondary_value is not None]
             secondary_top = max(priced) if priced else None
@@ -123,6 +127,21 @@ class ValueBook:
         self._name_keys = list(self.by_name.keys())
 
     # --- lookups ---------------------------------------------------------
+    def pick_at_tier(self, season: str, round_: int, tier: str) -> Optional[Asset]:
+        """The pick "<season> <round> <tier>" priced as each site prices it: the
+        FantasyCalc tiered entry when it has one (else its flat round value), and
+        KTC's value for that exact tier. None if FantasyCalc has no such round."""
+        fc = self.picks.get(f"{season} {round_} {tier}") or self.picks.get(f"{season} {round_}")
+        if fc is None:
+            return None
+        ordinal = {1: "1st", 2: "2nd", 3: "3rd"}.get(round_, f"{round_}th")
+        out = fc.model_copy()
+        out.name = f"{season} {ordinal} ({tier.capitalize()})"
+        ktc = self.secondary_map.get(f"{season} {round_} {tier}")
+        out.secondary_value = ktc
+        out.secondary_source = "exact" if ktc is not None else None
+        return out
+
     def value_for_sleeper_id(self, sleeper_id: str) -> Optional[Asset]:
         return self.by_sleeper_id.get(str(sleeper_id))
 
@@ -252,5 +271,6 @@ class ValuesClient:
             secondary_fetched_at=meta("last_fetched_at", float),  # type: ignore[arg-type]
             secondary_version=meta("last_version", str),  # type: ignore[arg-type]
             secondary_html=(meta("last_html", str) or "") if secondary_map else "",  # type: ignore[arg-type]
+            secondary_map=secondary_map,
         )
 

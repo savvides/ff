@@ -24,9 +24,9 @@ import itertools
 import json
 import sys
 import urllib.request
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, value_all_rosters
+from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.cli import _pick_window
 from ff.contracts import Asset, OfferVerdict, TradeEvaluation, TradeSide
 from ff.core.config import load_config
@@ -88,12 +88,23 @@ def _usernames(league_id: str) -> Dict[str, str]:
     return out
 
 
-def _roster_assets(book: ValueBook, player_ids: Sequence[str], picks: Sequence[object]) -> List[Asset]:
+def _roster_assets(book: ValueBook, player_ids: Sequence[str], picks: Sequence[object],
+                   tier_of: Callable[[int], str], origin_of: Callable[[int], str],
+                   origins: Dict[str, str]) -> List[Asset]:
+    """A roster's priced players plus the picks it owns. Each pick is priced at the
+    tier ff projects from its ORIGINAL team's power rank (as `ff picks` does), on
+    both sites, so KTC's number is its value for that exact Early/Mid/Late pick.
+    Picks that would price identically collapse to one; `origins` records whose
+    pick each name is, so an offer says which one to ask for."""
     assets = [a for a in (book.value_for_sleeper_id(p) for p in player_ids) if a is not None]
+    seen = set()
     for p in picks:
-        key = f"{p.season} {p.round} {p.tier}" if p.tier else f"{p.season} {p.round}"  # type: ignore[attr-defined]
-        if key in book.picks:
-            assets.append(book.picks[key])
+        pick = book.pick_at_tier(p.season, p.round, tier_of(p.original_roster_id))  # type: ignore[attr-defined]
+        if pick is None or pick.name in seen:
+            continue
+        seen.add(pick.name)
+        origins[pick.name] = origin_of(p.original_roster_id)  # type: ignore[attr-defined]
+        assets.append(pick)
     return [a for a in assets if a.secondary_value is not None and a.value > 0]
 
 
@@ -122,18 +133,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ledger = {tp.roster_id: tp.picks for tp in pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
                                                            ranks, seasons=seasons, rounds=rounds)}
     names = _usernames(cfg.league_id)
+    user_of = {r.roster_id: names.get(r.owner_id or "", f"roster {r.roster_id}") for r in rosters}
+
+    def tier_of(original_roster_id: int) -> str:
+        return pick_tier(ranks.get(original_roster_id), len(rosters))
+
     mine = next(r for r in rosters if r.owner_id == cfg.user_id)
-    my_assets = _roster_assets(book, mine.player_ids, ledger.get(mine.roster_id, []))
+    my_origins: Dict[str, str] = {}
+    my_assets = _roster_assets(book, mine.player_ids, ledger.get(mine.roster_id, []), tier_of,
+                               lambda rid: "your own" if rid == mine.roster_id else f"from {user_of[rid]}",
+                               my_origins)
+
+    def mine_named(tok: str) -> Optional[Asset]:
+        """Your asset for a token, preferring the tier-priced pick over a stand-in."""
+        by_name = next((m for m in my_assets if m.name.lower() == tok.strip().lower()), None)
+        if by_name is not None:
+            return by_name
+        a = book.resolve(tok)
+        return next((m for m in my_assets if a is not None and m.id == a.id), None)
 
     sale = []
     for tok in args.sell:
-        a = book.resolve(tok)
-        if a is None or a.id not in {x.id for x in my_assets}:
+        a = mine_named(tok)
+        if a is None:
             print(f"not on your roster (or unpriced): {tok}")
             return 2
         sale.append(a)
     if args.balancers:
-        balancers = [a for a in (book.resolve(t) for t in args.balancers) if a is not None]
+        balancers = [a for a in (mine_named(t) for t in args.balancers) if a is not None]
     else:
         # A balancer is a small add-on, never a bigger asset than the one being sold.
         cap = sum(a.value for a in sale)
@@ -148,7 +175,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if roster is None:
             print(f"\nno manager named {username}")
             continue
-        theirs = _roster_assets(book, roster.player_ids, ledger.get(roster.roster_id, []))
+        their_origins: Dict[str, str] = {}
+        theirs = _roster_assets(book, roster.player_ids, ledger.get(roster.roster_id, []), tier_of,
+                                lambda rid, r=roster: "their own" if rid == r.roster_id else f"theirs, from {user_of[rid]}",
+                                their_origins)
         rows = search(sale, theirs, balancers, top=book.secondary_top,
                       is_dynasty=cfg.format.is_dynasty, max_age=args.max_age, limit=args.limit)
         print(f"\n{username}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
@@ -158,6 +188,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  give {' + '.join(r['give'])}  for  {' + '.join(r['get'])}")  # type: ignore[arg-type]
             print(f"      FC {fc_give:,} vs {fc_get:,} ({r['fc_pct']:.2f}%)   KTC {k_give:,} vs {k_get:,} "
                   f"({r['ktc_pct']:.2f}%, site {r['ktc_site_pct']:.1f}%)   net youth {r['net_youth']:+,}")
+            picks = [f"{n} = {my_origins[n]}" for n in r["give"] if n in my_origins]  # type: ignore[union-attr]
+            picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]  # type: ignore[union-attr]
+            if picks:
+                print("      picks: " + "; ".join(picks) + " (tier projected from the original team's power rank)")
             for n in r["notes"]:  # type: ignore[union-attr]
                 print(f"      note: {n}")
     return 0
