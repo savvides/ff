@@ -1,0 +1,6585 @@
+{
+  "format": "ff repository contract catalog",
+  "format_version": 1,
+  "inspected_on": "2026-10-05",
+  "source_revision": "5bd80cd397d516969c800849544e91751479ee50",
+  "source_branch": "main",
+  "scope": {
+    "inbound_http_routes": [],
+    "server_actions": [],
+    "boundary": "Local Typer CLI, Python dispatcher and analysis functions, outbound provider calls",
+    "verification": "Source/fixtures and local introspection; no live provider verification",
+    "schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+    "notes": [
+      "This catalog is not an OpenAPI document or a new server/API implementation.",
+      "Pydantic definitions are extracted in validation mode; ordinary properties/aliases are listed separately and are not serialized fields.",
+      "Dispatcher outputs use model_dump in Python mode: datetimes can remain datetime objects; listed JSON Schema date-time fields describe their JSON representation, not a promised JSON encoding at that boundary.",
+      "Raw provider schemas document partial consumed shapes/fallbacks, not complete provider guarantees.",
+      "No schema-wide additionalProperties=false is invented; advertised tool input schemas are not globally enforced."
+    ]
+  },
+  "cli_commands": [
+    {
+      "path": "ff setup",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 342,
+      "description": "Find your dynasty league, auto-detect its format, and save it.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "league_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "league_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "username"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "username",
+          "location": "argument",
+          "spellings": [
+            "username"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "Your Sleeper username."
+        },
+        {
+          "name": "season",
+          "location": "option",
+          "spellings": [
+            "--season"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Season year; defaults to current."
+        },
+        {
+          "name": "league_id",
+          "location": "option",
+          "spellings": [
+            "--league-id"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Skip selection; use this league id."
+        },
+        {
+          "name": "league_index",
+          "location": "option",
+          "spellings": [
+            "--league-index",
+            "-n"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[int]",
+          "help": "Pick the Nth league non-interactively (index from the printed list)."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Saved league/format/config-path panel; writes config.json",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Config"
+          }
+        ]
+      },
+      "side_effects": [
+        "writes_config"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "league_index is zero-based. Multiple leagues require explicit ID/index without a TTY.",
+        "Format comes from Sleeper; defaults current season, then previous season for league discovery."
+      ]
+    },
+    {
+      "path": "ff roster",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 421,
+      "description": "Price out a roster: total value, power rank, positions, top assets.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "top": {
+            "type": "integer",
+            "default": 15
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "team",
+          "location": "argument",
+          "spellings": [
+            "team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; defaults to yours."
+        },
+        {
+          "name": "top",
+          "location": "option",
+          "spellings": [
+            "--top"
+          ],
+          "required": false,
+          "default": 15,
+          "python_type": "int",
+          "help": "How many top assets to list."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Selected team header, positional totals, top assets and unvalued count",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/RosterValuation"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "Default team uses saved user_id; explicit team is a case-insensitive name substring, not a guaranteed roster-ID selector.",
+        "top limits displayed assets, not the total valuation."
+      ]
+    },
+    {
+      "path": "ff power",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 492,
+      "description": "League power rankings by total dynasty value.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "parameters": [],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "League-wide player-value ranking, record and points-for table",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/RosterValuation"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": []
+    },
+    {
+      "path": "ff picks",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 519,
+      "description": "Future draft capital by team: every pick's current owner (endowment\nreconciled with trades), valued like `ff trade`. The half of team value\nthat `power` leaves out.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "years": {
+            "type": "integer",
+            "default": 2
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "team",
+          "location": "argument",
+          "spellings": [
+            "team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; omit for the whole league."
+        },
+        {
+          "name": "years",
+          "location": "option",
+          "spellings": [
+            "--years"
+          ],
+          "required": false,
+          "default": 2,
+          "python_type": "int",
+          "help": "How many future seasons to show."
+        },
+        {
+          "name": "rounds",
+          "location": "option",
+          "spellings": [
+            "--rounds"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[int]",
+          "help": "Rookie rounds per season; overrides auto-detection."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Whole-league draft-capital table or selected-team ownership/tier/value table",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/TeamPicks"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "Omitted team shows the entire league; years is bounded to at least one by _pick_window; rounds overrides league/draft detection."
+      ]
+    },
+    {
+      "path": "ff values",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 584,
+      "description": "Dynasty rankings for your league format.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "default": 40
+          },
+          "market": {
+            "type": "string",
+            "default": "both"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "position",
+          "location": "option",
+          "spellings": [
+            "--position",
+            "-p"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "QB/RB/WR/TE; omit for overall."
+        },
+        {
+          "name": "limit",
+          "location": "option",
+          "spellings": [
+            "--limit"
+          ],
+          "required": false,
+          "default": 40,
+          "python_type": "int",
+          "help": "How many to list."
+        },
+        {
+          "name": "market",
+          "location": "option",
+          "spellings": [
+            "--market",
+            "-m"
+          ],
+          "required": false,
+          "default": "both",
+          "python_type": "str",
+          "help": "Market: fc, ktc, or both (default: both)."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Ranked player table with FC, KTC or both markets",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Asset"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "market accepts fc, ktc, both and legacy dealer, case-insensitively; raw Python annotation is str, not an enum.",
+        "Position is uppercased for filtering; no central QB/RB/WR/TE enum check is enforced."
+      ]
+    },
+    {
+      "path": "ff trade",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 657,
+      "description": "Analyze a trade. Players and picks both count (e.g. --get '2027 1st').",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "give": {
+            "type": "string"
+          },
+          "get": {
+            "type": "string"
+          },
+          "market": {
+            "type": "string",
+            "default": "both"
+          }
+        },
+        "required": [
+          "give",
+          "get"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "give",
+          "location": "option",
+          "spellings": [
+            "--give"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "What you send, comma-separated."
+        },
+        {
+          "name": "get",
+          "location": "option",
+          "spellings": [
+            "--get"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "What you receive, comma-separated."
+        },
+        {
+          "name": "market",
+          "location": "option",
+          "spellings": [
+            "--market",
+            "-m"
+          ],
+          "required": false,
+          "default": "both",
+          "python_type": "str",
+          "help": "Market: fc, ktc, or both (default: both)."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Trade sides, raw and site-adjusted totals, offer rule, provenance, raw position deltas and unresolved/substitution notices",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/TradeEvaluation"
+          },
+          {
+            "$ref": "#/$defs/OfferVerdict"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "give/get split comma-separated player/pick labels; received assets are side_a and given assets side_b.",
+        "market accepts fc, ktc, both and legacy dealer. Unresolved assets and non-exact resolutions are surfaced.",
+        "Both markets fetched fresh; displayed verdict totals include ported site package adjustments. Raw position deltas exclude adjustments.",
+        "Default both-market offer rule requires <10% gap of larger side in each market and KTC Fair Trade; missing/approximate inputs, redraft or calculator drift produce CANNOT_JUDGE.",
+        "Calculator drift checks make text requests to provider pages and changed JS bundles."
+      ]
+    },
+    {
+      "path": "ff waivers",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 815,
+      "description": "Unrostered players by dynasty opportunity, or current-week lineup gain.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "default": 20
+          },
+          "include_rostered": {
+            "type": "boolean",
+            "default": false
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "trending_only": {
+            "type": "boolean",
+            "default": false
+          },
+          "weekly": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "limit",
+          "location": "option",
+          "spellings": [
+            "--limit"
+          ],
+          "required": false,
+          "default": 20,
+          "python_type": "int",
+          "help": "How many to show."
+        },
+        {
+          "name": "include_rostered",
+          "location": "option",
+          "spellings": [
+            "--all"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Include rostered players."
+        },
+        {
+          "name": "position",
+          "location": "option",
+          "spellings": [
+            "--position",
+            "-p"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Filter by position."
+        },
+        {
+          "name": "trending_only",
+          "location": "option",
+          "spellings": [
+            "--trending"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Only players in Sleeper's trending adds."
+        },
+        {
+          "name": "weekly",
+          "location": "option",
+          "spellings": [
+            "--weekly"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Rank by current-week lineup improvement instead of dynasty value."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Dynasty-opportunity table, or --weekly whole-lineup-gain table",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/WaiverTarget"
+          },
+          {
+            "$ref": "#/$defs/WeeklyWaivers"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "--weekly with --all raises an expected command error.",
+        "Default limit is 20; trending annotation does not restrict the general dynasty pool unless --trending.",
+        "Weekly mode uses the saved owner roster and fresh current-week data; acquisition eligibility remains unknown."
+      ]
+    },
+    {
+      "path": "ff news",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 870,
+      "description": "Player health, depth chart roles, injuries, and trending news across Sleeper.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "default": 15
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "team",
+          "location": "argument",
+          "spellings": [
+            "team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; omit for the whole league."
+        },
+        {
+          "name": "limit",
+          "location": "option",
+          "spellings": [
+            "--limit"
+          ],
+          "required": false,
+          "default": 15,
+          "python_type": "int",
+          "help": "How many trending adds/drops to display."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Roster injury/depth/status and trending adds/drops; this command does not fetch the per-player headline feed",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Asset"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": []
+    },
+    {
+      "path": "ff cleanup",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 944,
+      "description": "Roster cleanup: capacity vs fill, who to drop, who can move to IR, and which\nyoung players to stash on taxi so you free active room for a waiver add without\nlosing value.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "drops": {
+            "type": "integer",
+            "default": 8
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "team",
+          "location": "argument",
+          "spellings": [
+            "team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; defaults to yours."
+        },
+        {
+          "name": "drops",
+          "location": "option",
+          "spellings": [
+            "--drops"
+          ],
+          "required": false,
+          "default": 8,
+          "python_type": "int",
+          "help": "How many drop candidates to list."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Capacity, drop candidates, league-eligible IR moves and taxi-stash recommendations",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/RosterAudit"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": []
+    },
+    {
+      "path": "ff movers",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1055,
+      "description": "Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "buy": {
+            "type": "boolean",
+            "default": false
+          },
+          "sell": {
+            "type": "boolean",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20
+          },
+          "min_value": {
+            "type": "integer",
+            "default": 1000
+          },
+          "arbitrage": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "buy",
+          "location": "option",
+          "spellings": [
+            "--buy"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Show buy-low instead of sell-high (or Dealer > FC for arbitrage)."
+        },
+        {
+          "name": "sell",
+          "location": "option",
+          "spellings": [
+            "--sell"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Show sell-high (or FC > Dealer for arbitrage)."
+        },
+        {
+          "name": "limit",
+          "location": "option",
+          "spellings": [
+            "--limit"
+          ],
+          "required": false,
+          "default": 20,
+          "python_type": "int",
+          "help": "How many to show."
+        },
+        {
+          "name": "min_value",
+          "location": "option",
+          "spellings": [
+            "--min-value"
+          ],
+          "required": false,
+          "default": 1000,
+          "python_type": "int",
+          "help": "Floor on both values; filters deep stashes."
+        },
+        {
+          "name": "arbitrage",
+          "location": "option",
+          "spellings": [
+            "--arbitrage",
+            "-a"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Scan for market discrepancies between FantasyCalc and KeepTradeCut."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Dynasty-vs-redraft gaps or --arbitrage discrepancies with KTC values restated on FC scale by rank",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Asset"
+          },
+          {
+            "$ref": "#/$defs/ArbitrageMover"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "Without arbitrage, buy controls direction and sell is not separately read for direction.",
+        "In arbitrage mode, buy-only selects ktc bias, sell-only fc bias; both/neither show all."
+      ]
+    },
+    {
+      "path": "ff lineup",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1139,
+      "description": "Optimal start/sit for a week, scored by your league's exact rules (incl TEP).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "week": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "team",
+          "location": "argument",
+          "spellings": [
+            "team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; defaults to yours."
+        },
+        {
+          "name": "week",
+          "location": "option",
+          "spellings": [
+            "--week"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[int]",
+          "help": "NFL week; defaults to the current/upcoming one."
+        },
+        {
+          "name": "season",
+          "location": "option",
+          "spellings": [
+            "--season"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Season; defaults to your league's."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Slot/player/points/basis/availability table, lineup changes, warnings and bench",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Lineup"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "Defaults saved season and max(1, state.week, state.display_week). Explicit values below week 1 are clamped to 1.",
+        "Matching current state enables fresh weekly locks/status/actuals. Other season/week is an explicitly projection-only scenario."
+      ]
+    },
+    {
+      "path": "ff compare",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1240,
+      "description": "Compare two rostered players for current-week start/sit, including game locks.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "player_a": {
+            "type": "string"
+          },
+          "player_b": {
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "player_a",
+          "player_b"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "player_a",
+          "location": "argument",
+          "spellings": [
+            "player_a"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "First player's full name or Sleeper ID."
+        },
+        {
+          "name": "player_b",
+          "location": "argument",
+          "spellings": [
+            "player_b"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "Second player's full name or Sleeper ID."
+        },
+        {
+          "name": "team",
+          "location": "option",
+          "spellings": [
+            "--team"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Team name; defaults to yours."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Two-player start/sit table, whole-lineup totals and recommendation",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/PlayerComparison"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "Players resolve by unique aliases or Sleeper ID and must both belong to the selected roster.",
+        "Uses shared current-week preparation; unsupported rules/freshness failures refuse advice."
+      ]
+    },
+    {
+      "path": "ff draft",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1275,
+      "description": "Live draft board scored FOR your team: your picks, where you stand, and the\nbest available ranked by fit (roster need + win-now/rebuild horizon), not raw\nmarket value alone.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "default": 30
+          },
+          "rookies": {
+            "type": "boolean",
+            "default": false
+          },
+          "mode": {
+            "type": "string",
+            "default": "auto"
+          },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "position",
+          "location": "option",
+          "spellings": [
+            "--position",
+            "-p"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "QB/RB/WR/TE; filter the available list."
+        },
+        {
+          "name": "limit",
+          "location": "option",
+          "spellings": [
+            "--limit"
+          ],
+          "required": false,
+          "default": 30,
+          "python_type": "int",
+          "help": "How many available players to list."
+        },
+        {
+          "name": "rookies",
+          "location": "option",
+          "spellings": [
+            "--rookies",
+            "-r"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Available rookies only."
+        },
+        {
+          "name": "mode",
+          "location": "option",
+          "spellings": [
+            "--mode"
+          ],
+          "required": false,
+          "default": "auto",
+          "python_type": "str",
+          "help": "contend|rebuild|auto (auto reads your power rank)."
+        },
+        {
+          "name": "draft_id",
+          "location": "option",
+          "spellings": [
+            "--draft-id"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Override the auto-detected draft."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Live draft status, owned picks, positional standing and roster-relative best available",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/DraftPickInfo"
+          },
+          {
+            "$ref": "#/$defs/TeamContext"
+          },
+          {
+            "$ref": "#/$defs/DraftFit"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "mode must be auto/contend/rebuild; only linear/snake slot-based drafts with positive rounds are supported.",
+        "Requires saved user_id; individual draft endpoint provides slot_to_roster_id."
+      ]
+    },
+    {
+      "path": "ff ask",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1492,
+      "description": "Ask natural language questions about trades, lineups, waivers, or league setup.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "query",
+          "location": "argument",
+          "spellings": [
+            "query"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "Natural language question about your league"
+        },
+        {
+          "name": "backend",
+          "location": "option",
+          "spellings": [
+            "--backend"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Override backend (jev, agy, gemini, claude, ollama)"
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Jev: interpretation summary and deterministic domain tables; local: Markdown response/synthesis",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Route"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache",
+        "may_write_config_via_local_onboarding",
+        "may_invoke_terminal_runner",
+        "explicit_jev_makes_paid_classification_request"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict",
+        "jev_clarification",
+        "jev_service",
+        "local_ask_printed_failure"
+      ],
+      "notes": [
+        "backend precedence: option > saved config > auto. Valid backends: auto, jev, agy, gemini, claude, ollama.",
+        "Jev requires saved league config and explicitly selected backend; local setup can run without saved config.",
+        "Local unknown-tool/onboarding/dispatch errors may return normally with exit 0; no universal success/error JSON response."
+      ]
+    },
+    {
+      "path": "ff qa",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1644,
+      "description": "Run full-system diagnostic invariant audits across all league domains.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "verbose",
+          "location": "option",
+          "spellings": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Show granular check details."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Diagnostic scorecard for setup, power, optional own roster, picks, values, optional cleanup, waivers and arbitrage movers",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/QAReport"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": [
+        "The full-system label does not mean every command is exercised; lineup, comparison, weekly-waiver and live LLM execution are not part of this diagnostic command."
+      ]
+    },
+    {
+      "path": "ff doctor",
+      "kind": "cli_command",
+      "hidden": true,
+      "source": "src/ff/cli.py",
+      "line": 1715,
+      "description": "Diagnostic system health check (alias for `ff qa`).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "verbose",
+          "location": "option",
+          "spellings": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "default": false,
+          "python_type": "bool",
+          "help": "Show granular check details."
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Hidden alias of ff qa",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/QAReport"
+          }
+        ]
+      },
+      "side_effects": [
+        "provider_reads",
+        "may_write_http_cache"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception",
+        "qa_strict"
+      ],
+      "notes": []
+    },
+    {
+      "path": "ff version",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1724,
+      "description": "Print the ff version.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "parameters": [],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "ff 0.1.0",
+        "domain_models": []
+      },
+      "side_effects": [],
+      "errors": [
+        "cli_usage"
+      ],
+      "notes": []
+    },
+    {
+      "path": "ff config set-jev-key",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1606,
+      "description": "Privately enter and save a TypeSafe API key for Jev.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "parameters": [],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Hidden key prompt and saved-path confirmation; writes separate key file",
+        "domain_models": []
+      },
+      "side_effects": [
+        "writes_secret_file"
+      ],
+      "errors": [
+        "cli_usage",
+        "jev_service",
+        "unexpected_exception"
+      ],
+      "notes": [
+        "Input is interactive hidden text, not a positional argument or command option."
+      ],
+      "interactive_input": {
+        "type": "string",
+        "hidden": true,
+        "validation": "nonempty, ASCII and printable after stripping"
+      }
+    },
+    {
+      "path": "ff config set-llm",
+      "kind": "cli_command",
+      "hidden": false,
+      "source": "src/ff/cli.py",
+      "line": 1619,
+      "description": "Configure the LLM backend used by 'ff ask'.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "backend",
+          "location": "argument",
+          "spellings": [
+            "backend"
+          ],
+          "required": true,
+          "default": null,
+          "python_type": "str",
+          "help": "LLM backend: auto, jev, agy, gemini, claude, ollama"
+        },
+        {
+          "name": "model",
+          "location": "option",
+          "spellings": [
+            "--model",
+            "-m"
+          ],
+          "required": false,
+          "default": null,
+          "python_type": "Optional[str]",
+          "help": "Ollama model name (defaults to llama3.2)"
+        }
+      ],
+      "output": {
+        "transport": "Rich terminal text",
+        "python_return": "None",
+        "description": "Updated backend/model/config-path confirmation; writes config.json",
+        "domain_models": [
+          {
+            "$ref": "#/$defs/Config"
+          }
+        ]
+      },
+      "side_effects": [
+        "writes_config"
+      ],
+      "errors": [
+        "cli_usage",
+        "cli_expected",
+        "unexpected_exception"
+      ],
+      "notes": [
+        "Requires saved league config. Backend is checked against the same backend list; model updates ollama_model when supplied."
+      ]
+    }
+  ],
+  "dispatcher": {
+    "entrypoint": "ff.services.llm.dispatcher.dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -> Any",
+    "context": "CLI _analysis_ctx provides lazy config/client data; prepare_weekly fills a consistent weekly snapshot for weekly tools",
+    "call_schema": {
+      "$ref": "#/$defs/LocalToolCall"
+    },
+    "tools": [
+      {
+        "name": "get_weekly_waivers",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 129,
+        "description": "Rank unrostered players by current-week whole-lineup improvement for one team.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string"
+            },
+            "position": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer"
+            },
+            "trending_only": {
+              "type": "boolean"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None",
+          "trending_only": "None",
+          "position": "None",
+          "limit": "20"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/WeeklyWaivers"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "Requires fresh weekly context or prepare_weekly callback; always excludes rostered players.",
+          "Jev may add free_agents_only=true, but this branch has no free_agents_only toggle."
+        ]
+      },
+      {
+        "name": "get_player_comparison",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 143,
+        "description": "Compare exactly two rostered players for current-week start/sit.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string"
+            },
+            "player_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "required": [
+            "player_ids"
+          ]
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None",
+          "player_ids": "[]"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/PlayerComparison"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "Requires fresh weekly context and exactly two distinct owned player IDs; uses no fuzzy automatic substitution."
+        ]
+      },
+      {
+        "name": "setup_league",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 102,
+        "description": "Onboard or set up Sleeper league by username.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string",
+              "description": "Sleeper username"
+            }
+          },
+          "required": [
+            "username"
+          ]
+        },
+        "runtime_parameter_defaults_python": {
+          "username": "''"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/Config"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "CLI local-ask onboarding additionally passes optional league_id; dispatcher setup branch only forwards username.",
+          "Onboarding writes config only for one discovered league or explicit matching league_id."
+        ]
+      },
+      {
+        "name": "evaluate_trade",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 112,
+        "description": "Evaluate trade fairness between given assets and received assets.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "give": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Assets to give up"
+            },
+            "get": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Assets to receive"
+            }
+          },
+          "required": [
+            "give",
+            "get"
+          ]
+        },
+        "runtime_parameter_defaults_python": {
+          "give": "[]",
+          "get": "[]"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/TradeEvaluation"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "Runtime also accepts comma-separated give/get strings despite advertised arrays.",
+          "Both helper and direct CLI label side_a You get and side_b You give; a positive adjusted delta favors received assets.",
+          "TradeEvaluation retains unresolved tokens and package-adjustment fields. Generic dispatch does not perform the direct CLI fresh fetch, drift check or OfferVerdict rendering itself."
+        ]
+      },
+      {
+        "name": "get_lineup",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 154,
+        "description": "Get optimal starting lineup for a team/week.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or roster owner"
+            },
+            "week": {
+              "type": "integer",
+              "description": "NFL week number"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None",
+          "week": "None"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/Lineup"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "With prepare_weekly, only the current week is allowed; a context without weekly data can still produce a projection-only result."
+        ]
+      },
+      {
+        "name": "get_waivers",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 173,
+        "description": "Get top waiver targets ranked by dynasty value.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "position": {
+              "type": "string",
+              "description": "Positional filter (QB, RB, WR, TE)"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Number of targets to return"
+            },
+            "free_agents_only": {
+              "type": "boolean",
+              "description": "Filter for unrostered players only"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "limit": "25",
+          "free_agents_only": "True",
+          "position": "None",
+          "trending_only": "False"
+        },
+        "output_schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WaiverTarget"
+          }
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "trending_only is accepted at runtime but absent from advertised schema.",
+          "Dispatcher limit defaults to 25, while direct CLI/Jev default to 20.",
+          "Advertised description says dynasty value; actual ranking uses dynasty opportunity. free_agents_only defaults true."
+        ]
+      },
+      {
+        "name": "get_roster",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 195,
+        "description": "Get roster breakdown and dynasty valuation.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or roster owner"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/RosterValuation"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "Jev constructs limit (default 15) for rendering; dispatcher returns the full valuation and does not slice assets."
+        ]
+      },
+      {
+        "name": "get_power_rankings",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 204,
+        "description": "Get power rankings for all teams in the league.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "runtime_parameter_defaults_python": {},
+        "output_schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RosterValuation"
+          }
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": []
+      },
+      {
+        "name": "get_picks",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 211,
+        "description": "Get future draft picks owned by a team or all teams.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or roster owner"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None"
+        },
+        "output_schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeamPicks"
+          }
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "CLI context supplies future seasons and rounds from _pick_window; raw dispatcher defaults are 2026/2027/2028 and four rounds if those context keys are absent.",
+          "An unmatched explicit team in this branch does not raise and can leave the whole ledger selected. Jev resolves teams before dispatch."
+        ]
+      },
+      {
+        "name": "get_roster_cleanup",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 228,
+        "description": "Audit roster for drops and taxi moves.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or roster owner"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None",
+          "limit": "8"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/RosterAudit"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "limit defaults to 8 at runtime but is absent from advertised schema.",
+          "IR suggestions use context ir_statuses from league reserve settings, capped by open IR capacity."
+        ]
+      },
+      {
+        "name": "get_movers",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 250,
+        "description": "Get buy-low or sell-high candidates based on dynasty vs redraft gap.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "buy": {
+              "type": "boolean",
+              "description": "True for buy-low candidates, False for sell-high candidates"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Number of players to return"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "buy": "False",
+          "limit": "20"
+        },
+        "output_schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoverResult"
+          }
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": []
+      },
+      {
+        "name": "get_draft_fit",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 261,
+        "description": "Get draft fit rankings tailored to team competitive status.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or roster owner"
+            },
+            "position": {
+              "type": "string",
+              "description": "Positional filter (QB, RB, WR, TE)"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Number of fit candidates to return"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "team": "None",
+          "position": "None",
+          "limit": "10"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/DraftFitResult"
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": [
+          "Excludes rostered assets; generic tool does not fetch active draft picks/board. Direct ff draft performs that extra orchestration."
+        ]
+      },
+      {
+        "name": "get_dynasty_values",
+        "kind": "python_dispatcher_tool",
+        "source": "src/ff/services/llm/dispatcher.py",
+        "line": 289,
+        "description": "Get top overall player dynasty values.",
+        "advertised_input_schema": {
+          "type": "object",
+          "properties": {
+            "position": {
+              "type": "string",
+              "description": "Positional filter (QB, RB, WR, TE)"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Number of players to return"
+            }
+          }
+        },
+        "runtime_parameter_defaults_python": {
+          "position": "None",
+          "limit": "50"
+        },
+        "output_schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Asset"
+          }
+        },
+        "output_transport": "Python primitives/model_dump(mode=python), not HTTP; datetime values can remain Python datetime objects",
+        "errors": [
+          "dispatcher_value_error"
+        ],
+        "notes": []
+      }
+    ],
+    "validation": "Name allowlist plus per-branch checks; no generic advertised-schema kwargs validation"
+  },
+  "jev": {
+    "supported_operations": [
+      "get_roster",
+      "get_power_rankings",
+      "get_dynasty_values",
+      "get_weekly_waivers",
+      "get_waivers",
+      "get_picks",
+      "get_roster_cleanup",
+      "get_player_comparison",
+      "get_lineup"
+    ],
+    "deferred_operations": [
+      "trade",
+      "setup",
+      "draft",
+      "news",
+      "unsupported",
+      "ambiguous"
+    ],
+    "confidence_floor": 0.8,
+    "default_model": "jev-1.13.0",
+    "default_render_limits": {
+      "get_roster": 15,
+      "get_dynasty_values": 40,
+      "get_waivers": 20,
+      "get_weekly_waivers": 20,
+      "get_roster_cleanup": 8
+    },
+    "question_names": [
+      "operation",
+      "weekly_goal",
+      "comparison",
+      "action",
+      "availability",
+      "pool",
+      "parts",
+      "settings",
+      "players",
+      "time",
+      "filter",
+      "comparison_team",
+      "team",
+      "position",
+      "limit"
+    ],
+    "used_questions_by_operation": {
+      "get_roster": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "team",
+        "limit"
+      ],
+      "get_power_rankings": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action"
+      ],
+      "get_dynasty_values": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "limit"
+      ],
+      "get_waivers": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "availability",
+        "pool",
+        "limit"
+      ],
+      "get_weekly_waivers": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "availability",
+        "pool",
+        "limit",
+        "team",
+        "weekly_goal"
+      ],
+      "get_picks": [
+        "parts",
+        "settings",
+        "action",
+        "team"
+      ],
+      "get_roster_cleanup": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "team",
+        "limit"
+      ],
+      "get_lineup": [
+        "parts",
+        "players",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "team"
+      ],
+      "get_player_comparison": [
+        "parts",
+        "time",
+        "filter",
+        "position",
+        "settings",
+        "action",
+        "comparison_team",
+        "comparison"
+      ]
+    },
+    "route_schema": {
+      "$ref": "#/$defs/Route"
+    },
+    "errors": [
+      "jev_clarification",
+      "jev_service"
+    ],
+    "team_resolution": "mine by saved user_id == owner_id; named by explicit full name/roster number, resolved to canonical roster_id string",
+    "unsupported": "Transactions, alternate calculation settings/markets, other weeks, unsupported filters/counts, multiple operations and unverifiable acquisition conditions clarify; compare supports exactly two owned named players."
+  },
+  "outbound_endpoints": [
+    {
+      "id": "sleeper.state",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/state/{sport}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "sport": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/SleeperState"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Dict[str, Any]"
+      },
+      "cache_ttl_seconds": 3600,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "sport=nfl; fresh=True uses TTL 0"
+      ]
+    },
+    {
+      "id": "sleeper.user",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/user/{username_or_id}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "username_or_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SleeperUser"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Optional[Dict[str, Any]]"
+      },
+      "cache_ttl_seconds": 86400,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.user_leagues",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/user/{user_id}/leagues/{sport}/{season}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "user_id": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "season": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperLeague"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]]; null/falsy becomes []"
+      },
+      "cache_ttl_seconds": 3600,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.league",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/SleeperLeague"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Dict[str, Any]; detect_format -> Format"
+      },
+      "cache_ttl_seconds": 1800,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "fresh=True uses TTL 0; settings consumed include type, draft_rounds, taxi/reserve limits, reserve eligibility, max_subs, best_ball and capacity_override"
+      ]
+    },
+    {
+      "id": "sleeper.rosters",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}/rosters",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperRoster"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> build_rosters with users -> List[Roster]"
+      },
+      "cache_ttl_seconds": 1800,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "fresh=True uses TTL 0; null/falsy list becomes []"
+      ]
+    },
+    {
+      "id": "sleeper.matchups",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}/matchups/{week}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          },
+          "week": {
+            "type": "integer"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperMatchup"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]]; weekly uses selected roster_id and exact starter alignment"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.league_users",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}/users",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperUser"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> owner_id/team-name mapping"
+      },
+      "cache_ttl_seconds": 1800,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.traded_picks",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}/traded_picks",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperTradedPick"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> pick_ledger"
+      },
+      "cache_ttl_seconds": 1800,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "roster_id identifies original team; last row for a re-traded pick determines current owner"
+      ]
+    },
+    {
+      "id": "sleeper.drafts",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/league/{league_id}/drafts",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "league_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperDraft"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]]; summaries choose active/latest draft"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "List summaries may omit slot_to_roster_id; do not use them as the full draft object"
+      ]
+    },
+    {
+      "id": "sleeper.draft",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/draft/{draft_id}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "draft_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/SleeperDraft"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Dict[str, Any]; live board ownership uses slot_to_roster_id"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.draft_picks",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/draft/{draft_id}/picks",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "draft_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperDraftPick"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> made/taken picks and DraftPickInfo"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.draft_traded_picks",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/draft/{draft_id}/traded_picks",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "draft_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperTradedPick"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> live draft pick ownership"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "Draft trade ownership uses round/roster_id/owner_id; roster_id identifies the original roster, joined through slot_to_roster_id"
+      ]
+    },
+    {
+      "id": "sleeper.players",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/players/{sport}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "sport": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/SleeperPlayer"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Dict[str, Any] keyed by player ID; fallback names/depth/age metadata"
+      },
+      "cache_ttl_seconds": 86400,
+      "errors": [
+        "public_http"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.trending",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.app/v1/players/{sport}/trending/{kind}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "sport": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {
+            "lookback_hours": {
+              "type": "integer",
+              "default": 24
+            },
+            "limit": {
+              "type": "integer",
+              "default": 25
+            }
+          }
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperTrending"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]]; CLI usually fetches max(requested limit * 3, 50)"
+      },
+      "cache_ttl_seconds": 3600,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "sport=nfl; kind=add by default, news also requests drop"
+      ]
+    },
+    {
+      "id": "sleeper.player",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.com/players/nfl/{player_id}",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "player_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/SleeperPlayer"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Dict[str, Any]; weekly requires matching player_id and injury_status key"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http",
+        "weekly_shape"
+      ],
+      "notes": []
+    },
+    {
+      "id": "sleeper.player_news",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.com/players/nfl/{player_id}/news",
+      "source": "src/ff/sleeper/client.py",
+      "request": {
+        "path_parameters": {
+          "player_id": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperNews"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Dict[str, Any]] -> NewsItem.from_payload; published epoch milliseconds"
+      },
+      "cache_ttl_seconds": 300,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "Undocumented feed; missing metadata fields get defaults. Weekly reporting failure becomes a warning."
+      ]
+    },
+    {
+      "id": "sleeper.projections",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.com/projections/nfl/{season}/{week}",
+      "source": "src/ff/projections/client.py",
+      "request": {
+        "path_parameters": {
+          "season": {
+            "type": "string"
+          },
+          "week": {
+            "type": "integer"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {
+            "season_type": {
+              "const": "regular"
+            },
+            "order_by": {
+              "const": "ppr"
+            },
+            "position[]": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "QB",
+                "RB",
+                "WR",
+                "TE",
+                "K",
+                "DEF"
+              ]
+            }
+          }
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperProjection"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "week -> Dict[player_id, stat_line]; snapshot -> (stats_map, embedded_player_map)"
+      },
+      "cache_ttl_seconds": 10800,
+      "errors": [
+        "public_http",
+        "weekly_shape"
+      ],
+      "notes": [
+        "position[] is repeated literally in URL. fresh=True uses TTL 0 and verifies entry season/week. Entries without stats/player ID are omitted. Embedded candidate metadata requires injury_status key and team. Stat lines are scored with league rules."
+      ]
+    },
+    {
+      "id": "sleeper.schedule",
+      "direction": "outbound",
+      "provider": "Sleeper",
+      "method": "GET",
+      "url_template": "https://api.sleeper.com/schedule/nfl/regular/{season}",
+      "source": "src/ff/services/weekly.py",
+      "request": {
+        "path_parameters": {
+          "season": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SleeperScheduleGame"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "game_facts with ESPN -> Dict[team, (game_status, aware kickoff or None)]"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http",
+        "weekly_shape"
+      ],
+      "notes": [
+        "Undocumented feed; regular-season requested-week opponent pairs must agree with ESPN"
+      ]
+    },
+    {
+      "id": "espn.scoreboard",
+      "direction": "outbound",
+      "provider": "ESPN",
+      "method": "GET",
+      "url_template": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+      "source": "src/ff/services/weekly.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {
+            "dates": {
+              "type": "string"
+            },
+            "seasontype": {
+              "const": 2
+            },
+            "week": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "dates",
+            "seasontype",
+            "week"
+          ]
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/EspnScoreboard"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Validated against Sleeper schedule; ISO kickoff, game status"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "public_http",
+        "weekly_shape"
+      ],
+      "notes": [
+        "dates is requested season string; requires season.year/type, week.number and complete matching opponent pairs"
+      ]
+    },
+    {
+      "id": "fantasycalc.values",
+      "direction": "outbound",
+      "provider": "FantasyCalc",
+      "method": "GET",
+      "url_template": "https://api.fantasycalc.com/values/current",
+      "source": "src/ff/values/client.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {
+            "isDynasty": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "numQbs": {
+              "type": "string"
+            },
+            "numTeams": {
+              "type": "string"
+            },
+            "ppr": {
+              "type": "string"
+            },
+            "tep": {
+              "type": "string",
+              "enum": [
+                "te+",
+                "te++"
+              ]
+            }
+          },
+          "required": [
+            "isDynasty",
+            "numQbs",
+            "numTeams",
+            "ppr"
+          ]
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FantasyCalcEntry"
+          }
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "List[Asset] -> ValueBook indexes, format, fetched times and secondary provenance"
+      },
+      "cache_ttl_seconds": 21600,
+      "errors": [
+        "public_http"
+      ],
+      "notes": [
+        "Parameters are strings from Format.fantasycalc_params. fresh=True uses TTL 0; direct ff trade uses fresh values.",
+        "tep omitted below supported cut points; te+ for premium >=0.5, te++ for premium >1 or at least two dedicated TE slots. Numeric tep is not sent.",
+        "Unexpected non-list becomes an empty book."
+      ]
+    },
+    {
+      "id": "ktc.rankings",
+      "direction": "outbound",
+      "provider": "KeepTradeCut",
+      "method": "GET",
+      "url_template": "https://keeptradecut.com/trade-calculator",
+      "source": "src/ff/values/ktc.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "string",
+          "description": "HTML/text containing script#ktc-players JSON; legacy var playersArray also supported"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "KtcEntry[] -> value mapping plus top value, fetch time, HTML and approximate pick keys -> ValueBook"
+      },
+      "cache_ttl_seconds": 21600,
+      "errors": [
+        "secondary_degraded"
+      ],
+      "notes": [
+        "Parser also accepts raw JSON list or objects with players/values/data. Select superflexValues/oneQBValues and nested tep/tepp by Format; fallback numeric fields, canonical aliases, nonnegative values and pick tiers.",
+        "Generic round keys use Mid as a flagged stand-in; named tiers keep exact KTC prices. fresh=True/use_cache=False bypass reads but refresh cache.",
+        "core.get_text timeout 30 seconds; curl fallback only on TLS exception."
+      ]
+    },
+    {
+      "id": "fantasycalc.calculator_page",
+      "direction": "outbound",
+      "provider": "FantasyCalc",
+      "method": "GET",
+      "url_template": "https://fantasycalc.com/trade-calculator",
+      "source": "src/ff/values/calculators_live.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "string",
+          "description": "HTML identifying content-hashed main bundle"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Bundle identity compared with verified calculator fingerprint; problems -> OfferVerdict CANNOT_JUDGE"
+      },
+      "cache_ttl_seconds": 0,
+      "errors": [
+        "calculator_drift"
+      ],
+      "notes": [
+        "Runtime direct both-market ff trade checks this page; live Node oracle also uses it."
+      ]
+    },
+    {
+      "id": "fantasycalc.main_bundle",
+      "direction": "outbound",
+      "provider": "FantasyCalc",
+      "method": "GET",
+      "url_template": "https://fantasycalc.com/{main_bundle}",
+      "source": "src/ff/values/calculators_live.py",
+      "request": {
+        "path_parameters": {
+          "main_bundle": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "string",
+          "description": "JavaScript main bundle with trade-calculator chunk route"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Trade calculator chunk filename or drift problem"
+      },
+      "cache_ttl_seconds": "indefinite (ttl=None)",
+      "errors": [
+        "calculator_drift"
+      ],
+      "notes": [
+        "Runtime fetched only when page main filename differs from pinned content-hash; Node oracle always loads it."
+      ]
+    },
+    {
+      "id": "fantasycalc.calculator_chunk",
+      "direction": "outbound",
+      "provider": "FantasyCalc",
+      "method": "GET",
+      "url_template": "https://fantasycalc.com/{chunk_bundle}",
+      "source": "src/ff/values/calculators_live.py",
+      "request": {
+        "path_parameters": {
+          "chunk_bundle": {
+            "type": "string"
+          }
+        },
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "string",
+          "description": "JavaScript calculator chunk"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Extracted formula constants/normalized hashes -> fingerprint problems"
+      },
+      "cache_ttl_seconds": "indefinite (ttl=None)",
+      "errors": [
+        "calculator_drift"
+      ],
+      "notes": [
+        "Runtime fetched only when chunk filename differs from pinned hash; Node oracle runs extracted functions for live parity checks."
+      ]
+    },
+    {
+      "id": "ktc.calculator_bundle",
+      "direction": "outbound",
+      "provider": "KeepTradeCut",
+      "method": "GET",
+      "url_template": "https://keeptradecut.com/js/site.min.js",
+      "source": "src/ff/values/calculators_live.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "v"
+          ]
+        },
+        "body_schema": null,
+        "auth": "none"
+      },
+      "response": {
+        "schema": {
+          "type": "string",
+          "description": "Versioned JavaScript calculator bundle"
+        },
+        "schema_scope": "partial consumed wire fields, not a complete provider schema",
+        "normalized_python": "Formula constants/normalized hashes -> fingerprint problems"
+      },
+      "cache_ttl_seconds": "indefinite (ttl=None)",
+      "errors": [
+        "calculator_drift"
+      ],
+      "notes": [
+        "Version comes from already fetched KTC HTML; runtime fetched only if it differs from pinned fingerprint. Empty KTC HTML returns no drift problems, but missing prices still block offer rule."
+      ]
+    },
+    {
+      "id": "typesafe.choose",
+      "direction": "outbound",
+      "provider": "TypeSafe",
+      "method": "POST",
+      "url_template": "https://api.typesafe.ai/v1/systemone",
+      "source": "src/ff/services/llm/jev.py",
+      "request": {
+        "path_parameters": {},
+        "query_schema": {
+          "type": "object",
+          "properties": {}
+        },
+        "body_schema": {
+          "$ref": "#/$defs/TypeSafeRequest"
+        },
+        "auth": "Bearer TYPESAFE_API_KEY or saved key"
+      },
+      "response": {
+        "schema": {
+          "$ref": "#/$defs/JevResponse"
+        },
+        "schema_scope": "validated Pydantic transport model",
+        "normalized_python": "Dict[str, ChoiceAnswer] -> local interpret -> Route(tool, kwargs)"
+      },
+      "cache_ttl_seconds": null,
+      "errors": [
+        "jev_service",
+        "jev_clarification"
+      ],
+      "notes": [
+        "state contains original query, without appended league data; questions are fixed Choice prompts plus query-derived limit criteria.",
+        "Default model jev-1.13.0; TYPESAFE_MODEL overrides. Timeout 15 seconds, redirects disabled, retries only 429/529 twice.",
+        "Answer names must equal requested questions; choice/probability keys must equal offered options, probabilities must be 0..1 with rounded sum tolerance, chosen option must be maximal.",
+        "Confidence floor 0.80 is applied to used questions after local equivalent-outcome handling; abstaining/unsupported details refuse routing."
+      ]
+    }
+  ],
+  "analysis_functions": [
+    {
+      "name": "ff.analysis.calculators.js_round",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 49,
+      "python_parameters": "x: float",
+      "python_return": "float",
+      "description": "Math.round: halves round up (toward +inf), NaN/inf pass through."
+    },
+    {
+      "name": "ff.analysis.calculators.fc_adjustment",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 91,
+      "python_parameters": "side1: Sequence[int], side2: Sequence[int]",
+      "python_return": "Tuple[int, int]",
+      "description": "FantasyCalc's dynasty waiver adjustment, (side1_adj, side2_adj).\n\nPort of `getValueAdjustment(isDynasty=true, side1, side2)`: equal piece counts or\nan empty side get nothing. Otherwise the side sending FEWER pieces is credited\nwith floor(min(v*0.6982, 753 + i*0.23)) for each of the k lowest-valued pieces\non the other side (k = the piece-count gap, i = 0.. in ascending value order).\nPicks are pieces like players."
+    },
+    {
+      "name": "ff.analysis.calculators.ktc_adjustment",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 165,
+      "python_parameters": "side1: Sequence[int], side2: Sequence[int], top: int, variance: int=KTC_VARIANCE",
+      "python_return": "Optional[KtcAdjustment]",
+      "description": "KTC's value adjustment. Verbatim port of `adjustPackageNew` (ALGOTOUSE=2).\n\n`top` is `playersArray[0].value`: the most valuable asset on the whole page in\nthe chosen format/TEP. Returns None when a side is empty (the site then only\nprints an \"add a player worth ~N\" hint, no verdict) or when the Newton solve\nfails to converge (the site shows an error). `variance` is the page's slider,\nwhich moves the adjustment as well as the verdict."
+    },
+    {
+      "name": "ff.analysis.calculators.extract_functions",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 343,
+      "python_parameters": "js: str, name: str",
+      "python_return": "List[str]",
+      "description": "Source of every definition of `name` in minified JS: `function name(...){...}`\nor a class method `name(...){...}`. Calls (`x.name(`, `name(...)` not followed by\na body) are skipped; brace matching ignores braces inside strings."
+    },
+    {
+      "name": "ff.analysis.calculators.normalized_hash",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 382,
+      "python_parameters": "source: str",
+      "python_return": "str",
+      "description": "sha256 of JS source with whitespace dropped and short (minifier-renamed)\nidentifiers replaced by their order of first appearance, so a redeploy that only\nrenames locals keeps the hash while any change to the formula moves it."
+    },
+    {
+      "name": "ff.analysis.calculators.function_hashes",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 400,
+      "python_parameters": "js: str, functions: Sequence[str]",
+      "python_return": "Dict[str, str]",
+      "description": "Normalized hash per function name (all definitions concatenated); '' when\nthe function is gone from the bundle."
+    },
+    {
+      "name": "ff.analysis.calculators.fc_constants",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 410,
+      "python_parameters": "chunk_js: str",
+      "python_return": "Optional[Dict[str, float]]",
+      "description": "The dynasty constants object that `getValueAdjustment` destructures."
+    },
+    {
+      "name": "ff.analysis.calculators.ktc_constants",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 424,
+      "python_parameters": "site_js: str",
+      "python_return": "Dict[str, Optional[float]]",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.calculators.fingerprint_problems",
+      "source": "src/ff/analysis/calculators.py",
+      "line": 436,
+      "python_parameters": "site: str, bundle_js: str",
+      "python_return": "List[str]",
+      "description": "Differences between a live bundle and the verified FINGERPRINTS for `site`\n('fc' chunk or 'ktc' site.min.js). Empty list = the ported math still applies."
+    },
+    {
+      "name": "ff.analysis.cleanup.designation",
+      "source": "src/ff/analysis/cleanup.py",
+      "line": 45,
+      "python_parameters": "row: Dict[str, Any]",
+      "python_return": "Optional[str]",
+      "description": "A player's current Sleeper designation: the roster status when that is a\nreserve list (IR, Suspended, PUP, Inactive), else the injury tag."
+    },
+    {
+      "name": "ff.analysis.cleanup.ir_eligible_statuses",
+      "source": "src/ff/analysis/cleanup.py",
+      "line": 53,
+      "python_parameters": "settings: Dict[str, Any]",
+      "python_return": "FrozenSet[str]",
+      "description": "Lowercased designations this league lets onto IR: IR and PUP always, plus\neach designation a `reserve_allow_*` setting turns on."
+    },
+    {
+      "name": "ff.analysis.cleanup.taxi_eligible",
+      "source": "src/ff/analysis/cleanup.py",
+      "line": 63,
+      "python_parameters": "years_exp: Optional[int], *, allow_vets: bool, taxi_years: Optional[int]",
+      "python_return": "bool",
+      "description": "Whether a player may be stashed on the taxi squad.\n\nSleeper's taxi rules: if the league allows veterans (`taxi_allow_vets`), any\nplayer qualifies. Otherwise a player qualifies only inside the rookie window,\ni.e. experience <= `taxi_years` (and `taxi_years` unset means rookies only).\nUnknown experience is treated as ineligible (conservative: never suggest a\nmove the league might reject)."
+    },
+    {
+      "name": "ff.analysis.cleanup.audit_roster",
+      "source": "src/ff/analysis/cleanup.py",
+      "line": 86,
+      "python_parameters": "roster: Roster, book: ValueBook, players_meta: Optional[Dict[str, Any]]=None, *, roster_positions: Optional[List[str]]=None, taxi_slots: int=0, reserve_slots: int=0, taxi_allow_vets: bool=False, taxi_years: Optional[int]=None, is_superflex: bool=True, drop_limit: int=8, ir_statuses: FrozenSet[str]=frozenset()",
+      "python_return": "RosterAudit",
+      "description": "Categorize every player, compute capacity, and rank drop / IR / taxi moves.\n\n`ir_statuses` is the league's IR rule (`ir_eligible_statuses(settings)`);\nempty means no IR suggestions."
+    },
+    {
+      "name": "ff.analysis.compare.resolve_player",
+      "source": "src/ff/analysis/compare.py",
+      "line": 33,
+      "python_parameters": "text: str, players_meta: Dict[str, Any]",
+      "python_return": "str",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.compare.comparison_players",
+      "source": "src/ff/analysis/compare.py",
+      "line": 41,
+      "python_parameters": "query: str, players_meta: Dict[str, Any]",
+      "python_return": "List[str]",
+      "description": "Find exactly two names, preferring full-name spans over contained surnames."
+    },
+    {
+      "name": "ff.analysis.compare.compare_players",
+      "source": "src/ff/analysis/compare.py",
+      "line": 62,
+      "python_parameters": "player_ids: List[str], roster: Roster, projections: dict, scoring: dict, roster_positions: List[str], meta: dict, weekly: WeeklyContext, season: str, week: int",
+      "python_return": "PlayerComparison",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.depth.precompute_qb2_promotions",
+      "source": "src/ff/analysis/depth.py",
+      "line": 18,
+      "python_parameters": "players_meta: Optional[Dict[str, Any]]",
+      "python_return": "Set[str]",
+      "description": "Find QB3s on NFL teams where no active QB2 exists (post-cutdown gaps or QB2 ruled Out/IR)."
+    },
+    {
+      "name": "ff.analysis.depth.depth_chart_multiplier",
+      "source": "src/ff/analysis/depth.py",
+      "line": 51,
+      "python_parameters": "position: Optional[str], depth_chart_order: Optional[int], team: Optional[str], is_superflex: bool=True",
+      "python_return": "float",
+      "description": "Return depth chart opportunity multiplier (0.10 to 1.0)."
+    },
+    {
+      "name": "ff.analysis.depth.precompute_starter_injuries",
+      "source": "src/ff/analysis/depth.py",
+      "line": 120,
+      "python_parameters": "players_meta: Optional[Dict[str, Any]]",
+      "python_return": "Dict[tuple[str, str], str]",
+      "description": "Find injuries to starters (depth_chart_order == 1) by (team, position)."
+    },
+    {
+      "name": "ff.analysis.depth.opportunity_score",
+      "source": "src/ff/analysis/depth.py",
+      "line": 141,
+      "python_parameters": "value: int, position: Optional[str], depth_chart_order: Optional[int], team: Optional[str], is_superflex: bool=True, injury_status: Optional[str]=None, status: Optional[str]=None, starter_injury: Optional[str]=None",
+      "python_return": "int",
+      "description": "Composite heuristic: dynasty value x depth chart opportunity x news/health factor."
+    },
+    {
+      "name": "ff.analysis.draft.pick_number",
+      "source": "src/ff/analysis/draft.py",
+      "line": 18,
+      "python_parameters": "round_: int, slot: int, teams: int, *, snake: bool=False, reversal_round: int=0",
+      "python_return": "int",
+      "description": "Overall (1-indexed) pick number for a (round, slot).\n\nLinear: every round runs slot 1..teams, so slot S in round R is just\n(R-1)*teams + S. Snake: even rounds run in reverse. Third-round reversal\n(reversal_round=R, common in dynasty rookie drafts): the direction flips\nonce more from round R on, so the team that drafted last in round R-1 also\ndrafts first in round R."
+    },
+    {
+      "name": "ff.analysis.draft.my_picks",
+      "source": "src/ff/analysis/draft.py",
+      "line": 47,
+      "python_parameters": "roster_id: int, slot_to_roster: Dict[int, int], traded_picks: List[Dict[str, Any]], picks_made: List[Dict[str, Any]], *, teams: int, rounds: int, snake: bool=False, reversal_round: int=0",
+      "python_return": "List[DraftPickInfo]",
+      "description": "Every pick `roster_id` currently owns - made and upcoming - by pick number.\n\n`used` is decided by count (a pick is used once `pick_no <= picks made`), so\nit stays correct no matter how the draft is ordered; the player who was taken\nis read from the matching `picks_made` row when present."
+    },
+    {
+      "name": "ff.analysis.draft.available",
+      "source": "src/ff/analysis/draft.py",
+      "line": 81,
+      "python_parameters": "book: ValueBook, taken_ids: Set[str], *, position: Optional[str]=None, limit: Optional[int]=None",
+      "python_return": "List[Asset]",
+      "description": "ValueBook players not in `taken_ids`, ranked by dynasty value.\n\n`taken_ids` is the union of everyone already rostered league-wide and everyone\ndrafted in this draft - so what's left is exactly what you can still pick. The\nranking itself is `ValueBook.top`, so `values` and `draft` agree on order."
+    },
+    {
+      "name": "ff.analysis.fit.detect_status",
+      "source": "src/ff/analysis/fit.py",
+      "line": 51,
+      "python_parameters": "power_rank: Optional[int], num_teams: int",
+      "python_return": "str",
+      "description": "Top third of the league -> contend, bottom third -> rebuild, else\nbalanced. Unknown rank -> balanced."
+    },
+    {
+      "name": "ff.analysis.fit.starting_assets",
+      "source": "src/ff/analysis/fit.py",
+      "line": 64,
+      "python_parameters": "assets: List[Asset], roster_positions: List[str]",
+      "python_return": "List[Tuple[str, Asset]]",
+      "description": "(slot, asset) for the optimal starting lineup, scored by dynasty value (the\nlaminar greedy assignment from `lineup`)."
+    },
+    {
+      "name": "ff.analysis.fit.startable_value",
+      "source": "src/ff/analysis/fit.py",
+      "line": 75,
+      "python_parameters": "assets: List[Asset], roster_positions: List[str]",
+      "python_return": "Tuple[int, Dict[str, int]]",
+      "description": "Optimal starting-lineup value over `assets`, scored by dynasty value.\n\nReturns (total starter value, {player_position: starter value}). Reuses the\nlaminar greedy assignment from `lineup`, so a WR filling a FLEX still counts\nunder WR."
+    },
+    {
+      "name": "ff.analysis.fit.positional_standing",
+      "source": "src/ff/analysis/fit.py",
+      "line": 92,
+      "python_parameters": "my_val: RosterValuation, all_vals: List[RosterValuation], roster_positions: List[str]",
+      "python_return": "List[PositionStanding]",
+      "description": "Your startable value per position vs the league median startable value."
+    },
+    {
+      "name": "ff.analysis.fit.score_candidate",
+      "source": "src/ff/analysis/fit.py",
+      "line": 133,
+      "python_parameters": "candidate: Asset, base_starter_value: int, my_assets: List[Asset], roster_positions: List[str], standing_by_pos: Dict[str, PositionStanding], weights: Dict[str, float], status: str, market_rank: int",
+      "python_return": "DraftFit",
+      "description": "Score one available player for this team. Anchor = dynasty value; the\ntilts are bounded fractions of that anchor."
+    },
+    {
+      "name": "ff.analysis.fit.rank_fits",
+      "source": "src/ff/analysis/fit.py",
+      "line": 171,
+      "python_parameters": "candidates: List[Asset], my_val: RosterValuation, all_vals: List[RosterValuation], roster_positions: List[str], status: str, limit: int",
+      "python_return": "Tuple[TeamContext, List[DraftFit]]",
+      "description": "Score the value-sorted `candidates` for this team and return the top\n`limit` by FitScore, plus the team context for the header. `market_rank` is\ncaptured from the incoming (value-sorted) order before re-sorting."
+    },
+    {
+      "name": "ff.analysis.lineup.project_points",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 47,
+      "python_parameters": "stats: Dict[str, Any], scoring: Dict[str, Any]",
+      "python_return": "float",
+      "description": "Fantasy points for one projected stat line under the league's scoring.\n\nPurely data-driven: multiply every stat key the league scores by its weight.\nThis already covers position bonuses, because Sleeper's projection exposes\nthem as their own stat keys - `bonus_rec_te` (TE premium), `bonus_rec_wr`,\n`bonus_pass_yd_300`, etc. - each equal to the count it applies to. Do NOT add\nTEP separately: the projection's `bonus_rec_te` stat already carries it, so a\nmanual bonus would double-count. Verified against Sleeper's own\n`pts_half_ppr` (WR/TE/K match to the cent)."
+    },
+    {
+      "name": "ff.analysis.lineup.projected_points",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 66,
+      "python_parameters": "roster: Roster, projections: Dict[str, Dict[str, Any]], scoring: Dict[str, Any], players_meta: Optional[Dict[str, Any]]",
+      "python_return": "Dict[str, Dict[str, Any]]",
+      "description": "player_id -> {name, position, points} for everyone on the roster."
+    },
+    {
+      "name": "ff.analysis.lineup.starting_slots",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 84,
+      "python_parameters": "roster_positions: List[str]",
+      "python_return": "List[str]",
+      "description": "The ordered starting slots we optimize (duplicates kept, e.g. two 'RB').\n\nBench tokens (BN/IR/TAXI) and unsupported overlapping flexes are dropped, so\nthe result is exactly the laminar slots the greedy assignment is optimal for."
+    },
+    {
+      "name": "ff.analysis.lineup.optimal_lineup",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 120,
+      "python_parameters": "roster: Roster, projections: Dict[str, Dict[str, Any]], scoring: Dict[str, Any], roster_positions: List[str], players_meta: Optional[Dict[str, Any]]=None, season: str='', week: int=0, weekly: Optional[WeeklyContext]=None, required_start: Optional[str]=None, exclude: Optional[set]=None, contingencies: bool=True",
+      "python_return": "Lineup",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.lineup.unavailable",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 252,
+      "python_parameters": "fact: WeeklyPlayer",
+      "python_return": "bool",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.lineup.game_locked",
+      "source": "src/ff/analysis/lineup.py",
+      "line": 256,
+      "python_parameters": "fact: WeeklyPlayer, weekly: WeeklyContext",
+      "python_return": "bool",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.movers.value_redraft_gap",
+      "source": "src/ff/analysis/movers.py",
+      "line": 10,
+      "python_parameters": "a: Asset, min_value: int=1000",
+      "python_return": "Optional[float]",
+      "description": "(dynasty - redraft) / redraft * 100, or None when not comparable.\n\nNone for a pick, a player with no redraft value, or either value below\n`min_value` - so callers (movers, fit) degrade to a neutral signal instead of\na meaningless +100000% gap on a deep stash with redraft ~1. Positive means\ndynasty > redraft (young/ascending); negative means aging win-now value."
+    },
+    {
+      "name": "ff.analysis.movers.top_movers",
+      "source": "src/ff/analysis/movers.py",
+      "line": 25,
+      "python_parameters": "book: ValueBook, buy: bool=False, limit: int=20, min_value: int=1000",
+      "python_return": "List[Tuple[Asset, float]]",
+      "description": "Return (asset, gap_pct) ranked.\n\ngap_pct = (dynasty - redraft) / redraft * 100.\n  buy=True  -> dynasty >> redraft first (buy-low, young upside).\n  buy=False -> redraft >> dynasty first (sell-high, aging win-now value).\n\n`min_value` floors BOTH values so the list is real contributors. Without it,\ndeep stashes with redraft ~1 produce meaningless +100000% gaps and bury the\ngenuine buy-lows. Players below the floor in either value are dropped."
+    },
+    {
+      "name": "ff.analysis.movers.find_arbitrage_movers",
+      "source": "src/ff/analysis/movers.py",
+      "line": 66,
+      "python_parameters": "rosters: Optional[Union[List[Roster], ValueBook]]=None, book: Optional[ValueBook]=None, min_value: int=1000, limit: int=20, market: Optional[str]=None",
+      "python_return": "List[ArbitrageMover]",
+      "description": "Scan and rank assets with market valuation discrepancies between FC and secondary market (Dynasty Dealer).\n\nIf rosters is supplied, attaches owning team info to each arbitrage opportunity.\nmarket can be 'dealer' (assets where Dealer > FC) or 'fc' (assets where FC > Dealer).\nAccepts 'ktc' as a legacy alias for 'dealer'."
+    },
+    {
+      "name": "ff.analysis.picks.pick_tier",
+      "source": "src/ff/analysis/picks.py",
+      "line": 23,
+      "python_parameters": "power_rank: Optional[int], num_teams: int",
+      "python_return": "str",
+      "description": "Early/mid/late from the ORIGINAL team's power rank: better team, later\npick. Thirds, like `detect_status`; unknown rank prices neutrally as mid."
+    },
+    {
+      "name": "ff.analysis.picks.price_pick",
+      "source": "src/ff/analysis/picks.py",
+      "line": 36,
+      "python_parameters": "book: ValueBook, season: str, round_: int, tier: str",
+      "python_return": "Tuple[int, Optional[str]]",
+      "description": "(value, tier_used) for a (season, round) pick. Tiered entry when\nFantasyCalc has one, else the flat round entry (tier_used=None), else 0."
+    },
+    {
+      "name": "ff.analysis.picks.pick_ledger",
+      "source": "src/ff/analysis/picks.py",
+      "line": 49,
+      "python_parameters": "rosters: List[Roster], traded_picks: List[Dict[str, Any]], book: ValueBook, power_ranks: Dict[int, Optional[int]], *, seasons: List[str], rounds: int",
+      "python_return": "List[TeamPicks]",
+      "description": "Every team's future picks, reconciled and valued, best capital first.\n\n`rounds` is the caller's best guess at the rookie-draft round count; a traded\npick in a deeper round proves the draft has at least that many, so the ledger\nextends itself rather than silently dropping owned capital."
+    },
+    {
+      "name": "ff.analysis.roster.value_roster",
+      "source": "src/ff/analysis/roster.py",
+      "line": 13,
+      "python_parameters": "roster: Roster, book: ValueBook, players_meta: Optional[Dict[str, Any]]=None",
+      "python_return": "RosterValuation",
+      "description": "Build a priced valuation for one roster.\n\nPlayers FantasyCalc covers contribute their dynasty value; everyone else\n(kickers, defenses, deep bench) is listed under `unvalued` at value 0 so the\nroster view is still complete."
+    },
+    {
+      "name": "ff.analysis.roster.value_all_rosters",
+      "source": "src/ff/analysis/roster.py",
+      "line": 62,
+      "python_parameters": "rosters: List[Roster], book: ValueBook, players_meta: Optional[Dict[str, Any]]=None",
+      "python_return": "List[RosterValuation]",
+      "description": "Value every roster and assign power ranks (1 = most valuable)."
+    },
+    {
+      "name": "ff.analysis.trade.evaluate_trade",
+      "source": "src/ff/analysis/trade.py",
+      "line": 48,
+      "python_parameters": "give_inputs: Optional[List[str]]=None, get_inputs: Optional[List[str]]=None, book: Optional[ValueBook]=None, *, give: Optional[List[str]]=None, get: Optional[List[str]]=None, include_secondary: bool=True, include_ktc: bool=True, players_meta: Optional[Dict[str, Any]]=None",
+      "python_return": "TradeEvaluation",
+      "description": "Evaluate trade given assets to give and assets to receive."
+    },
+    {
+      "name": "ff.analysis.trade.analyze_trade",
+      "source": "src/ff/analysis/trade.py",
+      "line": 80,
+      "python_parameters": "side_a_tokens: List[str], side_b_tokens: List[str], book: ValueBook, labels: Tuple[str, str]=('Side A', 'Side B'), include_secondary: bool=True, include_ktc: bool=True, players_meta: Optional[Dict[str, Any]]=None",
+      "python_return": "Tuple[TradeEvaluation, List[str]]",
+      "description": "Returns (evaluation, unresolved_tokens).\n\nThe evaluation is symmetric in the two sides; `delta` is `value_a - value_b`,\nso whichever list you pass as side_a is the side that \"wins\" when delta > 0.\nThe CLI passes what you receive as side_a and what you give as side_b, so a\npositive delta means the trade favors you. Unresolved tokens are surfaced,\nnever silently dropped - a missing player would otherwise make a trade look\nlopsided."
+    },
+    {
+      "name": "ff.analysis.trade.apply_site_adjustments",
+      "source": "src/ff/analysis/trade.py",
+      "line": 117,
+      "python_parameters": "evaluation: TradeEvaluation",
+      "python_return": "TradeEvaluation",
+      "description": "Set both sites' package adjustments on the sides (side_a = the site's Team 1).\n\nFantasyCalc: its dynasty waiver adjustment (redraft is not modeled, so it stays\nNone there). KTC: its value adjustment, only when every asset has a KTC value\nand KTC's top value is known; a failed solve leaves it None."
+    },
+    {
+      "name": "ff.analysis.trade.offer_verdict",
+      "source": "src/ff/analysis/trade.py",
+      "line": 137,
+      "python_parameters": "evaluation: TradeEvaluation, threshold_pct: float=OFFER_THRESHOLD_PCT, calculator_problems: Sequence[str]=()",
+      "python_return": "OfferVerdict",
+      "description": "The offer rule, judged only on numbers the sites themselves would show.\n\nPASS: on the site-adjusted totals the gap is under `threshold_pct` of the larger\nside in FantasyCalc AND in KTC, and KTC's own verdict reads \"Fair Trade\".\nCANNOT_JUDGE when any input the sites would need is missing, or when a site's\ncalculator code has changed since ff's port was verified (`calculator_problems`,\nfrom ff.values.calculators_live)."
+    },
+    {
+      "name": "ff.analysis.trade.position_deltas",
+      "source": "src/ff/analysis/trade.py",
+      "line": 182,
+      "python_parameters": "evaluation: TradeEvaluation",
+      "python_return": "Dict[str, int]",
+      "description": "Net RAW value gained per position from side A's perspective (A minus B);\npackage adjustments belong to no position."
+    },
+    {
+      "name": "ff.analysis.trade.secondary_position_deltas",
+      "source": "src/ff/analysis/trade.py",
+      "line": 195,
+      "python_parameters": "evaluation: TradeEvaluation",
+      "python_return": "Dict[str, int]",
+      "description": "Net RAW secondary market value gained per position from side A's perspective (A minus B)."
+    },
+    {
+      "name": "ff.analysis.waivers.waiver_positions",
+      "source": "src/ff/analysis/waivers.py",
+      "line": 18,
+      "python_parameters": "roster_positions: List[str]",
+      "python_return": "set",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.waivers.waiver_targets",
+      "source": "src/ff/analysis/waivers.py",
+      "line": 24,
+      "python_parameters": "trending: List[Dict[str, Any]], book: ValueBook, rosters: List[Roster], players_meta: Optional[Dict[str, Any]]=None, limit: int=25, free_agents_only: bool=True, is_superflex: bool=True, position: Optional[str]=None, roster_positions: Optional[List[str]]=None, trending_only: bool=False",
+      "python_return": "List[WaiverTarget]",
+      "description": null
+    },
+    {
+      "name": "ff.analysis.weekly_waivers.weekly_waivers",
+      "source": "src/ff/analysis/weekly_waivers.py",
+      "line": 12,
+      "python_parameters": "roster: Roster, rosters: List[Roster], projections: dict, scoring: dict, roster_positions: List[str], meta: dict, weekly: WeeklyContext, season: str, week: int, position: Optional[str]=None, limit: int=20, trending_ids: Optional[set]=None",
+      "python_return": "WeeklyWaivers",
+      "description": null
+    }
+  ],
+  "auxiliary_script_boundaries": [
+    {
+      "path": "python scripts/find_offers.py",
+      "source": "scripts/find_offers.py",
+      "inputs": {
+        "--sell": "required repeatable asset label",
+        "--to": "required repeatable manager Sleeper username",
+        "--with": "optional repeatable owned balancer labels",
+        "--max-age": "float, default 26",
+        "--limit": "int, default 5",
+        "--years": "int, default 3"
+      },
+      "output": "Human-readable passing packages, site-adjusted totals, percentages, lineup gain, incoming roles/flags and pick origin/tier. Pure search returns Python row dictionaries.",
+      "errors": "argparse usage or unowned/unpriced --sell exits 2; calculator drift exits 1; an unknown --to manager is printed and skipped (the run may exit 0); unresolved --with balancers are omitted; uncaught config/provider/roster failures may propagate; no transaction execution",
+      "notes": "Uses one fresh values fetch and calculator drift verification, named manager-owned assets and tiered future picks. Separate script, not an ff command."
+    },
+    {
+      "path": "node scripts/calculator_oracle.mjs",
+      "source": "scripts/calculator_oracle.mjs",
+      "runtime": "Node >=18, no npm dependencies",
+      "inputs": {
+        "--generate": "prints golden-vector JSON",
+        "--check": "fixture filename; recompute with live site JS",
+        "--eval": "stdin JSON {fc_params, ktc_tep, ktc_format, ktc_html?, trades:[{side1, side2}]}",
+        "--date": "optional generated-date label"
+      },
+      "output": "JSON vectors, parity-check results or site values/adjustments/totals/verdicts to stdout; no files unless shell redirected",
+      "errors": "nonzero on network/shape/execution/parity/coverage failure",
+      "notes": "Fetches provider calculator pages/bundles and values endpoint; executes extracted source in node:vm for parity testing, outside application runtime."
+    }
+  ],
+  "error_contracts": {
+    "cli_usage": {
+      "boundary": "Typer/Click parser",
+      "exit_code": 2,
+      "shape": "Terminal usage/error text; no JSON envelope",
+      "triggers": [
+        "missing required argument/option",
+        "argument conversion failure",
+        "unknown command/option"
+      ]
+    },
+    "cli_expected": {
+      "boundary": "cli._fail / guarded commands",
+      "exit_code": 1,
+      "shape": "Rich-rendered error <message>",
+      "triggers": [
+        "missing configuration",
+        "team not found",
+        "invalid command mode",
+        "Requests RequestException",
+        "ValueError"
+      ],
+      "notes": "_guard also maps Pydantic ValidationError and JSONDecodeError to a corrupt/outdated-config message. It does not catch every exception."
+    },
+    "jev_clarification": {
+      "boundary": "cli._ask_jev",
+      "exit_code": 3,
+      "shape": "Plain clarification message; no result/tool execution for interpretation refusal",
+      "internal_exception": "Clarification(ValueError)",
+      "internal_attributes": {
+        "question": "Optional[str]",
+        "confidence": "Optional[float]"
+      },
+      "triggers": [
+        "unsupported action/detail",
+        "unresolved team/player identity",
+        "abstaining or low-confidence answer"
+      ]
+    },
+    "jev_service": {
+      "boundary": "JevClient / cli._ask_jev / config set-jev-key",
+      "exit_code": 1,
+      "shape": "error: <safe fixed message>",
+      "internal_exception": "JevError(RuntimeError)",
+      "triggers": [
+        "missing/invalid key",
+        "401/403",
+        "exhausted 429",
+        "other non-200 HTTP status",
+        "timeout/network error",
+        "invalid reply",
+        "key-file I/O error"
+      ]
+    },
+    "local_ask_printed_failure": {
+      "boundary": "cli.ask local backends",
+      "exit_code": 0,
+      "shape": "Printed warning/error followed by normal return; no uniform error JSON",
+      "triggers": [
+        "unknown tool",
+        "onboarding ValueError",
+        "missing username/config for dispatched operation",
+        "caught tool calculation failure"
+      ],
+      "notes": "Strict QA can raise instead. Runner failures use cli_expected/exit 1; failures outside these catches may propagate."
+    },
+    "qa_strict": {
+      "boundary": "qa.engine.run_qa",
+      "shape": "QAInvariantError(command, errors: List[str]); message begins QA invariant violation in '<command>'",
+      "exit_code": 1,
+      "notes": "Ordinary uncaught-exception process exit, not a friendly error explicitly handled by _guard. In non-strict modes, QA emits reports/warnings instead."
+    },
+    "dispatcher_value_error": {
+      "boundary": "services.llm.dispatcher.dispatch_tool",
+      "shape": "Native ValueError(message)",
+      "triggers": [
+        "unregistered tool",
+        "team not found",
+        "required fresh weekly context absent",
+        "weekly request incompatible with current-week snapshot",
+        "analysis eligibility/timing errors"
+      ],
+      "notes": "No process exit code at the function boundary; the caller decides how to report it."
+    },
+    "public_http": {
+      "boundary": "core.http.get_json",
+      "shape": "Requests exception (HTTPError/connection/timeout) or JSON decoding error; no normalized upstream error body",
+      "notes": "GET retries 429/500/502/503/504 up to four times; timeout 30 seconds. Corrupt cached JSON is refetched. Guarded CLI maps errors to cli_expected."
+    },
+    "weekly_shape": {
+      "boundary": "services.weekly / projections.client",
+      "shape": "Native ValueError(message)",
+      "triggers": [
+        "wrong season/week/projection shape",
+        "schedule-source disagreement",
+        "missing fresh player identity/status",
+        "missing/mismatched matchup starters",
+        "unknown or unsupported weekly state"
+      ]
+    },
+    "secondary_degraded": {
+      "boundary": "values.ktc / ValuesClient.fetch",
+      "shape": "Empty normalized secondary mapping / Asset.secondary_value = null; often logged warning",
+      "notes": "Optional fetch/parse failure degrades rather than aborting primary valuation. No promised provider error envelope."
+    },
+    "unexpected_exception": {
+      "boundary": "uncaught application exception",
+      "exit_code": 1,
+      "shape": "Python exception/traceback",
+      "notes": "Not all file I/O or programming errors are handled by _guard."
+    },
+    "calculator_drift": {
+      "boundary": "values.calculators_live.check_calculators",
+      "shape": "List[str] of missing/changed bundle or formula problems, including safe exception class names",
+      "notes": "Problems make direct both-market trade OfferVerdict CANNOT_JUDGE rather than trusting stale calculator math. get_text uses browser User-Agent and TLS-only curl fallback, without JSON-session retries."
+    }
+  },
+  "model_sources_and_computed_properties": {
+    "ArbitrageMover": {
+      "source": "src/ff/contracts/models.py",
+      "line": 611,
+      "ordinary_properties_not_in_model_dump": [
+        "ktc_value",
+        "dealer_value",
+        "compared_value"
+      ]
+    },
+    "Asset": {
+      "source": "src/ff/contracts/models.py",
+      "line": 73,
+      "ordinary_properties_not_in_model_dump": [
+        "ktc_value",
+        "dealer_value",
+        "is_pick",
+        "injury_tag",
+        "depth_tag",
+        "depth_role",
+        "status_label"
+      ]
+    },
+    "ComparisonOption": {
+      "source": "src/ff/contracts/models.py",
+      "line": 776,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "DraftFit": {
+      "source": "src/ff/contracts/models.py",
+      "line": 819,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "DraftPickInfo": {
+      "source": "src/ff/contracts/models.py",
+      "line": 196,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "Format": {
+      "source": "src/ff/contracts/models.py",
+      "line": 17,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "FuturePick": {
+      "source": "src/ff/contracts/models.py",
+      "line": 208,
+      "ordinary_properties_not_in_model_dump": [
+        "label"
+      ]
+    },
+    "Lineup": {
+      "source": "src/ff/contracts/models.py",
+      "line": 740,
+      "ordinary_properties_not_in_model_dump": [
+        "total"
+      ]
+    },
+    "LineupSlot": {
+      "source": "src/ff/contracts/models.py",
+      "line": 726,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "NewsItem": {
+      "source": "src/ff/contracts/models.py",
+      "line": 833,
+      "ordinary_properties_not_in_model_dump": [
+        "published_date"
+      ]
+    },
+    "OfferVerdict": {
+      "source": "src/ff/contracts/models.py",
+      "line": 593,
+      "ordinary_properties_not_in_model_dump": [
+        "passes"
+      ]
+    },
+    "PlayerComparison": {
+      "source": "src/ff/contracts/models.py",
+      "line": 785,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "PositionStanding": {
+      "source": "src/ff/contracts/models.py",
+      "line": 792,
+      "ordinary_properties_not_in_model_dump": [
+        "gap",
+        "is_hole"
+      ]
+    },
+    "Roster": {
+      "source": "src/ff/contracts/models.py",
+      "line": 247,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "RosterAudit": {
+      "source": "src/ff/contracts/models.py",
+      "line": 312,
+      "ordinary_properties_not_in_model_dump": [
+        "starters",
+        "bench",
+        "taxi",
+        "ir",
+        "active_count",
+        "active_cap",
+        "active_open",
+        "taxi_open",
+        "ir_open"
+      ]
+    },
+    "RosterSlot": {
+      "source": "src/ff/contracts/models.py",
+      "line": 278,
+      "ordinary_properties_not_in_model_dump": [
+        "depth_role",
+        "is_active"
+      ]
+    },
+    "RosterValuation": {
+      "source": "src/ff/contracts/models.py",
+      "line": 265,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "TeamContext": {
+      "source": "src/ff/contracts/models.py",
+      "line": 809,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "TeamPicks": {
+      "source": "src/ff/contracts/models.py",
+      "line": 235,
+      "ordinary_properties_not_in_model_dump": [
+        "total_value"
+      ]
+    },
+    "TradeEvaluation": {
+      "source": "src/ff/contracts/models.py",
+      "line": 420,
+      "ordinary_properties_not_in_model_dump": [
+        "value_a",
+        "value_b",
+        "raw_value_a",
+        "raw_value_b",
+        "delta",
+        "pct_diff",
+        "secondary_value_a",
+        "secondary_value_b",
+        "raw_secondary_value_a",
+        "raw_secondary_value_b",
+        "secondary_site_pct",
+        "secondary_delta",
+        "secondary_pct_diff",
+        "ktc_value_a",
+        "dealer_value_a",
+        "ktc_value_b",
+        "dealer_value_b",
+        "ktc_delta",
+        "dealer_delta",
+        "ktc_pct_diff",
+        "dealer_pct_diff"
+      ]
+    },
+    "TradeSide": {
+      "source": "src/ff/contracts/models.py",
+      "line": 373,
+      "ordinary_properties_not_in_model_dump": [
+        "total",
+        "adjusted_total",
+        "secondary_complete",
+        "secondary_adjusted_total",
+        "secondary_total",
+        "ktc_total",
+        "dealer_total"
+      ]
+    },
+    "WaiverTarget": {
+      "source": "src/ff/contracts/models.py",
+      "line": 682,
+      "ordinary_properties_not_in_model_dump": [
+        "depth_role"
+      ]
+    },
+    "WeeklyContext": {
+      "source": "src/ff/contracts/models.py",
+      "line": 719,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "WeeklyPlayer": {
+      "source": "src/ff/contracts/models.py",
+      "line": 709,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "WeeklyWaiverTarget": {
+      "source": "src/ff/contracts/models.py",
+      "line": 758,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "WeeklyWaivers": {
+      "source": "src/ff/contracts/models.py",
+      "line": 769,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "Config": {
+      "source": "src/ff/core/config.py",
+      "line": 34,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "QACheck": {
+      "source": "src/ff/qa/models.py",
+      "line": 9,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "QAReport": {
+      "source": "src/ff/qa/models.py",
+      "line": 18,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "ChoiceAnswer": {
+      "source": "src/ff/services/llm/jev.py",
+      "line": 83,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "JevResponse": {
+      "source": "src/ff/services/llm/jev.py",
+      "line": 90,
+      "ordinary_properties_not_in_model_dump": []
+    },
+    "Route": {
+      "source": "src/ff/services/llm/jev.py",
+      "line": 96,
+      "ordinary_properties_not_in_model_dump": []
+    }
+  },
+  "model_compatibility": {
+    "Asset": "Before validation, missing/null secondary_value accepts ktc_value then dealer_value; both alias properties proxy secondary_value. Output stores canonical secondary_value.",
+    "ArbitrageMover": "Legacy dealer_value/ktc_value constructor/property compatibility maps to canonical secondary_value; see model validator.",
+    "string_domains": "Many domain fields (kind, slot, availability, competitive status) are str with comments, not enforced Literal enums. Preserve actual Pydantic schema."
+  },
+  "$defs": {
+    "Asset": {
+      "description": "A tradeable thing: a player or a draft pick, with its dynasty value.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "default": "player",
+          "title": "Kind",
+          "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team"
+        },
+        "age": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age"
+        },
+        "value": {
+          "default": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "secondary_value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secondary Value"
+        },
+        "secondary_approx": {
+          "default": false,
+          "title": "Secondary Approx",
+          "type": "boolean"
+        },
+        "overall_rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overall Rank"
+        },
+        "position_rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position Rank"
+        },
+        "trend_30day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend 30Day"
+        },
+        "redraft_value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redraft Value"
+        },
+        "injury_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Injury Status"
+        },
+        "injury_body_part": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Injury Body Part"
+        },
+        "depth_chart_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Chart Order"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "ArbitrageMover": {
+      "description": "An asset with valuation discrepancies across FantasyCalc and secondary market (Dynasty Dealer / KTC).",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "fc_value": {
+          "default": 0,
+          "title": "Fc Value",
+          "type": "integer"
+        },
+        "secondary_value": {
+          "default": 0,
+          "title": "Secondary Value",
+          "type": "integer"
+        },
+        "secondary_scaled": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secondary Scaled"
+        },
+        "diff": {
+          "default": 0,
+          "title": "Diff",
+          "type": "integer"
+        },
+        "pct_diff": {
+          "default": 0.0,
+          "title": "Pct Diff",
+          "type": "number"
+        },
+        "diff_pct": {
+          "default": 0.0,
+          "title": "Diff Pct",
+          "type": "number"
+        },
+        "roster_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roster Id"
+        },
+        "team_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team Name"
+        },
+        "market_bias": {
+          "default": "",
+          "title": "Market Bias",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "title": "ArbitrageMover",
+      "type": "object"
+    },
+    "Lineup": {
+      "description": "An optimal starting lineup for one week plus the leftover bench.",
+      "properties": {
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/LineupSlot"
+          },
+          "title": "Slots",
+          "type": "array"
+        },
+        "bench": {
+          "items": {
+            "$ref": "#/$defs/LineupSlot"
+          },
+          "title": "Bench",
+          "type": "array"
+        },
+        "season": {
+          "default": "",
+          "title": "Season",
+          "type": "string"
+        },
+        "week": {
+          "default": 0,
+          "title": "Week",
+          "type": "integer"
+        },
+        "unsupported_slots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unsupported Slots",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        }
+      },
+      "title": "Lineup",
+      "type": "object"
+    },
+    "LineupSlot": {
+      "description": "One starting slot (or a bench entry) with its projected player.",
+      "properties": {
+        "slot": {
+          "title": "Slot",
+          "type": "string"
+        },
+        "player_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Player Id"
+        },
+        "name": {
+          "default": "(empty)",
+          "title": "Name",
+          "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        },
+        "points": {
+          "default": 0.0,
+          "title": "Points",
+          "type": "number"
+        },
+        "points_kind": {
+          "default": "projected",
+          "title": "Points Kind",
+          "type": "string"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        },
+        "availability": {
+          "default": "unverified",
+          "title": "Availability",
+          "type": "string"
+        },
+        "kickoff": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kickoff"
+        }
+      },
+      "required": [
+        "slot"
+      ],
+      "title": "LineupSlot",
+      "type": "object"
+    },
+    "ComparisonOption": {
+      "properties": {
+        "player_id": {
+          "title": "Player Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "projected_points": {
+          "title": "Projected Points",
+          "type": "number"
+        },
+        "availability": {
+          "title": "Availability",
+          "type": "string"
+        },
+        "lineup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lineup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "player_id",
+        "name",
+        "projected_points",
+        "availability"
+      ],
+      "title": "ComparisonOption",
+      "type": "object"
+    },
+    "DraftFit": {
+      "description": "One available player scored for *this* team: market value (the anchor)\nadjusted by roster-fit and win-now/rebuild horizon.",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "fit_score": {
+          "default": 0.0,
+          "title": "Fit Score",
+          "type": "number"
+        },
+        "market_rank": {
+          "default": 0,
+          "title": "Market Rank",
+          "type": "integer"
+        },
+        "marginal_starter": {
+          "default": 0,
+          "title": "Marginal Starter",
+          "type": "integer"
+        },
+        "upgrade_tilt": {
+          "default": 0.0,
+          "title": "Upgrade Tilt",
+          "type": "number"
+        },
+        "horizon_tilt": {
+          "default": 0.0,
+          "title": "Horizon Tilt",
+          "type": "number"
+        },
+        "standing_tilt": {
+          "default": 0.0,
+          "title": "Standing Tilt",
+          "type": "number"
+        },
+        "why": {
+          "default": "",
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "title": "DraftFit",
+      "type": "object"
+    },
+    "DraftPickInfo": {
+      "description": "One draft pick a roster owns - upcoming, or already used on a player.",
+      "properties": {
+        "pick_no": {
+          "title": "Pick No",
+          "type": "integer"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "slot": {
+          "title": "Slot",
+          "type": "integer"
+        },
+        "used": {
+          "default": false,
+          "title": "Used",
+          "type": "boolean"
+        },
+        "player_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Player Id"
+        },
+        "player_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Player Name"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        }
+      },
+      "required": [
+        "pick_no",
+        "round",
+        "slot"
+      ],
+      "title": "DraftPickInfo",
+      "type": "object"
+    },
+    "Format": {
+      "description": "A league's scoring/roster format - everything needed to ask FantasyCalc\nfor the *right* values. Derived from Sleeper's own league settings so it is\nalways correct for the user's league (never guessed).",
+      "properties": {
+        "is_dynasty": {
+          "default": true,
+          "title": "Is Dynasty",
+          "type": "boolean"
+        },
+        "superflex": {
+          "default": false,
+          "title": "Superflex",
+          "type": "boolean"
+        },
+        "num_qbs": {
+          "default": 1,
+          "title": "Num Qbs",
+          "type": "integer"
+        },
+        "num_teams": {
+          "default": 12,
+          "title": "Num Teams",
+          "type": "integer"
+        },
+        "ppr": {
+          "default": 1.0,
+          "title": "Ppr",
+          "type": "number"
+        },
+        "tep": {
+          "default": 0.0,
+          "title": "Tep",
+          "type": "number"
+        },
+        "te_slots": {
+          "default": 1,
+          "title": "Te Slots",
+          "type": "integer"
+        }
+      },
+      "title": "Format",
+      "type": "object"
+    },
+    "FuturePick": {
+      "description": "One future rookie-draft pick a roster currently owns.\n\nSleeper has no per-team pick endpoint: ownership is the default endowment\n(every team owns its own pick per season/round) reconciled with the league's\n`traded_picks`. `tier` records which FantasyCalc tier priced it (early/mid/\nlate, from the original team's power rank), None when only the flat round\nvalue existed.",
+      "properties": {
+        "season": {
+          "title": "Season",
+          "type": "string"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "original_roster_id": {
+          "title": "Original Roster Id",
+          "type": "integer"
+        },
+        "original_team": {
+          "default": "",
+          "title": "Original Team",
+          "type": "string"
+        },
+        "acquired": {
+          "default": false,
+          "title": "Acquired",
+          "type": "boolean"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier"
+        },
+        "value": {
+          "default": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "season",
+        "round",
+        "original_roster_id"
+      ],
+      "title": "FuturePick",
+      "type": "object"
+    },
+    "NewsItem": {
+      "description": "One headline from Sleeper's per-player news feed.\n\nThe feed is undocumented and its `metadata` block varies by source (a real\n10-item sample carried `url` on 6 and `analysis` on 7), so every field but\nthe title/description pair is optional and parsing never raises.",
+      "properties": {
+        "published": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published"
+        },
+        "source": {
+          "default": "?",
+          "title": "Source",
+          "type": "string"
+        },
+        "title": {
+          "default": "(untitled)",
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "analysis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Analysis"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "NewsItem",
+      "type": "object"
+    },
+    "OfferVerdict": {
+      "description": "The offer rule: the gap on the site-adjusted totals is under `threshold_pct`\nof the larger side in BOTH FantasyCalc and KTC, and KTC's own verdict is\n\"Fair Trade\". CANNOT_JUDGE lists why (missing prices, redraft, drifted site\ncode...), so a verdict is never reported on numbers the sites would not show.",
+      "properties": {
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "threshold_pct": {
+          "default": 10.0,
+          "title": "Threshold Pct",
+          "type": "number"
+        },
+        "fc_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fc Pct"
+        },
+        "ktc_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ktc Pct"
+        },
+        "ktc_site_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ktc Site Pct"
+        },
+        "ktc_site_fair": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ktc Site Fair"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "OfferVerdict",
+      "type": "object"
+    },
+    "PlayerComparison": {
+      "properties": {
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ComparisonOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "baseline": {
+          "$ref": "#/$defs/Lineup"
+        },
+        "recommendation": {
+          "title": "Recommendation",
+          "type": "string"
+        },
+        "difference": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Difference"
+        }
+      },
+      "required": [
+        "options",
+        "baseline",
+        "recommendation"
+      ],
+      "title": "PlayerComparison",
+      "type": "object"
+    },
+    "PositionStanding": {
+      "description": "Where one roster stands at a position vs the league, by startable value.",
+      "properties": {
+        "position": {
+          "title": "Position",
+          "type": "string"
+        },
+        "mine": {
+          "default": 0,
+          "title": "Mine",
+          "type": "integer"
+        },
+        "median": {
+          "default": 0,
+          "title": "Median",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "position"
+      ],
+      "title": "PositionStanding",
+      "type": "object"
+    },
+    "Roster": {
+      "description": "A team in the league, as Sleeper reports it (before valuation).",
+      "properties": {
+        "roster_id": {
+          "title": "Roster Id",
+          "type": "integer"
+        },
+        "owner_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Id"
+        },
+        "team_name": {
+          "default": "Unknown",
+          "title": "Team Name",
+          "type": "string"
+        },
+        "player_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Ids",
+          "type": "array"
+        },
+        "starters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Starters",
+          "type": "array"
+        },
+        "taxi": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Taxi",
+          "type": "array"
+        },
+        "reserve": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reserve",
+          "type": "array"
+        },
+        "wins": {
+          "default": 0,
+          "title": "Wins",
+          "type": "integer"
+        },
+        "losses": {
+          "default": 0,
+          "title": "Losses",
+          "type": "integer"
+        },
+        "ties": {
+          "default": 0,
+          "title": "Ties",
+          "type": "integer"
+        },
+        "points_for": {
+          "default": 0.0,
+          "title": "Points For",
+          "type": "number"
+        }
+      },
+      "required": [
+        "roster_id"
+      ],
+      "title": "Roster",
+      "type": "object"
+    },
+    "RosterSlot": {
+      "description": "One rostered player, categorized by where they sit, with the signals a\nroster-cleanup decision needs: value, age/experience, and taxi eligibility.",
+      "properties": {
+        "player_id": {
+          "title": "Player Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team"
+        },
+        "depth_chart_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Chart Order"
+        },
+        "age": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age"
+        },
+        "years_exp": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Years Exp"
+        },
+        "value": {
+          "default": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "trend_30day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend 30Day"
+        },
+        "slot": {
+          "default": "BENCH",
+          "title": "Slot",
+          "type": "string"
+        },
+        "taxi_eligible": {
+          "default": false,
+          "title": "Taxi Eligible",
+          "type": "boolean"
+        },
+        "opportunity_score": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opportunity Score"
+        },
+        "injury_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Injury Status"
+        }
+      },
+      "required": [
+        "player_id",
+        "name"
+      ],
+      "title": "RosterSlot",
+      "type": "object"
+    },
+    "RosterAudit": {
+      "description": "A roster's capacity vs its fill, plus ranked drop, IR-move, and taxi-move\nsuggestions - the input to a cleanup decision. Pure, deterministic.",
+      "properties": {
+        "team_name": {
+          "title": "Team Name",
+          "type": "string"
+        },
+        "starter_cap": {
+          "default": 0,
+          "title": "Starter Cap",
+          "type": "integer"
+        },
+        "bench_cap": {
+          "default": 0,
+          "title": "Bench Cap",
+          "type": "integer"
+        },
+        "taxi_cap": {
+          "default": 0,
+          "title": "Taxi Cap",
+          "type": "integer"
+        },
+        "ir_cap": {
+          "default": 0,
+          "title": "Ir Cap",
+          "type": "integer"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/RosterSlot"
+          },
+          "title": "Slots",
+          "type": "array"
+        },
+        "drop_candidates": {
+          "items": {
+            "$ref": "#/$defs/RosterSlot"
+          },
+          "title": "Drop Candidates",
+          "type": "array"
+        },
+        "taxi_candidates": {
+          "items": {
+            "$ref": "#/$defs/RosterSlot"
+          },
+          "title": "Taxi Candidates",
+          "type": "array"
+        },
+        "ir_candidates": {
+          "items": {
+            "$ref": "#/$defs/RosterSlot"
+          },
+          "title": "Ir Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "team_name"
+      ],
+      "title": "RosterAudit",
+      "type": "object"
+    },
+    "RosterValuation": {
+      "description": "A team's roster priced out with dynasty values.",
+      "properties": {
+        "roster_id": {
+          "title": "Roster Id",
+          "type": "integer"
+        },
+        "team_name": {
+          "title": "Team Name",
+          "type": "string"
+        },
+        "total_value": {
+          "default": 0,
+          "title": "Total Value",
+          "type": "integer"
+        },
+        "starters_value": {
+          "default": 0,
+          "title": "Starters Value",
+          "type": "integer"
+        },
+        "by_position": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Position",
+          "type": "object"
+        },
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Asset"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "unvalued": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unvalued",
+          "type": "array"
+        },
+        "power_rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Rank"
+        }
+      },
+      "required": [
+        "roster_id",
+        "team_name"
+      ],
+      "title": "RosterValuation",
+      "type": "object"
+    },
+    "TeamContext": {
+      "description": "A team's competitive status and positional standing - the lens a draft\nrecommendation is made through.",
+      "properties": {
+        "status": {
+          "default": "balanced",
+          "title": "Status",
+          "type": "string"
+        },
+        "power_rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Rank"
+        },
+        "num_teams": {
+          "default": 12,
+          "title": "Num Teams",
+          "type": "integer"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/PositionStanding"
+          },
+          "title": "Standings",
+          "type": "array"
+        }
+      },
+      "title": "TeamContext",
+      "type": "object"
+    },
+    "TeamPicks": {
+      "description": "Every future pick one roster owns, valued - a team's draft capital.",
+      "properties": {
+        "roster_id": {
+          "title": "Roster Id",
+          "type": "integer"
+        },
+        "team_name": {
+          "default": "",
+          "title": "Team Name",
+          "type": "string"
+        },
+        "picks": {
+          "items": {
+            "$ref": "#/$defs/FuturePick"
+          },
+          "title": "Picks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "roster_id"
+      ],
+      "title": "TeamPicks",
+      "type": "object"
+    },
+    "TradeSide": {
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Asset"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "adjustment": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adjustment"
+        },
+        "secondary_adjustment": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secondary Adjustment"
+        }
+      },
+      "title": "TradeSide",
+      "type": "object"
+    },
+    "TradeEvaluation": {
+      "description": "Result of analyzing a proposed trade between two sides.\n\n`value_*` / `secondary_value_*` are the totals each calculator site would show,\ni.e. raw sums plus the side's adjustment (see `TradeSide`); `raw_*` are the\nplain sums. side_a is the site's Team 1.",
+      "properties": {
+        "side_a": {
+          "$ref": "#/$defs/TradeSide"
+        },
+        "side_b": {
+          "$ref": "#/$defs/TradeSide"
+        },
+        "label_a": {
+          "default": "Side A",
+          "title": "Label A",
+          "type": "string"
+        },
+        "label_b": {
+          "default": "Side B",
+          "title": "Label B",
+          "type": "string"
+        },
+        "adjusted": {
+          "default": false,
+          "title": "Adjusted",
+          "type": "boolean"
+        },
+        "is_dynasty": {
+          "default": true,
+          "title": "Is Dynasty",
+          "type": "boolean"
+        },
+        "secondary_top": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secondary Top"
+        },
+        "secondary_hidden": {
+          "default": false,
+          "title": "Secondary Hidden",
+          "type": "boolean"
+        },
+        "unresolved": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "side_a",
+        "side_b"
+      ],
+      "title": "TradeEvaluation",
+      "type": "object"
+    },
+    "WaiverTarget": {
+      "description": "A trending add joined to its dynasty value and roster availability.",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "add_count": {
+          "default": 0,
+          "title": "Add Count",
+          "type": "integer"
+        },
+        "is_rostered": {
+          "default": false,
+          "title": "Is Rostered",
+          "type": "boolean"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team"
+        },
+        "depth_chart_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Chart Order"
+        },
+        "opportunity_score": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opportunity Score"
+        }
+      },
+      "required": [
+        "asset"
+      ],
+      "title": "WaiverTarget",
+      "type": "object"
+    },
+    "WeeklyPlayer": {
+      "description": "Fresh weekly facts; unknown data is explicit, never a guessed healthy player.",
+      "properties": {
+        "kickoff": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kickoff"
+        },
+        "game_status": {
+          "default": "unknown",
+          "title": "Game Status",
+          "type": "string"
+        },
+        "injury_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Injury Status"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "title": "WeeklyPlayer",
+      "type": "object"
+    },
+    "WeeklyContext": {
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "players": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WeeklyPlayer"
+          },
+          "title": "Players",
+          "type": "object"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "blocked_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked Reason"
+        }
+      },
+      "required": [
+        "as_of"
+      ],
+      "title": "WeeklyContext",
+      "type": "object"
+    },
+    "WeeklyWaiverTarget": {
+      "properties": {
+        "player_id": {
+          "title": "Player Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "position": {
+          "title": "Position",
+          "type": "string"
+        },
+        "projected_points": {
+          "title": "Projected Points",
+          "type": "number"
+        },
+        "lineup_gain": {
+          "title": "Lineup Gain",
+          "type": "number"
+        },
+        "displaced": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Displaced",
+          "type": "array"
+        },
+        "availability": {
+          "title": "Availability",
+          "type": "string"
+        },
+        "kickoff": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kickoff"
+        }
+      },
+      "required": [
+        "player_id",
+        "name",
+        "position",
+        "projected_points",
+        "lineup_gain",
+        "availability"
+      ],
+      "title": "WeeklyWaiverTarget",
+      "type": "object"
+    },
+    "WeeklyWaivers": {
+      "properties": {
+        "baseline": {
+          "$ref": "#/$defs/Lineup"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/WeeklyWaiverTarget"
+          },
+          "title": "Targets",
+          "type": "array"
+        },
+        "candidates_evaluated": {
+          "title": "Candidates Evaluated",
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "baseline",
+        "targets",
+        "candidates_evaluated"
+      ],
+      "title": "WeeklyWaivers",
+      "type": "object"
+    },
+    "Config": {
+      "description": "The saved league. Written once by `ff setup`, read by every command.",
+      "properties": {
+        "league_id": {
+          "title": "League Id",
+          "type": "string"
+        },
+        "season": {
+          "title": "Season",
+          "type": "integer"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/$defs/Format",
+          "default": {
+            "is_dynasty": true,
+            "superflex": false,
+            "num_qbs": 1,
+            "num_teams": 12,
+            "ppr": 1.0,
+            "tep": 0.0,
+            "te_slots": 1
+          }
+        },
+        "username": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Username"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        },
+        "user_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Name"
+        },
+        "league_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "League Name"
+        },
+        "llm_backend": {
+          "default": "auto",
+          "title": "Llm Backend",
+          "type": "string"
+        },
+        "ollama_model": {
+          "default": "llama3.2",
+          "title": "Ollama Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "league_id",
+        "season"
+      ],
+      "title": "Config",
+      "type": "object"
+    },
+    "QACheck": {
+      "description": "An individual assertion or sanity check performed during QA.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "is_warning": {
+          "default": false,
+          "title": "Is Warning",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed"
+      ],
+      "title": "QACheck",
+      "type": "object"
+    },
+    "QAReport": {
+      "description": "Aggregated QA report containing results of all checks for a command.",
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/QACheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "checks_passed": {
+          "default": 0,
+          "title": "Checks Passed",
+          "type": "integer"
+        },
+        "checks_failed": {
+          "default": 0,
+          "title": "Checks Failed",
+          "type": "integer"
+        },
+        "checks_warned": {
+          "default": 0,
+          "title": "Checks Warned",
+          "type": "integer"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "duration_ms": {
+          "default": 0.0,
+          "title": "Duration Ms",
+          "type": "number"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "command",
+        "passed"
+      ],
+      "title": "QAReport",
+      "type": "object"
+    },
+    "ChoiceAnswer": {
+      "properties": {
+        "type": {
+          "const": "choice",
+          "title": "Type",
+          "type": "string"
+        },
+        "choice": {
+          "title": "Choice",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "probabilities": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Probabilities",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "choice",
+        "confidence",
+        "probabilities"
+      ],
+      "title": "ChoiceAnswer",
+      "type": "object"
+    },
+    "JevResponse": {
+      "properties": {
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ChoiceAnswer"
+          },
+          "title": "Answers",
+          "type": "object"
+        },
+        "usage": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "model",
+        "answers",
+        "usage"
+      ],
+      "title": "JevResponse",
+      "type": "object"
+    },
+    "Route": {
+      "properties": {
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "kwargs": {
+          "additionalProperties": true,
+          "title": "Kwargs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "tool",
+        "kwargs"
+      ],
+      "title": "Route",
+      "type": "object"
+    },
+    "MoverResult": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "gap_pct": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "asset",
+        "gap_pct"
+      ]
+    },
+    "DraftFitResult": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/TeamContext"
+        },
+        "fits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DraftFit"
+          }
+        }
+      },
+      "required": [
+        "context",
+        "fits"
+      ]
+    },
+    "LocalToolCall": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "kwargs": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "tool"
+      ]
+    },
+    "TypeSafeChoiceQuestion": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "choice"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "criteria": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "instructions",
+        "criteria"
+      ]
+    },
+    "TypeSafeRequest": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/TypeSafeChoiceQuestion"
+          }
+        }
+      },
+      "required": [
+        "model",
+        "state",
+        "questions"
+      ]
+    },
+    "SleeperState": {
+      "type": "object",
+      "properties": {
+        "season": {
+          "type": "string"
+        },
+        "previous_season": {
+          "type": "string"
+        },
+        "week": {
+          "type": "integer"
+        },
+        "display_week": {
+          "type": "integer"
+        }
+      }
+    },
+    "SleeperUser": {
+      "type": "object",
+      "properties": {
+        "user_id": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "team_name": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "SleeperLeague": {
+      "type": "object",
+      "properties": {
+        "league_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "season": {
+          "type": "string"
+        },
+        "season_type": {
+          "type": "string"
+        },
+        "total_rosters": {
+          "type": "integer"
+        },
+        "roster_positions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scoring_settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      }
+    },
+    "SleeperRoster": {
+      "type": "object",
+      "properties": {
+        "roster_id": {
+          "type": "integer"
+        },
+        "owner_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "players": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "starters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "taxi": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reserve": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      }
+    },
+    "SleeperMatchup": {
+      "type": "object",
+      "properties": {
+        "roster_id": {
+          "type": "integer"
+        },
+        "starters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "players_points": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "SleeperPlayer": {
+      "type": "object",
+      "properties": {
+        "player_id": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "first_name": {
+          "type": "string"
+        },
+        "last_name": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string"
+        },
+        "team": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "injury_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "injury_body_part": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "depth_chart_order": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "age": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "years_exp": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "SleeperNews": {
+      "type": "object",
+      "properties": {
+        "published": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "analysis": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "SleeperTradedPick": {
+      "type": "object",
+      "properties": {
+        "season": {
+          "type": "string"
+        },
+        "round": {
+          "type": "integer"
+        },
+        "roster_id": {
+          "type": "integer"
+        },
+        "owner_id": {
+          "type": "integer"
+        },
+        "previous_owner_id": {
+          "type": "integer"
+        }
+      }
+    },
+    "SleeperDraft": {
+      "type": "object",
+      "properties": {
+        "draft_id": {
+          "type": "string"
+        },
+        "season": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "slot_to_roster_id": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "SleeperDraftPick": {
+      "type": "object",
+      "properties": {
+        "pick_no": {
+          "type": "integer"
+        },
+        "round": {
+          "type": "integer"
+        },
+        "draft_slot": {
+          "type": "integer"
+        },
+        "player_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      }
+    },
+    "SleeperTrending": {
+      "type": "object",
+      "properties": {
+        "player_id": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "SleeperProjection": {
+      "type": "object",
+      "properties": {
+        "player_id": {
+          "type": "string"
+        },
+        "season": {
+          "type": "string"
+        },
+        "week": {
+          "type": "integer"
+        },
+        "stats": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "player": {
+          "$ref": "#/$defs/SleeperPlayer"
+        }
+      }
+    },
+    "SleeperScheduleGame": {
+      "type": "object",
+      "properties": {
+        "week": {
+          "type": "integer"
+        },
+        "home": {
+          "type": "string"
+        },
+        "away": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "EspnScoreboard": {
+      "type": "object",
+      "properties": {
+        "season": {
+          "type": "object",
+          "properties": {
+            "year": {
+              "type": "integer"
+            },
+            "type": {
+              "type": "integer"
+            }
+          }
+        },
+        "week": {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer"
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "competitions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "competitors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "team": {
+                            "type": "object",
+                            "properties": {
+                              "abbreviation": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string"
+                            },
+                            "completed": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "FantasyCalcEntry": {
+      "type": "object",
+      "properties": {
+        "player": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "sleeperId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "position": {
+              "type": "string"
+            },
+            "maybeTeam": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maybeAge": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "value": {
+          "type": "integer"
+        },
+        "overallRank": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "positionRank": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trend30Day": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "redraftValue": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "KtcEntry": {
+      "type": "object",
+      "properties": {
+        "sleeper_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sleeperId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "playerName": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string"
+        },
+        "superflexValues": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number"
+            },
+            "tep": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "number"
+                }
+              }
+            },
+            "tepp": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "oneQBValues": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number"
+            },
+            "tep": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "number"
+                }
+              }
+            },
+            "tepp": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "current_value": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        },
+        "base_value": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}
