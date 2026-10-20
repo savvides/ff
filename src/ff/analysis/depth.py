@@ -147,9 +147,15 @@ def opportunity_score(
     injury_status: Optional[str] = None,
     status: Optional[str] = None,
     starter_injury: Optional[str] = None,
+    *,
+    injury_body_part: Optional[str] = None,
+    age: Optional[float] = None,
+    years_exp: Optional[int] = None,
+    secondary_value: Optional[int] = None,
 ) -> int:
     """Composite heuristic: dynasty value x depth chart opportunity x news/health factor."""
     pos = (position or "").upper()
+    on_team = bool(team and team not in ("FA", "None", ""))
     mult = depth_chart_multiplier(
         position, depth_chart_order, team, is_superflex=is_superflex
     )
@@ -164,21 +170,46 @@ def opportunity_score(
         elif "questionable" in sinj:
             mult = min(1.0, mult + 0.10)
 
+    # Young developmental QBs on rookie contracts (age <= 24 or exp <= 2) with
+    # real dynasty market backing (FantasyCalc >= 150 or KTC >= 800) are
+    # redshirting, not cuttable depth.
+    is_young_qb = pos == "QB" and (
+        (age is not None and age <= 24)
+        or (years_exp is not None and years_exp <= 2)
+    )
+    has_market_backing = value >= 150 or (
+        secondary_value is not None and secondary_value >= 800
+    )
+
     # Base value with positional scarcity protection
     base = value if value > 0 else 50
-    if (
+    if is_superflex and on_team and is_young_qb and has_market_backing:
+        base = max(base, 500)
+        mult = max(mult, 0.65)
+    elif (
         is_superflex
         and pos == "QB"
         and depth_chart_order == 2
-        and team
-        and team not in ("FA", "None", "")
+        and on_team
+        and (value >= 100 or is_young_qb or has_market_backing)
     ):
         base = max(base, 400)
 
-    # Player health/injury discount
+    # Player health/injury discount. Healthy game-day scratches ("Out" with
+    # body part "Coach's Decision", common for emergency QB3s) are not medical
+    # injuries and take no haircut.
+    is_healthy_scratch = (
+        (injury_status or "").lower() == "out"
+        and (injury_body_part or "").strip().lower() == "coach's decision"
+        and status not in ("Injured Reserve", "PUP", "DNR")
+    )
     pinj = (
-        injury_status
-        or (status if status in ("Injured Reserve", "Out", "PUP", "DNR") else "")
+        ""
+        if is_healthy_scratch
+        else (
+            injury_status
+            or (status if status in ("Injured Reserve", "Out", "PUP", "DNR") else "")
+        )
     ).lower()
     if any(w in pinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
         health_factor = 0.50
@@ -190,3 +221,4 @@ def opportunity_score(
         health_factor = 1.0
 
     return round(base * mult * health_factor)
+

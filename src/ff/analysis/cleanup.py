@@ -135,6 +135,7 @@ def audit_roster(
             if team and pos and depth_chart_order == 2
             else None
         )
+        age = valued.age if valued and valued.age is not None else m.get("age")
         opp_score = opportunity_score(
             val,
             pos,
@@ -144,6 +145,10 @@ def audit_roster(
             injury_status=m.get("injury_status"),
             status=m.get("status"),
             starter_injury=starter_inj,
+            injury_body_part=m.get("injury_body_part"),
+            age=age,
+            years_exp=years_exp,
+            secondary_value=valued.secondary_value if valued else None,
         )
         slots.append(RosterSlot(
             player_id=pid,
@@ -151,7 +156,7 @@ def audit_roster(
             position=pos,
             team=team,
             depth_chart_order=depth_chart_order,
-            age=(valued.age if valued and valued.age is not None else m.get("age")),
+            age=age,
             years_exp=years_exp,
             value=val,
             opportunity_score=opp_score,
