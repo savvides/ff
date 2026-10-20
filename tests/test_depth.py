@@ -182,3 +182,93 @@ def test_precompute_starter_injuries():
     assert injuries.get(("ATL", "QB")) == "Questionable"
     assert ("TB", "QB") not in injuries
     assert injuries.get(("SF", "RB")) == "Injured Reserve"
+
+
+def test_coachs_decision_not_penalized_as_injury():
+    # Real medical Out takes a 50% haircut
+    medical_out = opportunity_score(
+        500, "WR", 3, "SEA", injury_status="Out", injury_body_part="Ankle"
+    )
+    # Healthy scratch (Coach's Decision) takes no injury haircut (1.0x health)
+    healthy_scratch = opportunity_score(
+        500, "WR", 3, "SEA", injury_status="Out", injury_body_part="Coach's Decision"
+    )
+    assert medical_out == round(500 * 0.75 * 0.50)
+    assert healthy_scratch == round(500 * 0.75 * 1.0)
+
+
+def test_young_superflex_qb_developmental_runway():
+    # Jalen Milroe: 23yo, years_exp=1, QB3, value=265, Out (Coach's Decision)
+    # Gets developmental base floor 500 and multiplier floor 0.65 -> 325
+    milroe_sf = opportunity_score(
+        265,
+        "QB",
+        3,
+        "SEA",
+        is_superflex=True,
+        injury_status="Out",
+        injury_body_part="Coach's Decision",
+        age=23,
+        years_exp=1,
+    )
+    assert milroe_sf == 325
+
+    # Drew Allar: 22yo, years_exp=0, QB4, value=825, Out (Coach's Decision)
+    # Keeps his 825 value (>500 floor) with 0.65 developmental multiplier -> 536
+    allar_sf = opportunity_score(
+        825,
+        "QB",
+        4,
+        "PIT",
+        is_superflex=True,
+        injury_status="Out",
+        injury_body_part="Coach's Decision",
+        age=22,
+        years_exp=0,
+    )
+    assert allar_sf == round(825 * 0.65)
+
+    # In 1QB (is_superflex=False), no Superflex developmental protection applies
+    milroe_1qb = opportunity_score(
+        265,
+        "QB",
+        3,
+        "SEA",
+        is_superflex=False,
+        injury_status="Out",
+        injury_body_part="Coach's Decision",
+        age=23,
+        years_exp=1,
+    )
+    assert milroe_1qb == round(265 * 0.25)
+
+
+def test_young_superflex_qb_backed_by_ktc_secondary_value():
+    # Trade-log value lagged (80), but KTC crowd value is 1,200 -> still protected at 325
+    lagged_qb = opportunity_score(
+        80,
+        "QB",
+        3,
+        "IND",
+        is_superflex=True,
+        age=23,
+        years_exp=0,
+        secondary_value=1200,
+    )
+    assert lagged_qb == 325
+
+
+def test_zero_value_veteran_qb2_does_not_get_scarcity_floor():
+    # 0-value 32yo journeyman QB2 does NOT get boosted to 300
+    vet_zero_qb2 = opportunity_score(
+        0, "QB", 2, "LAR", is_superflex=True, age=32, years_exp=8
+    )
+    assert vet_zero_qb2 == round(50 * 0.75)
+
+    # Noise-valued (value=4) 38yo veteran QB2 (e.g. Andy Dalton) also does NOT get boosted 100x to 400
+    vet_noise_qb2 = opportunity_score(
+        4, "QB", 2, "ATL", is_superflex=True, age=38, years_exp=15
+    )
+    assert vet_noise_qb2 == round(4 * 0.75)
+
+

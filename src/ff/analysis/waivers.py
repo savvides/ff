@@ -83,6 +83,10 @@ def waiver_targets(
             injury_status=meta.get("injury_status"),
             status=meta.get("status"),
             starter_injury=starter_inj,
+            injury_body_part=meta.get("injury_body_part"),
+            age=asset.age if asset.age is not None else meta.get("age"),
+            years_exp=meta.get("years_exp"),
+            secondary_value=asset.secondary_value,
         )
         targets.append(
             WaiverTarget(

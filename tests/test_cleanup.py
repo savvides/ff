@@ -185,12 +185,49 @@ def test_audit_roster_depth_chart_contingent_drop():
         drop_limit=4,
     )
 
-    # Milroe (QB3) and Tyreek (FA) should be prioritized for cuts ahead of Daniels (QB2) and McGowan (RB2)
+    # Unsigned 31yo FA WR (tyreek: 177) is cut first; young QB3 (milroe: 325) is
+    # protected above FA/depth skill players while still trailing QB2 (daniels: 375)
+    # and high-value RB2 (mcgowan: 563).
     drop_pids = [s.player_id for s in audit.drop_candidates]
-    assert drop_pids[0] == "milroe"
-    assert drop_pids[1] == "tyreek"
+    assert drop_pids[0] == "tyreek"
+    assert drop_pids[1] == "milroe"
     assert drop_pids[2] == "daniels"
     assert drop_pids[3] == "mcgowan"
+
+
+def test_audit_roster_protects_young_superflex_qbs_over_depth_skill_players():
+    from ff.contracts import Asset, Roster
+    from ff.values import ValueBook
+
+    book = ValueBook([
+        Asset(id="kiner", name="Corey Kiner", position="RB", value=137),
+        Asset(id="hutch", name="Xavier Hutchinson", position="WR", value=247),
+        Asset(id="milroe", name="Jalen Milroe", position="QB", value=265),
+        Asset(id="allar", name="Drew Allar", position="QB", value=825),
+        Asset(id="simpson", name="Ty Simpson", position="QB", value=2015),
+    ])
+
+    roster = Roster(
+        roster_id=1,
+        team_name="TEAMUS CYPRUS",
+        player_ids=["kiner", "hutch", "milroe", "allar", "simpson"],
+        starters=[],
+        taxi=["allar"],
+    )
+
+    players_meta = {
+        "kiner": {"position": "RB", "team": "NE", "depth_chart_order": 3, "years_exp": 1, "age": 24, "status": "Active"},
+        "hutch": {"position": "WR", "team": "HOU", "depth_chart_order": 4, "years_exp": 3, "age": 26, "status": "Active"},
+        "milroe": {"position": "QB", "team": "SEA", "depth_chart_order": 3, "years_exp": 1, "age": 23, "status": "Active", "injury_status": "Out", "injury_body_part": "Coach's Decision"},
+        "allar": {"position": "QB", "team": "PIT", "depth_chart_order": 4, "years_exp": 0, "age": 22, "status": "Active", "injury_status": "Out", "injury_body_part": "Coach's Decision"},
+        "simpson": {"position": "QB", "team": "LAR", "depth_chart_order": 3, "years_exp": 0, "age": 23, "status": "Active", "injury_status": "Out", "injury_body_part": "Coach's Decision"},
+    }
+
+    audit = audit_roster(roster, book, players_meta, is_superflex=True, drop_limit=5)
+    drop_pids = [s.player_id for s in audit.drop_candidates]
+    # Kiner (62) and Hutchinson (99) are dropped well before Milroe (325), Allar (536), and Simpson (1310)
+    assert drop_pids == ["kiner", "hutch", "milroe", "allar", "simpson"]
+
 
 
 def test_audit_roster_high_value_rookies_protected():
