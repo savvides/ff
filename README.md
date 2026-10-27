@@ -291,6 +291,8 @@ Data flows unidirectionally across clear module boundaries:
 
 $$\text{CLI } (cli.py) \longrightarrow \text{Clients } (sleeper/, values/, projections/) \longrightarrow \text{Contracts } (contracts/) \longrightarrow \text{Pure Analysis } (analysis/) \longrightarrow \text{Rich Output}$$
 
+> Diagrams: [docs/architecture.md](docs/architecture.md)
+
 Every analysis module is pure (no I/O; deterministic inputs to outputs). Roster math, trade math, and draft valuations stay testable without network access.
 
 > For in-depth architecture notes, domain models, and developer guidelines, see [**`CLAUDE.md`**](CLAUDE.md).
