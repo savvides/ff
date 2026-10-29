@@ -28,14 +28,14 @@ flowchart LR
     sapp["api.sleeper.app/v1<br/>state, users, leagues, rosters, matchups,<br/>drafts, draft picks, traded picks,<br/>players file, trending"]
     scom["api.sleeper.com<br/>projections, schedule,<br/>per-player status and news"]
     fcapi["api.fantasycalc.com<br/>dynasty and redraft values"]
-    ktc["keeptradecut.com<br/>trade-calculator HTML (values),<br/>site.min.js when its version changes"]
-    fcsite["fantasycalc.com<br/>trade-calculator page,<br/>JS bundles when their names change"]
+    ktc["keeptradecut.com<br/>trade-calculator HTML (values),<br/>site.min.js when its version changes (trade drift check)"]
+    fcsite["fantasycalc.com<br/>trade-calculator page,<br/>JS bundles when their names change (trade drift check)"]
     espn["site.api.espn.com<br/>NFL scoreboard"]
   end
 
   subgraph opt["Optional, for ff ask only"]
     tsafe["api.typesafe.ai<br/>Jev classifier, paid, Bearer key"]
-    local["local LLM binary<br/>agy / gemini / claude / ollama<br/>via subprocess"]
+    local["LLM CLI via subprocess<br/>agy / gemini / claude call hosted models;<br/>ollama runs locally"]
   end
 
   ff -->|"read / write: setup, config set-llm,<br/>ask setup_league"| cfg
@@ -45,10 +45,10 @@ flowchart LR
   ff --> scom
   ff --> fcapi
   ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| ktc
-  ff -->|"trade drift check"| fcsite
+  ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| fcsite
   ff -->|"weekly: kickoff times, game status,<br/>schedule cross-check"| espn
-  ff -->|ask --backend jev| tsafe
-  ff -->|ask, other backends| local
+  ff -->|"ask, backend jev (flag or config):<br/>question text only"| tsafe
+  ff -->|"ask, other backends: question + tool schemas,<br/>then the tool result JSON"| local
 ```
 
 ## 2. Module dependencies
