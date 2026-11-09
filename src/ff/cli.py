@@ -393,6 +393,8 @@ def setup(
     league = sc.league(league_id)
     if not league:
         _fail(f"could not find Sleeper league with id '{league_id}'.")
+    if not season and league.get("season"):
+        season_val = str(league["season"])
     fmt = detect_format(league)
     cfg = Config(
         league_id=league_id,
@@ -953,7 +955,7 @@ def cleanup(
     cfg, sc = _load()
     if team is None and not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>`, or pass a team name.")
-    league = sc.league(cfg.league_id)
+    league = sc.league(cfg.league_id) or {}
     settings = league.get("settings") or {}
     roster_positions = league.get("roster_positions") or []
     book = _book(cfg, include_secondary=False)

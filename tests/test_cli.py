@@ -528,3 +528,29 @@ def test_cli_lazy_context(fake_clients, league):
     assert "rosters" in dict.keys(ctx)
 
 
+def test_cleanup_handles_null_league(fake_clients, league, monkeypatch):
+    _write_config(league)
+    import ff.cli
+    fake_sc = ff.cli.SleeperClient()
+    fake_sc.league = lambda lid, fresh=False: None
+    monkeypatch.setattr("ff.cli.SleeperClient", lambda: fake_sc)
+    result = runner.invoke(app, ["cleanup"])
+    assert result.exit_code == 0, result.output
+
+
+def test_setup_historical_league_id_detects_season(fake_clients, league, monkeypatch):
+    from ff.core.config import load_config
+    import ff.cli
+    historical_league = dict(league)
+    historical_league["season"] = "2023"
+    historical_league["league_id"] = "HIST_123"
+    fake_sc = ff.cli.SleeperClient()
+    fake_sc.league = lambda lid, fresh=False: historical_league
+    monkeypatch.setattr("ff.cli.SleeperClient", lambda: fake_sc)
+    result = runner.invoke(app, ["setup", "alice", "--league-id", "HIST_123"])
+    assert result.exit_code == 0, result.output
+    cfg = load_config()
+    assert cfg.season == 2023
+
+
+
