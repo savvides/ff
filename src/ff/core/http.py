@@ -133,9 +133,14 @@ def get_text(url: str, *, ttl: Optional[float] = 3600.0, timeout: int = DEFAULT_
         resp = requests.get(url, headers={"User-Agent": BROWSER_UA}, timeout=timeout)
         resp.raise_for_status()
         body = resp.text
-    except requests.exceptions.SSLError:
-        res = subprocess.run(["curl", "-sfL", "--compressed", "-A", BROWSER_UA, url],
-                             capture_output=True, text=True, timeout=timeout, check=True)
-        body = res.stdout
+    except requests.exceptions.SSLError as ssl_err:
+        try:
+            res = subprocess.run(["curl", "-sfL", "--compressed", "-A", BROWSER_UA, url],
+                                 capture_output=True, text=True, timeout=timeout, check=True)
+            body = res.stdout
+        except (subprocess.SubprocessError, FileNotFoundError) as err:
+            raise requests.exceptions.RequestException(
+                f"Failed to fetch {url} via curl fallback after SSL error ({ssl_err}): {err}"
+            ) from err
     _atomic_write(cache_path, body)
     return body

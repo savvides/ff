@@ -160,3 +160,22 @@ def test_timeout_parameter_passed_to_requests(monkeypatch):
     get_json(URL, use_cache=False, timeout=5)
     assert called
 
+
+def test_curl_fallback_error_raises_request_exception(monkeypatch):
+    import subprocess
+    import requests
+    from ff.core.http import get_text
+
+    def mock_requests_get(*args, **kwargs):
+        raise requests.exceptions.SSLError("SSL handshake failed")
+
+    def mock_subprocess_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=22, cmd="curl", output="", stderr="404 Not Found")
+
+    monkeypatch.setattr(requests, "get", mock_requests_get)
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    with pytest.raises(requests.exceptions.RequestException):
+        get_text("https://example.test/failing", ttl=0)
+
+
