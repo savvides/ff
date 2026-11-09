@@ -41,11 +41,20 @@ def resolve_player(text: str, players_meta: Dict[str, Any]) -> str:
 def comparison_players(query: str, players_meta: Dict[str, Any]) -> List[str]:
     """Find exactly two names, preferring full-name spans over contained surnames."""
     text = re.sub(r"\b(?:roster|team)\s*\d+\b", " ", _normalize(query))
+    words = text.split()
+    phrases = set()
+    for n in range(1, min(5, len(words) + 1)):
+        for i in range(len(words) - n + 1):
+            phrases.add(" ".join(words[i:i + n]))
+
     matches = []
     for pid, row in players_meta.items():
-        for alias in _aliases(pid, row):
-            for match in re.finditer(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", text):
-                matches.append((match.start(), match.end(), pid))
+        aliases = _aliases(pid, row)
+        hit = aliases & phrases
+        if hit:
+            for alias in hit:
+                for match in re.finditer(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", text):
+                    matches.append((match.start(), match.end(), pid))
     spans = [(a, b, p) for a, b, p in matches if not any(
         c <= a and d >= b and (c < a or d > b) for c, d, _ in matches)]
     grouped: Dict[tuple, set] = {}
