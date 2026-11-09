@@ -23,3 +23,4 @@ samples/
 # Claude Code superpowers-skill planning docs (specs/plans) - local working
 # artifacts, never published to this repo
 docs/superpowers/
+.superpowers/
