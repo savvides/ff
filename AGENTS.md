@@ -18,7 +18,7 @@ The linchpin: every FantasyCalc player carries a `sleeperId`, so values join dir
 venv-based, Python 3.9.
 
 - Install: `make install` (venv, editable install, enables the pre-commit hook). Manual: `python3 -m venv .venv && ./.venv/bin/python -m pip install -e ".[dev]"`.
-- Gate tests (offline, deterministic, under 2s, run by the pre-commit hook): `make test` or `./.venv/bin/pytest -q`.
+- Gate tests (offline, deterministic, under 2s, run by the pre-commit hook): `make test`, `uv run pytest -q`, or `./.venv/bin/pytest -q`.
 - One test: `./.venv/bin/pytest tests/test_trade.py::test_trade_with_players_and_picks`.
 - Live API checks (real network, excluded from the gate): `make test-live` or `./.venv/bin/pytest -m live`.
 - Jev routing eval (live, paid, opt-in; needs a saved key or `TYPESAFE_API_KEY`; never run by the gate): `./.venv/bin/python scripts/eval_jev.py`. See `evals/README.md`.
@@ -57,7 +57,7 @@ The global services-first rule is satisfied here by module boundaries plus a sha
 
 ### Picks
 
-FantasyCalc returns draft picks as assets with `position == "PICK"` and names like `2026 Pick 1.05`, `2026 1st`, `2027 1st`, and tiered `2027 1st (Early)/(Mid)/(Late)`. `normalize_pick()` in `values/normalize.py` canonicalizes user input to match, keeping the tier as a key suffix (`2027 1 early`) — without it the three tiers collapse onto one key and the last one loaded silently overwrites the rest (a real bug that undervalued every early 1st). `ValueBook.resolve()` falls back from a slot pick (`2026 1.07`) to the round-level value, from a tiered ask to the flat round value when no tiered entry exists, and from a flat ask to Mid when only tiered entries exist.
+FantasyCalc returns draft picks as assets with `position == "PICK"` and names like `2026 Pick 1.05`, `2026 1st`, `2027 1st`, and tiered `2027 1st (Early)/(Mid)/(Late)`. `normalize_pick()` in `values/normalize.py` canonicalizes user input to match across rounds 1–9 (including ordinals like `5th`, words like `fifth`, and tiered variants), keeping the tier as a key suffix (`2027 1 early`) — without it the three tiers collapse onto one key and the last one loaded silently overwrites the rest (a real bug that undervalued every early 1st). `ValueBook.resolve()` falls back from a slot pick (`2026 1.07`) to the round-level value, from a tiered ask to the flat round value when no tiered entry exists, and from a flat ask to Mid when only tiered entries exist.
 
 ## Testing model
 
@@ -78,6 +78,9 @@ The one bounded exception is Jev routing (`evals/jev.json`, `scripts/eval_jev.py
 - Target Python 3.9. Use `from __future__ import annotations` for modern type-hint syntax.
 - All local state lives under `FF_HOME` (default `./.ff`, gitignored): `config.json` and `cache/`. Clear with `make clean`.
 - Sleeper's limits are handled in `core/http.py`: the players file (~15MB) is cached 24h; everything stays well under 1000 req/min via per-endpoint TTLs and urllib3 retry/backoff.
+- Config persistence: `save_config()` in `core/config.py` is atomic (writes to temporary PID file and uses `os.replace` with UTF-8 encoding).
+- `values/dealer.py` is a deprecated legacy compatibility alias shim pointing to `KtcClient`; do not add new code there.
+- Mypy targets Python 3.10 in `pyproject.toml` (silencing deprecation warnings in modern Mypy) while the codebase preserves Python >=3.9 compatibility.
 
 ## Out of scope (and why)
 
