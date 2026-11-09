@@ -54,7 +54,7 @@ ignore = ["E501"]
 "tests/*" = ["F401", "E402"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 packages = ["ff"]
 mypy_path = "src"
 strict_optional = true
