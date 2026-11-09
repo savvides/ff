@@ -1,4 +1,4 @@
-from ff.values.normalize import normalize_name
+from ff.values.normalize import normalize_name, normalize_pick
 
 
 def test_normalize_name_lowercasing():
@@ -54,3 +54,15 @@ def test_normalize_name_empty_or_whitespace():
     assert normalize_name("") == ""
     assert normalize_name("   ") == ""
     assert normalize_name(" . ") == ""
+
+
+def test_normalize_pick_rounds_and_ordinals():
+    assert normalize_pick("2026 5th") == "2026 5"
+    assert normalize_pick("2026 5th round") == "2026 5"
+    assert normalize_pick("2026 fifth") == "2026 5"
+    assert normalize_pick("2027 6th") == "2027 6"
+    assert normalize_pick("2028 7th (Late)") == "2028 7 late"
+    assert normalize_pick("2026 1st") == "2026 1"
+    assert normalize_pick("2026 pick 1.05") == "2026 pick 1.05"
+    assert normalize_pick("not a pick") is None
+
