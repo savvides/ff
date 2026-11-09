@@ -53,3 +53,15 @@ def test_llm_config_defaults(tmp_path: Path) -> None:
     save_config(cfg, path=cfg_file)
     loaded = load_config(path=cfg_file)
     assert loaded.llm_backend == "gemini"
+
+
+def test_save_config_atomic_and_utf8(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg = Config(league_id="123456", season=2026, name="Dîckerson's Téam")
+    saved_path = save_config(cfg, path=cfg_file)
+    assert saved_path == cfg_file
+    assert cfg_file.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+    loaded = load_config(path=cfg_file)
+    assert loaded.name == "Dîckerson's Téam"
+

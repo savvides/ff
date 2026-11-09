@@ -53,13 +53,15 @@ def load_config(path: Optional[Path] = None) -> Config:
         raise FileNotFoundError(
             "No league configured yet. Run `ff setup <sleeper-username>` first."
         )
-    return Config.model_validate_json(p.read_text())
+    return Config.model_validate_json(p.read_text(encoding="utf-8"))
 
 
 def save_config(cfg: Config, path: Optional[Path] = None) -> Path:
     p = path or _config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(cfg.model_dump_json(indent=2))
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+    tmp.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    os.replace(tmp, p)
     return p
 
 
