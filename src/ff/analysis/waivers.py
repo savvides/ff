@@ -49,8 +49,11 @@ def waiver_targets(
     if roster_positions is not None:
         eligible_positions = waiver_positions(roster_positions)
 
+    req_pos = position.upper() if position else None
     targets: List[WaiverTarget] = []
     for pid in sorted(candidates):
+        if free_agents_only and pid in rostered:
+            continue
         count = counts.get(pid, 0)
         valued = book.value_for_sleeper_id(pid)
         if valued is not None:
@@ -66,6 +69,8 @@ def waiver_targets(
         if meta:
             asset.fill_from_meta(meta)
         if meta.get("active") is False or asset.position not in eligible_positions:
+            continue
+        if req_pos and asset.position != req_pos:
             continue
         team = meta.get("team")
         order = 2 if str(pid) in qb2_promoted else meta.get("depth_chart_order")
