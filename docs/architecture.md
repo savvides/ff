@@ -7,21 +7,20 @@ How `ff` is put together, from the outside in. These diagrams were derived from 
 3. [Command map](#3-command-map): which analysis each command runs and which providers it reads
 4. [`ff trade`](#4-ff-trade): fresh prices, site adjustments, the offer rule
 5. [Weekly decisions](#5-weekly-decisions): `lineup`, `compare`, `waivers --weekly`
-6. [`ff ask`](#6-ff-ask): the local-runner and Jev paths
+6. [`ff ask`](#6-ff-ask): the local-runner path
 
 ## 1. System context
 
-`ff` is a local CLI. Every provider call is an HTTP GET; the only exception is the optional Jev POST. No command writes to Sleeper: nothing submits claims, changes lineups or executes trades. CLI state is local files under `FF_HOME`. (`scripts/record_fixtures.py` writes to `samples/`, outside it.)
+`ff` is a local CLI. Every provider call is an HTTP GET. No command writes to Sleeper: nothing submits claims, changes lineups or executes trades. CLI state is local files under `FF_HOME`. (`scripts/record_fixtures.py` writes to `samples/`, outside it.)
 
 ```mermaid
 flowchart LR
   user(["You, in a terminal"]) --> ff["ff CLI<br/>ff.cli:app"]
-  env[/"environment<br/>FF_HOME, FF_QA,<br/>TYPESAFE_API_KEY, TYPESAFE_MODEL"/] --> ff
+  env[/"environment<br/>FF_HOME, FF_QA"/] --> ff
 
   subgraph home["FF_HOME (default ./.ff)"]
     cfg[("config.json<br/>league, season, Format, user, LLM backend")]
     cache[("cache/<br/>responses keyed by URL hash, per-endpoint TTL")]
-    key[("typesafe_api_key<br/>mode 0600, optional;<br/>TYPESAFE_API_KEY wins")]
   end
 
   subgraph free["Free, public, no auth"]
@@ -34,21 +33,18 @@ flowchart LR
   end
 
   subgraph opt["Optional, for ff ask only"]
-    tsafe["api.typesafe.ai<br/>Jev classifier, paid, Bearer key"]
     local["LLM CLI via subprocess<br/>agy / gemini / claude call hosted models;<br/>ollama runs locally"]
   end
 
   ff -->|"read / write: setup, config set-llm,<br/>ask setup_league"| cfg
   ff -->|read / write| cache
-  ff -->|"read; written by config set-jev-key"| key
   ff --> sapp
   ff --> scom
   ff --> fcapi
   ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| ktc
   ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| fcsite
   ff -->|"weekly: kickoff times, game status,<br/>schedule cross-check"| espn
-  ff -->|"ask, backend jev (flag or config):<br/>question text only"| tsafe
-  ff -->|"ask, other backends: question + tool schemas,<br/>then the tool result JSON"| local
+  ff -->|"ask: question + tool schemas,<br/>then the tool result JSON"| local
 ```
 
 ## 2. Module dependencies
@@ -58,7 +54,6 @@ Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: 
 - analysis reaches back into `sleeper` (`player_name`) and `values` (`ValueBook`) for convenience
 - `services.weekly` is a data loader, yet it reuses two rules from `analysis.cleanup`: `designation` and `ir_eligible_statuses`
 - `qa` re-runs `analysis.trade.apply_site_adjustments`, reuses lineup and waiver rules (`SLOT_ELIGIBILITY`, `game_locked`, `unavailable`, `waiver_positions`), and reads the `services.llm.tools` allowlist
-- `services.llm.jev_output` renders tables and runs QA, including for `compare` and `waivers --weekly`
 - `scripts/find_offers.py` imports `ff.cli._pick_window`
 
 `values/dealer.py` is a backward-compatibility shim that no command imports.
@@ -68,11 +63,11 @@ Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: 
 flowchart TD
   subgraph boundary["Boundary"]
     cli["cli.py<br/>Typer commands, Rich tables"]
-    scripts["scripts/<br/>find_offers, record_fixtures, eval_jev<br/>(calculator_oracle.mjs is Node, no ff imports)"]
+    scripts["scripts/<br/>find_offers, record_fixtures<br/>(calculator_oracle.mjs is Node, no ff imports)"]
   end
   subgraph services["Services"]
     weekly["services/weekly.py<br/>load_weekly"]
-    llm["services/llm/<br/>runner, jev, dispatcher, tools,<br/>onboarding, jev_output"]
+    llm["services/llm/<br/>runner, dispatcher, tools, onboarding"]
   end
   subgraph clients["Data clients"]
     sleeper["sleeper/client.py<br/>SleeperClient, detect_format,<br/>build_rosters"]
@@ -148,7 +143,7 @@ Which analysis each command calls directly. Dotted edges inside the analysis box
 flowchart TD
   subgraph cmds["ff commands"]
     setup["setup"]
-    cfgcmd["config set-llm<br/>config set-jev-key<br/>version"]
+    cfgcmd["config set-llm<br/>version"]
     rpn["roster<br/>power<br/>news"]
     picks_c["picks"]
     values_c["values"]
@@ -164,7 +159,7 @@ flowchart TD
     qa_c["qa<br/>doctor (hidden alias)"]
   end
 
-  cfgnote(["config.json /<br/>typesafe_api_key only"])
+  cfgnote(["config.json only"])
   detect["sleeper.detect_format"]
   top["ValueBook.top"]
   weekly["services.weekly<br/>load_weekly"]
@@ -225,27 +220,26 @@ flowchart TD
   a_fit -.-> a_movers
 ```
 
-What each command reads. `●` always; `◐` only in the noted case; blank means never. Every command except `setup`, `config set-jev-key` and `version` loads `config.json` first; `ask` loads it only if it exists. The last column is the `qa.engine.VALIDATOR_MAP` key that checks the result.
+What each command reads. `●` always; `◐` only in the noted case; blank means never. Every command except `setup` and `version` loads `config.json` first; `ask` loads it only if it exists. The last column is the `qa.engine.VALIDATOR_MAP` key that checks the result.
 
-| Command | api.sleeper.app | api.sleeper.com | FantasyCalc | KTC | ESPN | TypeSafe | QA check |
-|---|---|---|---|---|---|---|---|
-| `setup` | ● state, user, leagues, league | | | | | | `setup` |
-| `config set-llm`, `config set-jev-key`, `version` | | | | | | | none |
-| `roster`, `power` | ● rosters, users, players | | ● | | | | `roster` / `power` |
-| `picks` | ● rosters, users, league, drafts, traded picks, players | | ● | | | | `picks` |
-| `values` | | | ● | ◐ unless `--market fc` (default `both`) | | | `values` |
-| `trade` | ● players | | ● fresh | ◐ fresh, unless `--market fc` | | | `trade` |
-| `movers` | ◐ rosters, users with `--arbitrage` | | ● | ◐ `--arbitrage` | | | `movers` |
-| `waivers` | ● league, rosters, users, players, trending | | ● | | | | `waivers` |
-| `waivers --weekly` | ● fresh state, league, rosters; users, players, matchups; ◐ trending with `--trending` | ● projections snapshot, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | | `weekly_waivers` |
-| `news` | ● rosters, users, players, trending adds and drops | | ● | | | | `news` |
-| `cleanup` | ● league, rosters, users, players | | ● | | | | `cleanup` |
-| `lineup` | ● fresh state, league, rosters; users, players; ◐ matchups, current week only | ● projections; ◐ schedule, rostered players' status and news, current week only | | | ◐ current week only | | `lineup` |
-| `compare` | ● fresh state, league, rosters; users, players, matchups | ● projections, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | | `compare` |
-| `draft` | ● draft, draft picks, draft traded picks, rosters, users, players, league; ◐ drafts list unless `--draft-id` | | ● | | | | `draft` |
-| `ask` (local runner) | ◐ per tool | ◐ weekly tools | ◐ value tools | ◐ value tools | ◐ weekly tools | | `ask` |
-| `ask --backend jev` | ◐ per tool | ◐ weekly tools | ◐ value tools | | ◐ weekly tools | ● | per-tool domain check |
-| `qa`, `doctor` | ● rosters, users, players, league, drafts, traded picks, trending | | ● | ● | | | up to 8 (`roster`, `cleanup` need your roster) |
+| Command | api.sleeper.app | api.sleeper.com | FantasyCalc | KTC | ESPN | QA check |
+|---|---|---|---|---|---|---|
+| `setup` | ● state, user, leagues, league | | | | | `setup` |
+| `config set-llm`, `version` | | | | | | none |
+| `roster`, `power` | ● rosters, users, players | | ● | | | `roster` / `power` |
+| `picks` | ● rosters, users, league, drafts, traded picks, players | | ● | | | `picks` |
+| `values` | | | ● | ◐ unless `--market fc` (default `both`) | | `values` |
+| `trade` | ● players | | ● fresh | ◐ fresh, unless `--market fc` | | `trade` |
+| `movers` | ◐ rosters, users with `--arbitrage` | | ● | ◐ `--arbitrage` | | `movers` |
+| `waivers` | ● league, rosters, users, players, trending | | ● | | | `waivers` |
+| `waivers --weekly` | ● fresh state, league, rosters; users, players, matchups; ◐ trending with `--trending` | ● projections snapshot, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | `weekly_waivers` |
+| `news` | ● rosters, users, players, trending adds and drops | | ● | | | `news` |
+| `cleanup` | ● league, rosters, users, players | | ● | | | `cleanup` |
+| `lineup` | ● fresh state, league, rosters; users, players; ◐ matchups, current week only | ● projections; ◐ schedule, rostered players' status and news, current week only | | | ◐ current week only | `lineup` |
+| `compare` | ● fresh state, league, rosters; users, players, matchups | ● projections, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | `compare` |
+| `draft` | ● draft, draft picks, draft traded picks, rosters, users, players, league; ◐ drafts list unless `--draft-id` | | ● | | | `draft` |
+| `ask` (local runner) | ◐ per tool | ◐ weekly tools | ◐ value tools | ◐ value tools | ◐ weekly tools | `ask` |
+| `qa`, `doctor` | ● rosters, users, players, league, drafts, traded picks, trending | | ● | ● | | up to 8 (`roster`, `cleanup` need your roster) |
 
 `trade` with `--market both` also runs the calculator drift check: it fetches the `fantasycalc.com` trade-calculator page every run (plus its JS bundles when their names change), reuses the KTC page it already has, and downloads `keeptradecut.com/js/site.min.js` only when that version changes. The local `ask` runner's own network traffic belongs to the external binary and is invisible to `ff`.
 
@@ -322,7 +316,7 @@ flowchart TD
   a_lu["analysis.lineup<br/>optimal_lineup<br/>locks started games, skips taxi / IR / unavailable"]
   a_cmp["analysis.compare<br/>compare_players"]
   a_ww["analysis.weekly_waivers<br/>weekly_waivers"]
-  jo["services.llm.jev_output<br/>render_comparison / render_weekly_waivers<br/>(each runs its own run_qa)"]
+  jo["cli rendering helpers<br/>render_comparison / render_weekly_waivers<br/>(each runs its own run_qa)"]
 
   compare --> prep
   ww --> prep
@@ -356,7 +350,7 @@ flowchart TD
 
 ## 6. `ff ask`
 
-Two interpreters share one deterministic back end, and the model never computes. Jev only answers fixed choices, and code builds the arguments. A local model picks the tool and its kwargs, then explains the result in prose. Either way the calculation runs in `analysis/` through `dispatch_tool`, which accepts only names in `services.llm.tools.ALLOWED_TOOLS`, against the same lazily loaded data as the structured commands (`cli._analysis_ctx`). Through `ask`, values come from the cache; `evaluate_trade` gets no drift check and no offer rule.
+A local model picks the tool and its kwargs, then explains the deterministic calculation result in prose. The model never computes. The calculation runs in `analysis/` through `dispatch_tool`, which accepts only names in `services.llm.tools.ALLOWED_TOOLS`, against the same lazily loaded data as the structured commands (`cli._analysis_ctx`). Through `ask`, values come from the cache; `evaluate_trade` gets no drift check and no offer rule.
 
 ```mermaid
 flowchart TD
@@ -375,22 +369,12 @@ flowchart TD
     qal["run_qa('ask')"]
   end
 
-  subgraph jevpath["Jev: explicit opt-in, never chosen by auto; requires config"]
-    ctxj["cli._analysis_ctx<br/>KTC excluded"]
-    choose["jev.JevClient.choose<br/>one request to api.typesafe.ai<br/>(retried on 429/529), question text only"]
-    interp{"jev.interpret<br/>operation confidence at least 0.80;<br/>team answer picks the method:<br/>mine = saved owner id, named = exact name<br/>or roster number in the question;<br/>then per-question confidence and guards"}
-    weeklyprep["weekly tools: cli._prepare_weekly<br/>(section 5); waivers: trending adds"]
-    render["jev_output.render_result<br/>tables + domain run_qa, no prose model"]
-  end
-
-  clar(["Clarification, exit 3"])
-  jerr(["JevError: key, auth, rate limit,<br/>network, exit 1"])
   rerr(["no runner found or runner failed, exit 1"])
-  dispatch["dispatcher.dispatch_tool<br/>ALLOWED_TOOLS only;<br/>local weekly tools call prepare_weekly<br/>when a team kwarg is given"]
+  dispatch["dispatcher.dispatch_tool<br/>ALLOWED_TOOLS only"]
   analysis["analysis/ functions"]
 
   q --> pick
-  pick -- local --> run1
+  pick --> run1
   run1 -- error --> rerr
   run1 --> reply
   reply -- markdown --> prose1 --> qal
@@ -398,16 +382,8 @@ flowchart TD
   reply -- setup_league --> onboard --> qal
   reply -- "JSON {tool, kwargs}, no config" --> nocfg
   reply -- "JSON {tool, kwargs}" --> ctxl --> dispatch
-  dispatch -. local .-> run2 --> qal
-  dispatch -. "local: tool error" .-> qal
-
-  pick -- jev --> ctxj --> choose
-  choose -- error --> jerr
-  choose --> interp
-  interp -- "no single team, low confidence,<br/>guard fails" --> clar
-  interp -- ok --> weeklyprep --> dispatch
-  weeklyprep -- weekly gate fails --> clar
-  dispatch -. jev .-> render
+  dispatch -.-> run2 --> qal
+  dispatch -. "tool error" .-> qal
 
   dispatch --> analysis
 ```
