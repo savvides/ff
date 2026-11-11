@@ -87,10 +87,13 @@ def test_waivers_pool_size(fake_clients, league, trending, monkeypatch):
     _write_config(league)
     sc = cli.SleeperClient()
     sc.trending = Mock(return_value=trending)
+    orig_players = sc.players
+    sc.players = Mock(side_effect=orig_players)
     monkeypatch.setattr(cli, "SleeperClient", lambda: sc)
     result = runner.invoke(app, ["waivers", "--limit", "20"])
     assert result.exit_code == 0, result.output
     sc.trending.assert_called_once_with(kind="add", limit=60)
+    sc.players.assert_called_once_with(fresh=True)
 
 
 def test_values_by_position(fake_clients, league):

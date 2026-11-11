@@ -50,6 +50,19 @@ def waiver_targets(
         eligible_positions = waiver_positions(roster_positions)
 
     req_pos = position.upper() if position else None
+    sf_starter_floor = None
+    if is_superflex:
+        qb_vals = sorted(
+            [a.value for a in book.assets if a.position == "QB" and a.value > 0],
+            reverse=True,
+        )
+        if len(qb_vals) >= 32:
+            sf_starter_floor = qb_vals[31]
+        elif qb_vals:
+            sf_starter_floor = qb_vals[-1]
+        else:
+            sf_starter_floor = 1500
+
     targets: List[WaiverTarget] = []
     for pid in sorted(candidates):
         if free_agents_only and pid in rostered:
@@ -92,6 +105,7 @@ def waiver_targets(
             age=asset.age if asset.age is not None else meta.get("age"),
             years_exp=meta.get("years_exp"),
             secondary_value=asset.secondary_value,
+            superflex_starter_floor=sf_starter_floor,
         )
         targets.append(
             WaiverTarget(
