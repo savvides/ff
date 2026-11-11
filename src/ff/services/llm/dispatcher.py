@@ -214,8 +214,9 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         players_meta = ctx.get("players_meta")
         valuations = roster.value_all_rosters(rosters, value_book, players_meta) if (rosters and value_book) else []
         sim = sorted(ctx.get("season_sim") or [], key=lambda p: p.draft_slot, reverse=True)
-        power_ranks = ({p.roster_id: i for i, p in enumerate(sim, 1)} if sim
-                       else {v.roster_id: v.power_rank for v in valuations})
+        power_ranks: Dict[int, Optional[int]] = (
+            {p.roster_id: i for i, p in enumerate(sim, 1)} if sim
+            else {v.roster_id: v.power_rank for v in valuations})
         seasons = ctx.get("seasons", ["2026", "2027", "2028"])
         rounds = ctx.get("rounds", 4)
         ledger = picks.pick_ledger(rosters, traded_picks, value_book, power_ranks, seasons=seasons, rounds=rounds)

@@ -17,6 +17,7 @@ import functools
 import inspect
 import json
 import re
+import statistics
 import subprocess
 import sys
 from datetime import datetime
@@ -32,6 +33,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ff import __version__
+from ff.analysis.fab import bid_summary, winning_bids
 from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
@@ -66,7 +68,7 @@ from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
 from ff.services.weekly import load_weekly
 from ff.sleeper import SleeperClient, build_rosters, detect_format, player_name
-from ff.values import ValueBook, ValuesClient, normalize_name
+from ff.values import ValueBook, ValuesClient, normalize_name, normalize_pick
 from ff.values.calculators_live import check_calculators
 
 app = typer.Typer(add_completion=False, help="Manage a Sleeper dynasty league with free data.")
@@ -624,6 +626,69 @@ def standings() -> None:
                   "it sets early/mid/late pick prices in `ff picks`.[/]")
 
 
+# --- fab -----------------------------------------------------------------
+
+def _fab_claims(cfg: Config, sc: SleeperClient) -> list:
+    week = _current_week(sc.state() or {})
+    return winning_bids([row for w in range(week + 1) for row in sc.transactions(cfg.league_id, w)])
+
+
+@app.command()
+@_guard
+def fab(limit: int = typer.Option(12, help="How many recent contested claims to list.")) -> None:
+    """Waiver budgets left and what this league has actually paid for claims."""
+    cfg, sc = _load()
+    league = sc.league(cfg.league_id) or {}
+    budget = int((league.get("settings") or {}).get("waiver_budget") or 0)
+    if (league.get("settings") or {}).get("waiver_type") != 2 or not budget:
+        _fail("this league does not use a waiver budget (FAB).")
+    rosters = _league_rosters(cfg, sc)
+    meta = sc.players()
+    claims = _fab_claims(cfg, sc)
+    names = {r.roster_id: r.team_name for r in rosters}
+
+    t = Table(title=f"waiver budgets (of ${budget})")
+    for c in ("team", "left", "spent"):
+        t.add_column(c, justify="left" if c == "team" else "right")
+    for r in sorted(rosters, key=lambda r: r.fab_used):
+        mine = r.owner_id == cfg.user_id
+        t.add_row(f"[bold]{r.team_name}[/]" if mine else r.team_name,
+                  f"${budget - r.fab_used}", f"${r.fab_used}")
+    console.print(t)
+
+    if not claims:
+        console.print("[dim]no waiver bids recorded this season yet.[/]")
+        return
+    t = Table(title="winning bids this season")
+    for c in ("group", "claims", "median", "75th pct", "max"):
+        t.add_column(c, justify="left" if c == "group" else "right")
+    groups = [("all", claims), ("contested", [c for c in claims if c.bidders > 1])]
+    groups += [(pos, [c for c in claims if (meta.get(c.player_id) or {}).get("position") == pos])
+               for pos in ("QB", "RB", "WR", "TE")]
+    for label, group in groups:
+        s = bid_summary([c.bid for c in group])
+        if s:
+            t.add_row(label, str(s["n"]), f"${s['median']:g}", f"${s['p75']:g}", f"${s['max']:g}")
+    console.print(t)
+
+    all_contested = [c for c in claims if c.runner_up is not None]
+    contested = all_contested[:limit]
+    if contested:
+        t = Table(title="recent contested claims")
+        for c in ("wk", "player", "pos", "winner", "bid", "next best", "bidders"):
+            t.add_column(c, justify="right" if c in ("bid", "next best", "bidders", "wk") else "left")
+        for c in contested:
+            t.add_row(str(c.week), player_name(c.player_id, meta),
+                      (meta.get(c.player_id) or {}).get("position") or "-",
+                      names.get(c.roster_id, "?"), f"${c.bid}", f"${c.runner_up}", str(c.bidders))
+        console.print(t)
+        over = statistics.median(c.bid - (c.runner_up or 0) for c in all_contested)
+        console.print(f"[dim]winners of contested claims paid a median ${over:g} more than they needed to.[/]")
+    console.print("[dim]Sleeper shows a losing bid only when another team won the player, so "
+                  "uncontested claims have no 'next best'. A rival can never bid more than "
+                  "their budget left. ff is read-only; place bids in Sleeper.[/]")
+
+
 # --- picks ---------------------------------------------------------------
 
 @app.command()
@@ -908,6 +973,7 @@ def trade(
             console.print(f"[dim]positional swing (raw, before package adjustments):[/] {line}")
     for tok, name in subs:
         console.print(f"[dim]matched '{tok}' -> {name}[/]")
+    _print_generic_pick_hints(cfg, sc, book, give_tokens + get_tokens)
     if unresolved:
         console.print(f"[bold red]unmatched (ignored):[/] {', '.join(unresolved)} "
                       f"[dim]- check spelling, or '2027 1st' / '2027 early 1st' for picks[/]")
@@ -918,6 +984,42 @@ def trade(
                               f"{', '.join(c.name for c in cands)}?[/]")
     qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
     render_qa_footer(qa_rep, console)
+
+
+def _print_generic_pick_hints(cfg: Config, sc: SleeperClient, book: ValueBook,
+                              tokens: List[str]) -> None:
+    """A round pick typed without a tier is priced as nobody's pick in
+    particular; when the market tiers that round, show what it is really worth."""
+    keys = sorted({k for k in map(normalize_pick, tokens) if k and f"{k} early" in book.picks})
+    if not keys:
+        return
+    league = sc.league(cfg.league_id) or {}
+    rosters = _league_rosters(cfg, sc)
+    valuations = value_all_rosters(rosters, book, sc.players())
+    ranks, basis = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
+    seasons = sorted({k.split()[0] for k in keys})
+    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book, ranks,
+                         seasons=seasons, rounds=max(int(k.split()[1]) for k in keys))
+    mine = _pick_roster(rosters, None, cfg.user_id)
+    for key in keys:
+        season, rnd = key.split()
+        flat = book.picks.get(key)
+        tiers = " / ".join(f"{t} {book.picks[f'{key} {t}'].value:,}" for t in ("early", "mid", "late"))
+        console.print(f"[yellow]'{flat.name if flat else key}' is priced as a generic pick"
+                      + (f" ({flat.value:,})" if flat else "") + f". By tier: {tiers}.[/]")
+        by_tier: Dict[str, List[str]] = {}
+        for tp in ledger:
+            for pk in tp.picks:
+                if pk.season == season and pk.round == int(rnd) and pk.tier:
+                    is_mine = bool(mine and tp.roster_id == mine.roster_id)
+                    held = "[bold]you hold it[/]" if is_mine else f"held by {tp.team_name}"
+                    by_tier.setdefault(pk.tier, []).append(
+                        pk.original_team + (f" ({held})" if pk.acquired or is_mine else ""))
+        for t in ("early", "mid", "late"):
+            if by_tier.get(t):
+                console.print(f"[dim]  {t} (original team, by {basis}): {', '.join(by_tier[t])}[/]")
+        console.print(f"[dim]  name the tier for an exact price, e.g. "
+                      f"'{season} early {flat.name.split()[1] if flat else 'round ' + rnd}'.[/]")
 
 
 def _render_table(console: Console, title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:

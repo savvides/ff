@@ -275,6 +275,17 @@ class StandingProjection(BaseModel):
     draft_slot: float  # expected pick slot in next year's rookie draft (1 = first)
 
 
+class FabClaim(BaseModel):
+    """A winning waiver bid, with the best losing bid when it was contested."""
+
+    player_id: str
+    roster_id: int
+    week: int
+    bid: int
+    runner_up: Optional[int] = None  # highest losing bid on the same player that run
+    bidders: int = 1  # teams that bid on the player in that run
+
+
 class RosterValuation(BaseModel):
     """A team's roster priced out with dynasty values."""
 
