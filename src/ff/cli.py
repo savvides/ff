@@ -60,8 +60,6 @@ from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
-from ff.services.llm.jev import Clarification, JevClient, JevError, interpret, save_jev_key
-from ff.services.llm.jev_output import render_result
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
@@ -1504,64 +1502,20 @@ def draft(
     render_qa_footer(qa_rep, console)
 
 
-def _ask_jev(query: str, cfg: Config) -> None:
-    try:
-        client = JevClient()
-        sc = SleeperClient()
-        # Jev renders FantasyCalc-only tables, so skip the secondary-market scrape.
-        ctx = _analysis_ctx(cfg, sc, include_secondary=False)
-        route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id, lambda: ctx["players_meta"])
-        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
-            ctx["weekly_candidates"] = route.tool == "get_weekly_waivers"
-            if route.kwargs.get("trending_only"):
-                ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
-            _prepare_weekly(ctx, route.kwargs.get("team"))
-        elif route.tool == "get_waivers":
-            ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
-        details = dict(route.kwargs)
-        if details.pop("free_agents_only", False):
-            details["availability"] = "unrostered (claim status unknown)"
-        if "team" in details:
-            details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
-        if "player_ids" in details:
-            details["players"] = ", ".join(player_name(pid, ctx["players_meta"]) for pid in details.pop("player_ids"))
-        if route.tool == "get_picks":
-            details.update(seasons=ctx["seasons"], rounds=ctx["rounds"])
-            details.setdefault("team", "whole league")
-        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
-            details.update(season=cfg.season, week=ctx["week"])
-        operation = route.tool.removeprefix("get_").replace("_", " ")
-        filters = "; ".join(f"{key}: {value}" for key, value in details.items())
-        console.print(f"Interpreted: {operation}" + (f"; {filters}" if filters else ""), markup=False)
-        result = dispatch_tool(route.tool, route.kwargs, ctx)
-        render_result(route, result, ctx, console)
-    except Clarification as exc:
-        console.print(str(exc), markup=False)
-        raise typer.Exit(3)
-    except JevError as exc:
-        console.print(f"error: {exc}", markup=False)
-        raise typer.Exit(1)
-
-
-_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto", "jev"]
+_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto"]
 
 
 @app.command()
 @_guard
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your league"),
-    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (jev, agy, gemini, claude, ollama)"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (agy, gemini, claude, ollama)"),
 ) -> None:
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
     target_backend = (backend or (cfg.llm_backend if cfg else "auto")).lower()
     if target_backend not in _LLM_BACKENDS:
         _fail(f"Invalid backend '{target_backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
-    if target_backend == "jev":
-        if cfg is None:
-            _fail("No league configured. Run `ff setup <username>` first.")
-        _ask_jev(query, cfg)
-        return
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
     try:
@@ -1660,23 +1614,10 @@ def ask(
     render_qa_footer(qa_rep, console)
 
 
-@config_app.command(name="set-jev-key")
-def set_jev_key() -> None:
-    """Privately enter and save a TypeSafe API key for Jev."""
-    key = typer.prompt("TypeSafe API key", hide_input=True)
-    try:
-        path = save_jev_key(key)
-    except JevError as exc:
-        console.print(f"error: {exc}", markup=False)
-        raise typer.Exit(1)
-    console.print(f"Saved TypeSafe API key to {path} (owner read/write only).", markup=False)
-    console.print("An exported TYPESAFE_API_KEY takes precedence over this saved key.")
-
-
 @config_app.command(name="set-llm")
 @_guard
 def set_llm(
-    backend: str = typer.Argument(..., help="LLM backend: auto, jev, agy, gemini, claude, ollama"),
+    backend: str = typer.Argument(..., help="LLM backend: auto, agy, gemini, claude, ollama"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
 ) -> None:
     """Configure the LLM backend used by 'ff ask'."""

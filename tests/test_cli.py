@@ -581,5 +581,17 @@ def test_cli_waivers_weekly_command(fake_clients, league, monkeypatch):
     assert "claim status" in direct.output
 
 
+def test_cli_rejects_jev_backend(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["config", "set-llm", "jev"])
+    assert res.exit_code != 0
+    assert "Invalid backend 'jev'" in res.output
+
+    res_ask = runner.invoke(app, ["ask", "who should I start", "--backend", "jev"])
+    assert res_ask.exit_code != 0
+    assert "Invalid backend 'jev'" in res_ask.output
+
+
+
 
 
