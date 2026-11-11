@@ -5,7 +5,7 @@ Baseline inspected on 2026-10-05 at commit `5bd80cd397d516969c800849544e91751479
 ## Style and tooling
 
 - Maintain Python 3.9 compatibility. Use `from __future__ import annotations` with modern annotations. Follow the existing `src/ff/` package layout and local style; do not reformat adjacent code.
-- Use Pydantic v2 models for domain data crossing module boundaries in `contracts/models.py`; update producers and consumers together. Config, Jev transport and QA report models have existing separate homes. Preserve `Field(default_factory=...)` for collection defaults.
+- Use Pydantic v2 models for domain data crossing module boundaries in `contracts/models.py`; update producers and consumers together. Config and QA report models have existing separate homes. Preserve `Field(default_factory=...)` for collection defaults.
 - Ruff targets `py39`, line length 100, selects `E4`, `E7`, `E9`, `F`, and ignores `E501`. Tests additionally ignore `F401` and `E402`. This is the actual lint contract; no formatter, comprehensive Ruff rule set or strict mypy mode is configured.
 - mypy targets Python 3.9, checks `ff` under `src`, uses `strict_optional`, `warn_unused_ignores` and `show_error_codes`. Keep existing narrow, justified ignores; do not suppress failures broadly.
 - Use tools/code for calculations, sorting, parsing, schema extraction and checkable transformations. Keep interpretation and judgment separate from deterministic execution. Claim a command/check ran only from its literal output and exit status.
@@ -48,18 +48,14 @@ Baseline inspected on 2026-10-05 at commit `5bd80cd397d516969c800849544e91751479
 
 ## LLM and credentials
 
-- Use local runners only in the existing print/headless modes with a 120-second timeout. Do not add permission-bypass flags. Supported binaries are currently `agy`, `gemini`, `claude`, `ollama`; automatic selection follows that order and never chooses paid Jev.
-- Jev must stay explicitly selected, pinned by default to `jev-1.13.0` (unless `TYPESAFE_MODEL` overrides), with confidence floor 0.80, fixed Choice questions and locally built arguments. Do not lower thresholds, guess team identity, silently discard requested restrictions or add a fallback model to hide failure.
-- Preserve local resolution of `mine` by saved owner ID and named teams by explicit full name/roster number. Reject conflicting ownership wording, unsupported execution requests and unverifiable acquisition conditions.
-- TypeSafe receives the question and classification schema, not appended league datasets. Local terminal synthesis does receive dispatched results; do not generalize Jev's payload boundary to every backend.
-- Preserve the 15-second TypeSafe request timeout, disabled redirects and at most two retries only for 429/529. Keep provider error messages safe and do not expose credentials or raw provider replies.
-- Keep all application state under `FF_HOME`. Store the optional key separately via hidden input and atomic mode-0600 replacement. Never print, commit or request credentials in chat. Remember `make clean` removes the default saved key.
+- Use local runners only in the existing print/headless modes with a 120-second timeout. Do not add permission-bypass flags. Supported binaries are currently `agy`, `gemini`, `claude`, `ollama`; automatic selection follows that order.
+- Keep all application state under `FF_HOME`. Never print, commit or request credentials in chat.
 
 ## Existing rough edges to preserve unless specifically addressed
 
 These are observed compatibility/implementation details, not patterns to spread:
 
-- Tool parameter schemas are instructions to local models, not a global runtime validation layer. Dispatcher accepts extra kwargs such as `get_waivers.trending_only` and cleanup `limit` absent from their advertised schemas. CLI-local onboarding also accepts `league_id` beyond advertised `setup_league.username`. Jev constructs a narrower set itself. `api-contracts.json` records these differences; do not claim strict schema enforcement.
+- Tool parameter schemas are instructions to local models, not a global runtime validation layer. Dispatcher accepts extra kwargs such as `get_waivers.trending_only` and cleanup `limit` absent from their advertised schemas. CLI-local onboarding also accepts `league_id` beyond advertised `setup_league.username`. `api-contracts.json` records these differences; do not claim strict schema enforcement.
 - Broad catches exist around optional KTC loading, legacy compatibility paths, lazy projection loading and local `ask` dispatch. Do not extend catch-all handling to hide required weekly data failures, model failures or invalid primary inputs.
 - `_book` retries an older `include_ktc` signature after `TypeError`; `values/dealer.py` and legacy property aliases support existing integrations. Avoid unrequested removal or new general abstractions.
 - Most command bodies emit their result before QA. Local `ask` can print onboarding/unknown-tool/calculation failures and return normally (exit 0); strict QA may instead raise. Do not infer a universal exit-1 error contract.
@@ -79,22 +75,11 @@ Run from the repository root after dependencies exist. Setup is `make install` (
 | Whitespace/scope | `git diff --check` and `git status --short` | Review tracked diff plus newly created/untracked files separately |
 | Live API canaries | `make test-live` or `./.venv/bin/pytest -m live` | Real provider shape/freshness checks; optional league-specific checks use `FF_LIVE_LEAGUE_ID` |
 
-`.githooks/pre-commit` runs only the offline suite, using `.venv/bin/python` or `python3`; the hook is enabled by `make install`/`make hooks`, not merely by existing in Git. CI tests Python 3.9, 3.10, 3.11 and 3.12 with frozen dependencies, Ruff, mypy, offline pytest and `uv build` on main pushes and pull requests. Live tests and paid Jev evaluations are not CI/offline gates. Before shipping provider-facing changes run live checks and report skips; before committing/opening a PR run the local lint/type/test gates and review scope.
+`.githooks/pre-commit` runs only the offline suite, using `.venv/bin/python` or `python3`; the hook is enabled by `make install`/`make hooks`, not merely by existing in Git. CI tests Python 3.9, 3.10, 3.11 and 3.12 with frozen dependencies, Ruff, mypy, offline pytest and `uv build` on main pushes and pull requests. Live tests are not CI/offline gates. Before shipping provider-facing changes run live checks and report skips; before committing/opening a PR run the local lint/type/test gates and review scope.
 
 Offline HTTP tests use `responses`; `tests/conftest.py` redirects `FF_HOME` to a temporary directory. Do not read/write real league config in tests. Mocked interface changes require a matching contract check; prioritize integration smokes and schema validation over heavy mocking. A practical bug regression must be run and fail before the fix, then pass after it. Documentation-only verification should parse/check the generated contracts and establish source-file preservation; no new application regression is needed for this baseline.
 
 For calculator port/parity changes, run the offline golden-vector tests and the real-site oracle with Node 18+ (`node scripts/calculator_oracle.mjs --check tests/fixtures/calculator_vectors.json`), plus the affected live calculator checks. Do not generate replacement golden vectors merely to hide drift; retain formula/fingerprint evidence. The oracle is networked and excluded from the ordinary offline gate.
-
-For changes to Jev questions, confidence floor, routing or default model, run the affected opt-in paid suites with a privately configured key:
-
-```sh
-./.venv/bin/python scripts/eval_jev.py
-./.venv/bin/python scripts/eval_jev.py --cases evals/jev-boundaries.json
-./.venv/bin/python scripts/eval_jev.py --cases evals/jev-waivers.json
-./.venv/bin/python scripts/eval_jev.py --cases evals/jev-weekly.json
-```
-
-Main/boundary acceptance: at least 90% exact supported routes, every unsupported case abstaining, zero API errors, passing fixed `Show my roster` control (`get_roster`, `team="1"`, `limit=15`). Focused waiver coverage requires all 22 cases passing twice consecutively; weekly coverage requires all 23 passing twice. Check case results, not only exit status. Historical results in `evals/README.md` are not a fresh run or independent accuracy/calibration evidence.
 
 ## Change and specification hygiene
 

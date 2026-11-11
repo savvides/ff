@@ -556,4 +556,38 @@ def test_setup_historical_league_id_detects_season(fake_clients, league, monkeyp
     assert cfg.season == 2023
 
 
+def test_cli_compare_command(fake_clients, league, monkeypatch):
+    monkeypatch.setenv("FF_QA", "strict")
+    _write_config(league)
+    direct = runner.invoke(app, ["compare", "Ja'Marr Chase", "Jahmyr Gibbs"])
+    assert direct.exit_code == 0, direct.output
+    assert "Start/sit comparison" in direct.output
+    assert "Both players" in direct.output
+    assert direct.output.count("QA:") == 1
+
+
+def test_cli_waivers_weekly_command(fake_clients, league, monkeypatch):
+    _write_config(league)
+    import ff.cli as cli
+    projections = cli.ProjectionsClient()
+    projections.snapshot = lambda *a, **k: (
+        {**projections.week("2026", 1), "weekly_free": {"rec": 30}},
+        {"weekly_free": {"full_name": "Weekly Free", "position": "WR", "team": "SEA", "injury_status": None}},
+    )
+    monkeypatch.setattr(cli, "ProjectionsClient", lambda: projections)
+    direct = runner.invoke(app, ["waivers", "--weekly", "--position", "WR", "--limit", "5"])
+    assert direct.exit_code == 0, direct.output
+    assert "Weekly Free" in direct.output and "+30.00" in direct.output
+    assert "claim status" in direct.output
+
+
+def test_cli_rejects_jev_backend(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["config", "set-llm", "jev"])
+    assert res.exit_code != 0
+    assert "Invalid backend 'jev'" in res.output
+
+    res_ask = runner.invoke(app, ["ask", "who should I start", "--backend", "jev"])
+    assert res_ask.exit_code != 0
+    assert "Invalid backend 'jev'" in res_ask.output
 

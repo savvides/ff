@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, NoReturn, Optional, Sequence, Set, Tuple
 
 import requests
 import typer
@@ -29,6 +29,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from ff import __version__
 from ff.analysis.compare import compare_players, resolve_player
@@ -53,13 +54,12 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Roster
+from ff.contracts import Asset, Lineup, Roster
+from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
-from ff.services.llm.jev import Clarification, JevClient, JevError, interpret, save_jev_key
-from ff.services.llm.jev_output import render_result, render_weekly_notes, render_comparison, render_weekly_waivers
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
@@ -257,22 +257,22 @@ def _prepare_weekly(ctx: _LazyContext, team: Optional[str]) -> Roster:
     ctx._cache["_league"] = sc.league(cfg.league_id, fresh=True)
     ctx["week"] = _current_week(state)
     if str(state.get("season")) != str(cfg.season):
-        raise Clarification("The configured season is not current. Run `ff setup <username>`.")
+        raise ValueError("The configured season is not current. Run `ff setup <username>`.")
     if ctx._get_league().get("season_type", "regular") != "regular":
-        raise Clarification("Weekly advice supports regular-season leagues only.")
+        raise ValueError("Weekly advice supports regular-season leagues only.")
     ctx["rosters"] = build_rosters(sc.rosters(cfg.league_id, fresh=True), sc.league_users(cfg.league_id))
     target = next((r for r in ctx["rosters"] if str(r.roster_id) == team), None)
     if target is None:
         target = _pick_roster(ctx["rosters"], team, cfg.user_id)
     if target is None:
-        raise Clarification("Could not find that team in the fresh roster snapshot.")
+        raise ValueError("Could not find that team in the fresh roster snapshot.")
     candidates = None
     if ctx.get("weekly_candidates", False):
         ctx["projections"], candidates = ProjectionsClient().snapshot(str(cfg.season), ctx["week"], fresh=True)
     else:
         ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"], fresh=True)
     if not ctx["projections"]:
-        raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
+        raise ValueError(f"No projections available for {cfg.season} week {ctx['week']}.")
     ctx["weekly"], ctx["players_meta"] = load_weekly(
         sc, cfg.league_id, target, str(cfg.season), ctx["week"], ctx._get_league(), ctx["players_meta"], candidate_meta=candidates)
     ctx["weekly_team"] = str(target.roster_id)
@@ -810,6 +810,58 @@ def trade(
                               f"{', '.join(c.name for c in cands)}?[/]")
     qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
     render_qa_footer(qa_rep, console)
+
+
+def _render_table(console: Console, title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:
+    table = Table(title=Text(title))
+    for column in columns:
+        table.add_column(column)
+    count = 0
+    for row in rows:
+        table.add_row(*(Text(str(cell)) for cell in row))
+        count += 1
+    if count:
+        console.print(table)
+    else:
+        console.print(f"{title}: no results.", markup=False)
+
+
+def render_weekly_notes(lineup: Lineup, console: Console) -> None:
+    if lineup.as_of:
+        console.print(f"Availability and schedule checked {lineup.as_of.isoformat()} (UTC).")
+        console.print("Live games show actual points so far; totals exclude their unplayed remainder. Recheck Sleeper before making changes.")
+    if any(w.startswith("Conditional:") for w in lineup.warnings):
+        console.print("Each injury scenario changes one player at a time; backups may overlap.")
+    for warning in sorted(lineup.warnings, key=lambda w: 0 if w.startswith("Conditional:") else (2 if w.startswith("Reporting context") else 1)):
+        console.print(warning, markup=False)
+
+
+def render_comparison(result: PlayerComparison, target: Any, ctx: dict, console: Console) -> None:
+    console.print(result.recommendation, markup=False)
+    _render_table(console, "Start/sit comparison", ("start", "full-game projection", "availability", "whole-lineup total", "constraint"), (
+        (o.name, f"{o.projected_points:.2f}", o.availability,
+         f"{o.lineup.total:.2f}" if o.lineup else "-", o.reason or "other player sits") for o in result.options))
+    render_weekly_notes(result.baseline, console)
+    report = run_qa("compare", result=result, target_roster=target, weekly=ctx["weekly"])
+    render_qa_footer(report, console)
+
+
+def render_weekly_waivers(result: WeeklyWaivers, target: Any, ctx: dict, console: Console) -> None:
+    console.print(f"Weekly waiver lineup improvement: {result.baseline.season} week {result.baseline.week}; "
+                  f"baseline {result.baseline.total:.2f}; {result.candidates_evaluated} candidates evaluated.")
+    _render_table(console, "Unrostered players by lineup gain", ("player", "pos", "projection", "lineup gain", "displaces"), (
+        (t.name, t.position, f"{t.projected_points:.2f}", f"+{t.lineup_gain:.2f}", ", ".join(t.displaced) or "-") for t in result.targets))
+    for candidate in result.targets:
+        kickoff = candidate.kickoff.strftime("%a %m-%d %H:%M UTC") if candidate.kickoff else "unverified"
+        console.print(f"{candidate.name}: {candidate.availability}; kickoff {kickoff}.", markup=False)
+    console.print("Gains assume acquisition before kickoff and room on the active roster. No drop is selected. "
+                  "Unrostered does not establish claim status, waiver clearance or immediate pickup eligibility; check Sleeper. "
+                  "Zero gain means depth only; questionable players and the baseline remain conditional.")
+    render_weekly_notes(result.baseline, console)
+    for warning in result.warnings:
+        console.print(warning, markup=False)
+    render_qa_footer(run_qa("weekly_waivers", result=result, target_roster=target, rosters=ctx["rosters"],
+                            weekly=ctx["weekly"], roster_positions=ctx["roster_positions"]), console)
 
 
 # --- waivers -------------------------------------------------------------
@@ -1450,64 +1502,20 @@ def draft(
     render_qa_footer(qa_rep, console)
 
 
-def _ask_jev(query: str, cfg: Config) -> None:
-    try:
-        client = JevClient()
-        sc = SleeperClient()
-        # Jev renders FantasyCalc-only tables, so skip the secondary-market scrape.
-        ctx = _analysis_ctx(cfg, sc, include_secondary=False)
-        route = interpret(query, client, lambda: ctx["rosters"], cfg.user_id, lambda: ctx["players_meta"])
-        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
-            ctx["weekly_candidates"] = route.tool == "get_weekly_waivers"
-            if route.kwargs.get("trending_only"):
-                ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
-            _prepare_weekly(ctx, route.kwargs.get("team"))
-        elif route.tool == "get_waivers":
-            ctx["trending"] = _trending_adds(sc, route.kwargs["limit"])
-        details = dict(route.kwargs)
-        if details.pop("free_agents_only", False):
-            details["availability"] = "unrostered (claim status unknown)"
-        if "team" in details:
-            details["team"] = next(r.team_name for r in ctx["rosters"] if str(r.roster_id) == details["team"])
-        if "player_ids" in details:
-            details["players"] = ", ".join(player_name(pid, ctx["players_meta"]) for pid in details.pop("player_ids"))
-        if route.tool == "get_picks":
-            details.update(seasons=ctx["seasons"], rounds=ctx["rounds"])
-            details.setdefault("team", "whole league")
-        if route.tool in {"get_lineup", "get_player_comparison", "get_weekly_waivers"}:
-            details.update(season=cfg.season, week=ctx["week"])
-        operation = route.tool.removeprefix("get_").replace("_", " ")
-        filters = "; ".join(f"{key}: {value}" for key, value in details.items())
-        console.print(f"Interpreted: {operation}" + (f"; {filters}" if filters else ""), markup=False)
-        result = dispatch_tool(route.tool, route.kwargs, ctx)
-        render_result(route, result, ctx, console)
-    except Clarification as exc:
-        console.print(str(exc), markup=False)
-        raise typer.Exit(3)
-    except JevError as exc:
-        console.print(f"error: {exc}", markup=False)
-        raise typer.Exit(1)
-
-
-_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto", "jev"]
+_LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto"]
 
 
 @app.command()
 @_guard
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your league"),
-    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (jev, agy, gemini, claude, ollama)"),
+    backend: Optional[str] = typer.Option(None, "--backend", help="Override backend (agy, gemini, claude, ollama)"),
 ) -> None:
     """Ask natural language questions about trades, lineups, waivers, or league setup."""
     cfg = load_config() if config_exists() else None
     target_backend = (backend or (cfg.llm_backend if cfg else "auto")).lower()
     if target_backend not in _LLM_BACKENDS:
         _fail(f"Invalid backend '{target_backend}'. Must be one of: {', '.join(_LLM_BACKENDS)}")
-    if target_backend == "jev":
-        if cfg is None:
-            _fail("No league configured. Run `ff setup <username>` first.")
-        _ask_jev(query, cfg)
-        return
     ollama_model = cfg.ollama_model if cfg else "llama3.2"
 
     try:
@@ -1606,23 +1614,10 @@ def ask(
     render_qa_footer(qa_rep, console)
 
 
-@config_app.command(name="set-jev-key")
-def set_jev_key() -> None:
-    """Privately enter and save a TypeSafe API key for Jev."""
-    key = typer.prompt("TypeSafe API key", hide_input=True)
-    try:
-        path = save_jev_key(key)
-    except JevError as exc:
-        console.print(f"error: {exc}", markup=False)
-        raise typer.Exit(1)
-    console.print(f"Saved TypeSafe API key to {path} (owner read/write only).", markup=False)
-    console.print("An exported TYPESAFE_API_KEY takes precedence over this saved key.")
-
-
 @config_app.command(name="set-llm")
 @_guard
 def set_llm(
-    backend: str = typer.Argument(..., help="LLM backend: auto, jev, agy, gemini, claude, ollama"),
+    backend: str = typer.Argument(..., help="LLM backend: auto, agy, gemini, claude, ollama"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model name (defaults to llama3.2)"),
 ) -> None:
     """Configure the LLM backend used by 'ff ask'."""
