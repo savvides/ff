@@ -96,11 +96,17 @@ def build_weekly(roster: Roster, meta: Dict[str, Any], games: Dict[str, tuple],
     for pid in roster.player_ids:
         if pid not in context.players:
             context.players[pid] = WeeklyPlayer()
-    # A now-healthy IR occupant can block *all* roster changes on Sleeper.
+    # Sleeper locks adds/drops (not lineup changes) while an IR slot holds a
+    # player the league no longer lets onto IR, so this warns rather than blocks.
     ir_allowed = ir_eligible_statuses(settings)
     for pid in roster.reserve:
-        if (context.players[pid].injury_status or "").lower() not in ir_allowed:
-            context.blocked_reason = "IR eligibility is unverified or invalid; resolve the roster lock in Sleeper first"
+        status = context.players[pid].injury_status
+        if (status or "").lower() not in ir_allowed:
+            row = meta.get(pid) or {}
+            name = " ".join(filter(None, [row.get("first_name"), row.get("last_name")])) or pid
+            context.warnings.append(
+                f"IR lock: {name} ({status or 'healthy'}) is no longer IR-eligible; Sleeper blocks "
+                f"adds and waiver claims until he is activated or dropped. Lineup changes still work.")
     active_count = len(set(roster.player_ids) - set(roster.reserve) - set(roster.taxi))
     capacity = sum(s not in {"IR", "TAXI"} for s in roster_positions)
     if active_count > capacity or settings.get("capacity_override"):
