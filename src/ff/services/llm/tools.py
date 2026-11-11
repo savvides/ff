@@ -125,6 +125,18 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "get_standings",
+        "description": "Simulated rest of season for every team: expected wins, playoff odds, projected rookie-draft slot.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_trade_plan",
+        "description": "A team's trade stance (seller, buyer or hold) with the players to shop and to target, each with a reason.",
+        "parameters": {"type": "object", "properties": {
+            "team": {"type": "string", "description": "Team name or roster owner"}
+        }}
+    },
+    {
         "name": "get_dynasty_values",
         "description": "Get top overall player dynasty values.",
         "parameters": {

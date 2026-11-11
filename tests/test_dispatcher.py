@@ -249,3 +249,25 @@ def test_lineup_cannot_label_current_week_facts_as_another_week():
     with pytest.raises(ValueError, match="current week"):
         dispatch_tool("get_lineup", {"team": "1", "week": 8}, {
             "rosters": [Roster(roster_id=1)], "weekly": object(), "week": 3})
+
+
+def test_dispatch_standings_and_trade_plan() -> None:
+    from ff.contracts import Asset, Roster, StandingProjection
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    vet = Asset(id="vet", name="Vet", position="RB", age=29, value=3000, redraft_value=4500)
+    kid = Asset(id="kid", name="Kid", position="WR", age=22, value=4000, redraft_value=2000)
+    ctx = {
+        "rosters": [Roster(roster_id=1, owner_id="me", team_name="Mine", player_ids=["vet"]),
+                    Roster(roster_id=2, owner_id="x", team_name="Other", player_ids=["kid"])],
+        "value_book": ValueBook([vet, kid]),
+        "players_meta": {},
+        "season_sim": [StandingProjection(roster_id=1, team_name="Mine", exp_wins=2.0,
+                                          playoff_odds=0.0, draft_slot=1.0)],
+    }
+    assert dispatch_tool("get_standings", {}, ctx)[0]["draft_slot"] == 1.0
+    res = dispatch_tool("get_trade_plan", {"team": "Mine"}, ctx)
+    assert res["stance"] == "seller"
+    assert [r["player"] for r in res["shop"]] == ["Vet"]
+    assert [r["player"] for r in res["target"]] == ["Kid"]
