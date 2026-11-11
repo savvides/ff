@@ -60,7 +60,7 @@ def test_ask_command_tool_execution_loop(
         def league_users(self, lid):
             return users_raw
 
-        def players(self, sport="nfl"):
+        def players(self, sport="nfl", *, fresh=False):
             return players_meta
 
         def trending(self, sport="nfl", kind="add", lookback_hours=24, limit=25):

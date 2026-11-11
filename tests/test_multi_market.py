@@ -490,7 +490,7 @@ def test_cli_e2e_multi_market_trade_and_arbitrage(monkeypatch, multi_market_book
         def league_users(self, lid):
             return users_raw
 
-        def players(self, sport="nfl"):
+        def players(self, sport="nfl", *, fresh=False):
             return players_meta
 
     class FakeValues:

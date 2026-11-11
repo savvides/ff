@@ -101,3 +101,18 @@ def test_client_get_is_cached(rosters_raw, monkeypatch):
     second = sc.rosters("LG1")
     assert first == second == rosters_raw
     assert len(responses.calls) == 1  # second served from cache
+
+
+def test_players_fresh_flag(monkeypatch):
+    sc = SleeperClient()
+    called = {}
+    def mock_get(path, ttl=None):
+        called["path"] = path
+        called["ttl"] = ttl
+        return {"p1": {"name": "Test"}}
+    monkeypatch.setattr(sc, "_get", mock_get)
+    sc.players()
+    assert called["ttl"] == 24 * 3600
+    sc.players(fresh=True)
+    assert called["ttl"] == 0
+

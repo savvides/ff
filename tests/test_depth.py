@@ -167,6 +167,38 @@ def test_starter_injury_news_boost():
     assert with_out_starter == 500  # 500 * 1.0
 
 
+def test_promoted_backup_qb_superflex_starter_floor():
+    # Healthy backup QB (order 2, value 640) with starter on IR (starter_injury="Injured Reserve")
+    # In Superflex with superflex_starter_floor=1800, base is lifted to 1800 and multiplier is 1.0 -> 1800
+    promoted_score = opportunity_score(
+        640, "QB", 2, "MIA", is_superflex=True, starter_injury="Injured Reserve",
+        superflex_starter_floor=1800
+    )
+    assert promoted_score == 1800
+
+    # Without starter injury, backup gets regular depth multiplier (0.75) and no starter floor
+    backup_score = opportunity_score(
+        640, "QB", 2, "MIA", is_superflex=True, starter_injury=None,
+        superflex_starter_floor=1800
+    )
+    assert backup_score == round(640 * 0.75)  # 480
+
+    # In 1QB format, the Superflex starter floor does not apply even if starter is on IR
+    one_qb_score = opportunity_score(
+        640, "QB", 2, "MIA", is_superflex=False, starter_injury="Injured Reserve",
+        superflex_starter_floor=1800
+    )
+    assert one_qb_score < 1800
+
+    # Starter with lower nominal value (order 1, e.g. Wentz 1100) does not trigger promoted floor
+    starter_score = opportunity_score(
+        1100, "QB", 1, "MIN", is_superflex=True, starter_injury=None,
+        superflex_starter_floor=1800
+    )
+    assert starter_score == 1100
+
+
+
 def test_precompute_starter_injuries():
     from ff.analysis.depth import precompute_starter_injuries
 

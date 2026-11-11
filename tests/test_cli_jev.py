@@ -305,7 +305,7 @@ def test_general_waivers_find_nontrending_players_and_explain_availability(confi
     meta = dict(sleeper.players())
     meta["quiet"] = {"full_name": "Quiet Quarterback", "position": "QB", "team": "CHI", "active": True}
     meta["k"] = {"full_name": "Trending Kicker", "position": "K", "team": "TB", "active": True}
-    sleeper.players = lambda: meta
+    sleeper.players = lambda **k: meta
     sleeper.trending = lambda **kwargs: [{"player_id": "k", "count": 100}]
     monkeypatch.setattr(cli, "SleeperClient", lambda: sleeper)
     serve("get_waivers", {})

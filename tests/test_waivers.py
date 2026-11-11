@@ -104,3 +104,32 @@ def test_overlapping_flex_slots_allow_their_positions():
     for slot, expected in [("WRRB_FLEX", {"WR", "RB"}), ("REC_FLEX", {"WR", "TE"})]:
         targets = waiver_targets([], ValueBook([]), [], meta, roster_positions=[slot])
         assert {t.asset.position for t in targets} == expected
+
+
+def test_waivers_promoted_qb_outranks_veteran_starter_in_superflex():
+    from ff.contracts import Asset
+    from ff.values import ValueBook
+
+    # Create 32 QBs to establish a dynamic baseline floor
+    qbs = [Asset(id=f"qb_{i}", name=f"QB {i}", position="QB", value=2000 - i * 10) for i in range(35)]
+    # qbs[31].value is 2000 - 310 = 1690
+    mccord = Asset(id="mccord", name="Kyle McCord", position="QB", value=640)
+    waller = Asset(id="waller", name="Darren Waller", position="TE", value=1047)
+    book = ValueBook(qbs + [mccord, waller])
+
+    meta = {
+        "starter": {"position": "QB", "team": "MIA", "depth_chart_order": 1, "status": "Injured Reserve", "active": True},
+        "mccord": {"full_name": "Kyle McCord", "position": "QB", "team": "MIA", "depth_chart_order": 2, "status": "Active", "active": True},
+        "waller": {"full_name": "Darren Waller", "position": "TE", "team": "CAR", "depth_chart_order": 1, "status": "Active", "active": True},
+    }
+    trending = [{"player_id": "mccord", "count": 500}, {"player_id": "waller", "count": 200}]
+    targets = waiver_targets(
+        trending, book, rosters=[], players_meta=meta, limit=10, is_superflex=True,
+        roster_positions=["QB", "TE", "SUPER_FLEX"]
+    )
+    # McCord should be ranked #1 above Waller (opp score 1690 vs 1047)
+    assert targets[0].asset.name == "Kyle McCord"
+    assert targets[0].opportunity_score == 1690
+    assert targets[1].asset.name == "Darren Waller"
+    assert targets[1].opportunity_score == 1047
+

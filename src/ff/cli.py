@@ -841,11 +841,12 @@ def waivers(
     rosters = _league_rosters(cfg, sc)
     trending = _trending_adds(sc, limit)
     roster_positions = (sc.league(cfg.league_id) or {}).get("roster_positions") or []
+    players_meta = sc.players(fresh=True)
     targets = waiver_targets(
         trending,
         book,
         rosters,
-        sc.players(),
+        players_meta,
         limit=limit,
         free_agents_only=not include_rostered,
         is_superflex=bool(cfg.format.superflex),

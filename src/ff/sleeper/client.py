@@ -80,8 +80,8 @@ class SleeperClient:
         return self._get(f"draft/{draft_id}/traded_picks", ttl=0) or []
 
     # --- players / trending ---------------------------------------------
-    def players(self, sport: str = "nfl") -> Dict[str, Any]:
-        return self._get(f"players/{sport}", ttl=PLAYERS_TTL)
+    def players(self, sport: str = "nfl", *, fresh: bool = False) -> Dict[str, Any]:
+        return self._get(f"players/{sport}", ttl=0 if fresh else PLAYERS_TTL)
 
     def trending(self, sport: str = "nfl", kind: str = "add",
                  lookback_hours: int = 24, limit: int = 25) -> List[Dict[str, Any]]:

@@ -152,6 +152,7 @@ def opportunity_score(
     age: Optional[float] = None,
     years_exp: Optional[int] = None,
     secondary_value: Optional[int] = None,
+    superflex_starter_floor: Optional[int] = None,
 ) -> int:
     """Composite heuristic: dynasty value x depth chart opportunity x news/health factor."""
     pos = (position or "").upper()
@@ -161,10 +162,12 @@ def opportunity_score(
     )
 
     # Starter injury boost for direct backups / handcuffs (order == 2)
+    is_promoted_starter = False
     if depth_chart_order == 2 and starter_injury:
         sinj = starter_injury.lower()
         if any(w in sinj for w in ("out", "ir", "injured reserve", "pup", "dnr")):
             mult = min(1.0, mult + 0.25)
+            is_promoted_starter = True
         elif "doubtful" in sinj:
             mult = min(1.0, mult + 0.15)
         elif "questionable" in sinj:
@@ -183,7 +186,9 @@ def opportunity_score(
 
     # Base value with positional scarcity protection
     base = value if value > 0 else 50
-    if is_superflex and on_team and is_young_qb and has_market_backing:
+    if is_superflex and on_team and pos == "QB" and is_promoted_starter and superflex_starter_floor is not None:
+        base = max(base, superflex_starter_floor)
+    elif is_superflex and on_team and is_young_qb and has_market_backing:
         base = max(base, 500)
         mult = max(mult, 0.65)
     elif (

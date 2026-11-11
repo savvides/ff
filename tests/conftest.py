@@ -148,7 +148,7 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
         def league_users(self, lid):
             return users_raw
 
-        def players(self, sport="nfl"):
+        def players(self, sport="nfl", *, fresh=False):
             return players_meta
 
         def trending(self, sport="nfl", kind="add", lookback_hours=24, limit=25):
