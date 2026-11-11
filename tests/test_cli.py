@@ -109,6 +109,9 @@ def test_trade_command(fake_clients, league):
                                  "--get", "Bijan Robinson,2027 1st"])
     assert result.exit_code == 0, result.output
     assert "win" in result.output.lower()
+    # A tier-less pick in a tiered round is called out with what each tier is worth.
+    assert "priced as a generic pick" in result.output
+    assert "name the tier" in result.output
 
 
 def test_cleanup_command(fake_clients, league):
@@ -608,3 +611,25 @@ def test_load_refreshes_league_format_from_sleeper(fake_clients, monkeypatch):
     # verify config was updated on disk
     assert load_config().format.superflex is True
 
+
+
+def test_fab_command_requires_a_budget_league(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["fab"])
+    assert result.exit_code == 1
+    assert "waiver budget" in result.output
+
+
+def test_standings_before_any_game(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["standings"])
+    assert result.exit_code == 1
+    assert "no games played" in result.output
+
+
+def test_plan_command(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["plan"])
+    assert result.exit_code == 0, result.output
+    assert "stance:" in result.output
+    assert "trades" in result.output

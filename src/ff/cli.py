@@ -1,6 +1,10 @@
 """ff command-line interface.
 
     ff setup <username>     pick your league, auto-detect its format, save it
+    ff plan                 your team on one page: stance, this week's to-dos, who to shop/target
+    ff standings            playoff odds and projected draft slot, simulated
+    ff fab                  waiver budgets left and what this league pays for claims
+    ff offers --sell        packages for your asset that pass the offer rule
     ff roster [team]        price out a roster, with power rank + positions
     ff power                league power rankings by dynasty value
     ff picks [team]         future draft capital by team, tier-valued
@@ -17,6 +21,7 @@ import functools
 import inspect
 import json
 import re
+import statistics
 import subprocess
 import sys
 from datetime import datetime
@@ -32,6 +37,8 @@ from rich.table import Table
 from rich.text import Text
 
 from ff import __version__
+from ff.analysis.fab import bid_summary, winning_bids
+from ff.analysis.plan import buy_candidates, sell_candidates, trade_stance
 from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
@@ -48,13 +55,14 @@ from ff.analysis import (
     position_deltas,
     secondary_position_deltas,
     projected_points,
+    simulate_season,
     rank_fits,
     top_movers,
     value_all_rosters,
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Lineup, Roster
+from ff.contracts import Asset, Lineup, Roster, RosterValuation, StandingProjection
 from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
@@ -65,7 +73,7 @@ from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
 from ff.services.weekly import load_weekly
 from ff.sleeper import SleeperClient, build_rosters, detect_format, player_name
-from ff.values import ValueBook, ValuesClient, normalize_name
+from ff.values import ValueBook, ValuesClient, normalize_name, normalize_pick
 from ff.values.calculators_live import check_calculators
 
 app = typer.Typer(add_completion=False, help="Manage a Sleeper dynasty league with free data.")
@@ -168,6 +176,45 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
     return seasons, rounds_n
 
 
+def _season_sim(cfg: Config, sc: SleeperClient, league: Dict[str, Any],
+                rosters: List[Roster]) -> List[StandingProjection]:
+    """Simulated rest of the regular season; empty before the first game."""
+    settings = league.get("settings") or {}
+    median = bool(settings.get("league_average_match"))
+    done = max((r.wins + r.losses + r.ties for r in rosters), default=0) // (2 if median else 1)
+    if not done:
+        return []
+    start = int(settings.get("start_week") or 1)
+    end = int(settings.get("playoff_week_start") or 15)
+    scores: Dict[int, List[float]] = {r.roster_id: [] for r in rosters}
+    remaining = []
+    for week in range(start, end):
+        final = week < start + done
+        rows = sc.matchups(cfg.league_id, week, ttl=24 * 3600 if final else 1800)
+        games: Dict[int, List[int]] = {}
+        for m in rows:
+            if m.get("matchup_id") is None or m.get("roster_id") not in scores:
+                continue
+            if final:
+                scores[m["roster_id"]].append(float(m.get("points") or 0))
+            else:
+                games.setdefault(m["matchup_id"], []).append(m["roster_id"])
+        if not final:
+            remaining.append([(g[0], g[1]) for g in games.values() if len(g) == 2])
+    return simulate_season(rosters, scores, remaining, median_game=median,
+                           playoff_teams=int(settings.get("playoff_teams") or 6))
+
+
+def _finish_ranks(sim: List[StandingProjection],
+                  valuations: List[RosterValuation]) -> Tuple[Dict[int, Optional[int]], str]:
+    """({roster_id: expected finish, 1 = best}, basis) for tiering next year's
+    picks: the simulated draft order once games exist, else roster value."""
+    if sim:
+        order = sorted(sim, key=lambda p: p.draft_slot, reverse=True)
+        return {p.roster_id: i for i, p in enumerate(order, 1)}, "projected finish"
+    return {v.roster_id: v.power_rank for v in valuations}, "power rank"
+
+
 def _current_week(state: Dict[str, Any]) -> int:
     """The NFL week whose lineup is still open: the later of Sleeper's `week` and
     `display_week`, never below 1.
@@ -243,6 +290,8 @@ class _LazyContext(dict):
             return self._get_league().get("roster_positions") or []
         elif key == "traded_picks":
             return self._sc.traded_picks(self._cfg.league_id)
+        elif key == "season_sim":
+            return _season_sim(self._cfg, self._sc, self._get_league(), self["rosters"])
         elif key == "seasons":
             return self._get_pick_window()[0]
         elif key == "rounds":
@@ -523,19 +572,230 @@ def power() -> None:
     valuations = value_all_rosters(rosters, book, sc.players())
     by_id = {r.roster_id: r for r in rosters}
 
+    league = sc.league(cfg.league_id) or {}
+    sim = _season_sim(cfg, sc, league, rosters)
+    seasons, rounds_n = _pick_window(sc, cfg, league, 3)
+    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
+                         _finish_ranks(sim, valuations)[0], seasons=seasons, rounds=rounds_n)
+    pick_value = {tp.roster_id: tp.total_value for tp in ledger}
+    total = {v.roster_id: v.total_value + pick_value.get(v.roster_id, 0) for v in valuations}
+    total_rank = {rid: i for i, rid in enumerate(sorted(total, key=lambda k: -total[k]), 1)}
+
     t = Table(title=f"{cfg.name} - power rankings ({cfg.format.label()})")
-    for c in ("#", "team", "dynasty value", "record", "pts for"):
-        t.add_column(c, justify="right" if c in ("dynasty value", "pts for", "#") else "left")
+    for c in ("#", "team", "players", "picks", "total", "total #", "record", "pts for"):
+        t.add_column(c, justify="left" if c in ("team", "record") else "right")
     for v in valuations:
         r = by_id[v.roster_id]
         t.add_row(str(v.power_rank), v.team_name, f"{v.total_value:,}",
+                  f"{pick_value.get(v.roster_id, 0):,}", f"{total[v.roster_id]:,}",
+                  str(total_rank[v.roster_id]),
                   f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
                   f"{r.points_for:.0f}")
     console.print(t)
-    console.print("[dim]value = rostered players only; draft picks are not counted, "
-                  "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
+    console.print(f"[dim]# ranks rostered players (who wins now); picks = {seasons[0]}-{seasons[-1][2:]} "
+                  "draft capital (`ff picks`); total = both, the long-run asset base. "
+                  "Playoff odds: `ff standings`.[/]")
     qa_rep = run_qa("power", valuations=valuations, rosters=rosters)
     render_qa_footer(qa_rep, console)
+
+
+# --- standings -----------------------------------------------------------
+
+@app.command()
+@_guard
+def standings() -> None:
+    """Standings with simulated playoff odds and projected rookie-draft slot."""
+    cfg, sc = _load()
+    league = sc.league(cfg.league_id) or {}
+    rosters = _league_rosters(cfg, sc)
+    sim = _season_sim(cfg, sc, league, rosters)
+    if not sim:
+        _fail("no games played yet this season; standings start after week 1.")
+    by_id = {r.roster_id: r for r in rosters}
+    settings = league.get("settings") or {}
+    t = Table(title=f"{cfg.name} - standings and outlook")
+    for c in ("#", "team", "record", "pts for", "exp wins", "playoffs", "draft slot"):
+        t.add_column(c, justify="left" if c in ("team", "record") else "right")
+    for i, p in enumerate(sim, 1):
+        r = by_id[p.roster_id]
+        mine = r.owner_id == cfg.user_id
+        t.add_row(str(i), f"[bold]{p.team_name}[/]" if mine else p.team_name,
+                  f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
+                  f"{r.points_for:.0f}", f"{p.exp_wins:.1f}",
+                  f"{p.playoff_odds:.0%}", f"{p.draft_slot:.1f}")
+    console.print(t)
+    console.print(f"[dim]4,000 simulated finishes of the regular season (playoffs start week "
+                  f"{settings.get('playoff_week_start', '?')}, {settings.get('playoff_teams', '?')} teams): "
+                  "each team scores around its points per game, regressed toward the league "
+                  "average. Draft slot assumes reverse order of standings, playoff teams last; "
+                  "it sets early/mid/late pick prices in `ff picks`.[/]")
+
+
+# --- plan ----------------------------------------------------------------
+
+@app.command()
+@_guard
+def plan() -> None:
+    """Your team in one page: where you stand and what to do about it now."""
+    cfg, sc = _load()
+    ctx = _analysis_ctx(cfg, sc, include_secondary=False)
+    league = ctx._get_league()
+    settings = league.get("settings") or {}
+    rosters: List[Roster] = ctx["rosters"]
+    me = _pick_roster(rosters, None, cfg.user_id)
+    if me is None:
+        _fail("your team is unknown. Re-run `ff setup <username>`.")
+    book: ValueBook = ctx["value_book"]
+    meta = ctx["players_meta"]
+    valuations = value_all_rosters(rosters, book, meta)
+    mine = next(v for v in valuations if v.roster_id == me.roster_id)
+    sim = ctx["season_sim"]
+    outlook = next((p for p in sim if p.roster_id == me.roster_id), None)
+    ledger = pick_ledger(rosters, ctx["traded_picks"], book, _finish_ranks(sim, valuations)[0],
+                         seasons=_pick_window(sc, cfg, league, 3)[0], rounds=ctx["rounds"])
+    pick_rank = next(i for i, tp in enumerate(ledger, 1) if tp.roster_id == me.roster_id)
+    my_picks_value = ledger[pick_rank - 1].total_value
+    stance = trade_stance(mine.power_rank, len(rosters), outlook.playoff_odds if outlook else None)
+    week = ctx["week"]
+    deadline = int(settings.get("trade_deadline") or 0)
+    budget = int(settings.get("waiver_budget") or 0)
+
+    head = [f"[bold]{me.team_name}[/]   {me.wins}-{me.losses}" + (f"-{me.ties}" if me.ties else "")]
+    if outlook:
+        head.append(f"playoff odds [bold]{outlook.playoff_odds:.0%}[/]   expected wins "
+                    f"{outlook.exp_wins:.1f}   projected draft slot [bold]{outlook.draft_slot:.1f}[/]")
+    head.append(f"players {mine.total_value:,} (#{mine.power_rank}/{len(rosters)})   "
+                f"picks {my_picks_value:,} (#{pick_rank}/{len(rosters)})")
+    head.append(f"stance: [bold cyan]{stance}[/] - " + {
+        "seller": "this season will not end in a title; turn points you cannot use into future value",
+        "buyer": "you are in the hunt; turn future value into points now",
+        "hold": "neither clearly in nor out; do not pay for either direction yet"}[stance])
+    console.print(Panel.fit("\n".join(head), title=f"plan - week {week}"))
+
+    console.print("[bold]this week[/]")
+    try:
+        target = _prepare_weekly(ctx, None)
+        lu = optimal_lineup(target, ctx["projections"], ctx["scoring"], ctx["roster_positions"],
+                            ctx["players_meta"], season=str(cfg.season), week=week, weekly=ctx["weekly"])
+        empty = sum(p == "0" for p in target.starters)
+        swaps = len({s.player_id for s in lu.slots if s.player_id} - set(target.starters))
+        if empty or swaps:
+            console.print(f"  [yellow]lineup:[/] {swaps} better starter(s) on your bench"
+                          + (f", {empty} empty starting slot(s)" if empty else "") + " - run `ff lineup`")
+        else:
+            console.print("  [green]lineup:[/] already optimal")
+        for w in lu.warnings:
+            if w.startswith("IR lock:"):
+                console.print(f"  [red]{w}[/]")
+    except (ValueError, requests.RequestException) as e:
+        console.print(f"  [dim]lineup check unavailable: {e}[/]")
+    audit = audit_roster(
+        me, book, meta, roster_positions=league.get("roster_positions") or [],
+        taxi_slots=int(settings.get("taxi_slots") or 0), reserve_slots=int(settings.get("reserve_slots") or 0),
+        taxi_allow_vets=bool(settings.get("taxi_allow_vets")), taxi_years=settings.get("taxi_years"),
+        is_superflex=bool(cfg.format.superflex), ir_statuses=ir_eligible_statuses(settings))
+    for label, moves in (("IR", audit.ir_candidates), ("taxi", audit.taxi_candidates)):
+        if moves:
+            console.print(f"  [yellow]free roster room:[/] move {', '.join(s.name for s in moves)} to {label}")
+    if budget:
+        left = sorted(((budget - r.fab_used, r.team_name) for r in rosters), reverse=True)
+        console.print(f"  waiver budget: ${budget - me.fab_used} left of ${budget} "
+                      f"(most in the league: ${left[0][0]}, {left[0][1]}) - bid history in `ff fab`")
+
+    console.print("[bold]trades[/]")
+    if deadline and week > deadline:
+        console.print(f"  [dim]the trade deadline (week {deadline}) has passed; this is your offseason list.[/]")
+    elif deadline:
+        console.print(f"  trade deadline: week {deadline} ({deadline - week + 1} lineup week(s) left, this one included)")
+    owner = {pid: r.team_name for r in rosters for pid in r.player_ids}
+    sells = sell_candidates(mine.assets, stance)
+    # Deal with teams going the other way: a seller's partners are the buyers.
+    odds = {p.roster_id: p.playoff_odds for p in sim}
+    other = {"seller": "buyer", "buyer": "seller"}.get(stance)
+    partners = [r for v in valuations for r in rosters if r.roster_id == v.roster_id != me.roster_id
+                and trade_stance(v.power_rank, len(rosters), odds.get(v.roster_id)) == other]
+    partner_ids = {pid for r in (partners or [r for r in rosters if r is not me]) for pid in r.player_ids}
+    buys = buy_candidates(book, {a.id for a in book.assets} - partner_ids, stance)
+    for title, rows, col in (("shop these", sells, None),
+                             (f"target these (on {other} rosters)", buys, "owner")):
+        if not rows:
+            continue
+        t = Table(title=title, title_justify="left")
+        for c in ("player", "pos", "age", "value", "win-now", *([col] if col else []), "why"):
+            t.add_column(c, justify="right" if c in ("age", "value", "win-now") else "left")
+        for a, why in rows:
+            t.add_row(a.name, a.position or "-", f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
+                      f"{a.redraft_value:,}" if a.redraft_value else "-",
+                      *([owner.get(a.id, "free agent")] if col else []), why)
+        console.print(t)
+    if not sells and not buys:
+        console.print("  [dim]nothing on your roster or the market stands out for your stance.[/]")
+    console.print("[dim]value = FantasyCalc dynasty value; win-now = its redraft value on the same scale. "
+                  "Price any deal with `ff trade`. Stance uses `ff standings` odds once games exist, "
+                  "else roster rank. ff is read-only.[/]")
+
+
+# --- fab -----------------------------------------------------------------
+
+def _fab_claims(cfg: Config, sc: SleeperClient) -> list:
+    week = _current_week(sc.state() or {})
+    return winning_bids([row for w in range(week + 1) for row in sc.transactions(cfg.league_id, w)])
+
+
+@app.command()
+@_guard
+def fab(limit: int = typer.Option(12, help="How many recent contested claims to list.")) -> None:
+    """Waiver budgets left and what this league has actually paid for claims."""
+    cfg, sc = _load()
+    league = sc.league(cfg.league_id) or {}
+    budget = int((league.get("settings") or {}).get("waiver_budget") or 0)
+    if (league.get("settings") or {}).get("waiver_type") != 2 or not budget:
+        _fail("this league does not use a waiver budget (FAB).")
+    rosters = _league_rosters(cfg, sc)
+    meta = sc.players()
+    claims = _fab_claims(cfg, sc)
+    names = {r.roster_id: r.team_name for r in rosters}
+
+    t = Table(title=f"waiver budgets (of ${budget})")
+    for c in ("team", "left", "spent"):
+        t.add_column(c, justify="left" if c == "team" else "right")
+    for r in sorted(rosters, key=lambda r: r.fab_used):
+        mine = r.owner_id == cfg.user_id
+        t.add_row(f"[bold]{r.team_name}[/]" if mine else r.team_name,
+                  f"${budget - r.fab_used}", f"${r.fab_used}")
+    console.print(t)
+
+    if not claims:
+        console.print("[dim]no waiver bids recorded this season yet.[/]")
+        return
+    t = Table(title="winning bids this season")
+    for c in ("group", "claims", "median", "75th pct", "max"):
+        t.add_column(c, justify="left" if c == "group" else "right")
+    groups = [("all", claims), ("contested", [c for c in claims if c.bidders > 1])]
+    groups += [(pos, [c for c in claims if (meta.get(c.player_id) or {}).get("position") == pos])
+               for pos in ("QB", "RB", "WR", "TE")]
+    for label, group in groups:
+        s = bid_summary([c.bid for c in group])
+        if s:
+            t.add_row(label, str(s["n"]), f"${s['median']:g}", f"${s['p75']:g}", f"${s['max']:g}")
+    console.print(t)
+
+    all_contested = [c for c in claims if c.runner_up is not None]
+    contested = all_contested[:limit]
+    if contested:
+        t = Table(title="recent contested claims")
+        for c in ("wk", "player", "pos", "winner", "bid", "next best", "bidders"):
+            t.add_column(c, justify="right" if c in ("bid", "next best", "bidders", "wk") else "left")
+        for c in contested:
+            t.add_row(str(c.week), player_name(c.player_id, meta),
+                      (meta.get(c.player_id) or {}).get("position") or "-",
+                      names.get(c.roster_id, "?"), f"${c.bid}", f"${c.runner_up}", str(c.bidders))
+        console.print(t)
+        over = statistics.median(c.bid - (c.runner_up or 0) for c in all_contested)
+        console.print(f"[dim]winners of contested claims paid a median ${over:g} more than they needed to.[/]")
+    console.print("[dim]Sleeper shows a losing bid only when another team won the player, so "
+                  "uncontested claims have no 'next best'. A rival can never bid more than "
+                  "their budget left. ff is read-only; place bids in Sleeper.[/]")
 
 
 # --- picks ---------------------------------------------------------------
@@ -558,7 +818,7 @@ def picks(
     seasons, rounds_n = _pick_window(sc, cfg, league, years, rounds)
 
     valuations = value_all_rosters(rosters, book, sc.players())
-    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ranks, basis = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
     traded = sc.traded_picks(cfg.league_id)
     ledger = pick_ledger(rosters, traded, book, ranks,
                          seasons=seasons, rounds=rounds_n)
@@ -594,9 +854,9 @@ def picks(
                       f"[cyan]from {p.original_team}[/]" if p.acquired else "own",
                       p.tier or "-", f"{p.value:,}")
         console.print(t)
-    console.print("[dim]picks only - players are `ff power`. 1sts/2nds are tiered "
-                  "early/mid/late by the ORIGINAL team's power rank (a bad team's own "
-                  "1st is an early one); other rounds use the flat round value; "
+    console.print("[dim]picks only - players are `ff power`. Picks FantasyCalc tiers are priced "
+                  f"early/mid/late by the ORIGINAL team's {basis} (a bad team's own "
+                  "1st is an early one; see `ff standings`); other picks use the flat round value; "
                   "0 = FantasyCalc does not price that round. This year's board: "
                   "`ff draft`.[/]")
     qa_rep = run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded)
@@ -822,6 +1082,7 @@ def trade(
             console.print(f"[dim]positional swing (raw, before package adjustments):[/] {line}")
     for tok, name in subs:
         console.print(f"[dim]matched '{tok}' -> {name}[/]")
+    _print_generic_pick_hints(cfg, sc, book, give_tokens + get_tokens)
     if unresolved:
         console.print(f"[bold red]unmatched (ignored):[/] {', '.join(unresolved)} "
                       f"[dim]- check spelling, or '2027 1st' / '2027 early 1st' for picks[/]")
@@ -832,6 +1093,64 @@ def trade(
                               f"{', '.join(c.name for c in cands)}?[/]")
     qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
     render_qa_footer(qa_rep, console)
+
+
+def _print_generic_pick_hints(cfg: Config, sc: SleeperClient, book: ValueBook,
+                              tokens: List[str]) -> None:
+    """A round pick typed without a tier is priced as nobody's pick in
+    particular; when the market tiers that round, show what it is really worth."""
+    keys = sorted({k for k in map(normalize_pick, tokens) if k and f"{k} early" in book.picks})
+    if not keys:
+        return
+    league = sc.league(cfg.league_id) or {}
+    rosters = _league_rosters(cfg, sc)
+    valuations = value_all_rosters(rosters, book, sc.players())
+    ranks, basis = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
+    seasons = sorted({k.split()[0] for k in keys})
+    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book, ranks,
+                         seasons=seasons, rounds=max(int(k.split()[1]) for k in keys))
+    mine = _pick_roster(rosters, None, cfg.user_id)
+    for key in keys:
+        season, rnd = key.split()
+        flat = book.picks.get(key)
+        tiers = " / ".join(f"{t} {book.picks[f'{key} {t}'].value:,}" for t in ("early", "mid", "late"))
+        console.print(f"[yellow]'{flat.name if flat else key}' is priced as a generic pick"
+                      + (f" ({flat.value:,})" if flat else "") + f". By tier: {tiers}.[/]")
+        by_tier: Dict[str, List[str]] = {}
+        for tp in ledger:
+            for pk in tp.picks:
+                if pk.season == season and pk.round == int(rnd) and pk.tier:
+                    is_mine = bool(mine and tp.roster_id == mine.roster_id)
+                    held = "[bold]you hold it[/]" if is_mine else f"held by {tp.team_name}"
+                    by_tier.setdefault(pk.tier, []).append(
+                        pk.original_team + (f" ({held})" if pk.acquired or is_mine else ""))
+        for t in ("early", "mid", "late"):
+            if by_tier.get(t):
+                console.print(f"[dim]  {t} (original team, by {basis}): {', '.join(by_tier[t])}[/]")
+        console.print(f"[dim]  name the tier for an exact price, e.g. "
+                      f"'{season} early {flat.name.split()[1] if flat else 'round ' + rnd}'.[/]")
+
+
+@app.command()
+@_guard
+def offers(
+    sell: List[str] = typer.Option(..., "--sell", help="Asset you sell (repeatable)."),
+    to: Optional[List[str]] = typer.Option(None, "--to", help="Manager's Sleeper username or team name "
+                                           "(repeatable); default: every other team."),
+    with_: Optional[List[str]] = typer.Option(None, "--with", help="Asset of yours allowed as a balancer "
+                                              "(repeatable); default: your vets 27+ and picks after round 1."),
+    max_age: float = typer.Option(26, help="Oldest player you would take back."),
+    limit: int = typer.Option(5, help="Packages to show per manager."),
+) -> None:
+    """Find packages for what you sell that pass the offer rule in both markets,
+    ranked by how well they fit your roster."""
+    from ff.offers import main  # ff.offers imports this module
+
+    argv = ["--max-age", str(max_age), "--limit", str(limit)]
+    for flag, vals in (("--sell", sell), ("--to", to), ("--with", with_)):
+        for v in vals or []:
+            argv += [flag, v]
+    raise typer.Exit(main(argv))
 
 
 def _render_table(console: Console, title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:
@@ -1692,7 +2011,7 @@ def qa_cmd(
     start = base + 1 if latest else base
     seasons = [str(start + i) for i in range(2)]
     rounds_n = int((league.get("settings") or {}).get("draft_rounds") or 4)
-    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ranks, _ = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
     traded = sc.traded_picks(cfg.league_id)
     ledger = pick_ledger(rosters, traded, book, ranks, seasons=seasons, rounds=rounds_n)
     reports.append(run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded))

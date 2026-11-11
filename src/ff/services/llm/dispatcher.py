@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ff.analysis import cleanup, fit, lineup, movers, picks, roster, trade, waivers
+from ff.analysis import cleanup, fit, lineup, movers, picks, plan, roster, trade, waivers
 from ff.analysis.draft import available
 from ff.analysis.compare import compare_players
 from ff.analysis.weekly_waivers import weekly_waivers
@@ -207,13 +207,37 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         valuations = roster.value_all_rosters(rosters, value_book, players_meta)
         return [v.model_dump() if hasattr(v, "model_dump") else v for v in valuations]
 
+    elif tool_name == "get_standings":
+        return [p.model_dump() for p in ctx.get("season_sim") or []]
+
+    elif tool_name == "get_trade_plan":
+        rosters = ctx.get("rosters", [])
+        value_book = ctx.get("value_book")
+        target_r = _require_roster(rosters, kwargs.get("team"), ctx)
+        valuations = roster.value_all_rosters(rosters, value_book, ctx.get("players_meta"))
+        mine = next(v for v in valuations if v.roster_id == target_r.roster_id)
+        odds = {p.roster_id: p.playoff_odds for p in ctx.get("season_sim") or []}
+        stance = plan.trade_stance(mine.power_rank, len(rosters), odds.get(target_r.roster_id))
+
+        def rows(found: Any) -> List[Dict[str, Any]]:
+            return [{"player": a.name, "position": a.position, "age": a.age, "value": a.value,
+                     "win_now_value": a.redraft_value, "why": why} for a, why in found]
+
+        return {"team": target_r.team_name, "stance": stance,
+                "playoff_odds": odds.get(target_r.roster_id),
+                "shop": rows(plan.sell_candidates(mine.assets, stance)),
+                "target": rows(plan.buy_candidates(value_book, set(target_r.player_ids), stance))}
+
     elif tool_name == "get_picks":
         rosters = ctx.get("rosters", [])
         traded_picks = ctx.get("traded_picks", [])
         value_book = ctx.get("value_book")
         players_meta = ctx.get("players_meta")
         valuations = roster.value_all_rosters(rosters, value_book, players_meta) if (rosters and value_book) else []
-        power_ranks = {v.roster_id: v.power_rank for v in valuations}
+        sim = sorted(ctx.get("season_sim") or [], key=lambda p: p.draft_slot, reverse=True)
+        power_ranks: Dict[int, Optional[int]] = (
+            {p.roster_id: i for i, p in enumerate(sim, 1)} if sim
+            else {v.roster_id: v.power_rank for v in valuations})
         seasons = ctx.get("seasons", ["2026", "2027", "2028"])
         rounds = ctx.get("rounds", 4)
         ledger = picks.pick_ledger(rosters, traded_picks, value_book, power_ranks, seasons=seasons, rounds=rounds)

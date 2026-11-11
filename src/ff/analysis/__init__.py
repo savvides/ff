@@ -22,6 +22,7 @@ from ff.analysis.lineup import (
 )
 from ff.analysis.movers import find_arbitrage_movers, top_movers, value_redraft_gap
 from ff.analysis.picks import pick_ledger, pick_tier, price_pick
+from ff.analysis.standings import simulate_season
 from ff.analysis.roster import value_all_rosters, value_roster
 from ff.analysis.trade import (
     analyze_trade,
@@ -61,6 +62,7 @@ __all__ = [
     "my_picks",
     "available",
     "pick_ledger",
+    "simulate_season",
     "pick_tier",
     "price_pick",
     "rank_fits",
