@@ -34,7 +34,7 @@ from ff.analysis.fit import positional_standing, startable_value, starting_asset
 from ff.cli import _pick_window
 from ff.contracts import Asset, FuturePick, OfferVerdict, TradeEvaluation, TradeSide
 from ff.core.config import load_config
-from ff.sleeper import SleeperClient, build_rosters
+from ff.sleeper import SleeperClient, build_rosters, detect_format
 from ff.values import ValueBook, ValuesClient
 from ff.values.calculators_live import check_calculators
 
@@ -183,7 +183,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cfg = load_config()
     sc = SleeperClient()
-    book = ValuesClient().fetch(cfg.format, fresh=True)
+    league = sc.league(cfg.league_id) or {}
+    fmt = detect_format(league) if league else cfg.format
+    book = ValuesClient().fetch(fmt, fresh=True)
     problems = check_calculators(book.secondary_html)
     if problems:
         print("cannot judge any offer: " + "; ".join(problems))

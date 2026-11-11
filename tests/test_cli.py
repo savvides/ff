@@ -591,3 +591,20 @@ def test_cli_rejects_jev_backend(fake_clients, league):
     assert res_ask.exit_code != 0
     assert "Invalid backend 'jev'" in res_ask.output
 
+
+def test_load_refreshes_league_format_from_sleeper(fake_clients, monkeypatch):
+    from ff.cli import _load
+    from ff.core.config import Config, save_config, load_config
+    from ff.contracts import Format
+    # Save a stale 1QB format
+    stale_fmt = Format(superflex=False, num_qbs=1, num_teams=12, ppr=1.0)
+    save_config(Config(league_id="LG1", season=2026, format=stale_fmt, user_id="userA"))
+
+    cfg, sc = _load()
+    # fake_clients returns the fixture league which is Superflex with TEP 0.5
+    assert cfg.format.superflex is True
+    assert cfg.format.num_qbs == 2
+    assert cfg.format.tep == 0.5
+    # verify config was updated on disk
+    assert load_config().format.superflex is True
+
