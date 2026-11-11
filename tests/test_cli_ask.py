@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,7 +123,8 @@ def test_ask_waivers_pool_follows_limit(fake_clients, trending, monkeypatch) -> 
     import ff.cli as cli
     save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
     sc = cli.SleeperClient()
-    sc.trending = MagicMock(return_value=trending)
+    mock_trending = MagicMock(return_value=trending)
+    monkeypatch.setattr(sc, "trending", mock_trending)
     monkeypatch.setattr(cli, "SleeperClient", lambda: sc)
     with patch("ff.cli.TerminalRunner") as MockRunner:
         mock_inst = MagicMock()
@@ -130,7 +132,7 @@ def test_ask_waivers_pool_follows_limit(fake_clients, trending, monkeypatch) -> 
         MockRunner.return_value = mock_inst
         res = runner.invoke(app, ["ask", "who should I add"])
     assert res.exit_code == 0, res.output
-    sc.trending.assert_called_once_with(kind="add", limit=90)
+    mock_trending.assert_called_once_with(kind="add", limit=90)
 
 
 def test_ask_waivers_bad_limit_is_a_tool_error(fake_clients) -> None:
@@ -162,7 +164,7 @@ def test_ask_missing_backend_is_a_clean_error() -> None:
     assert "not found" in res.output.lower() or "LLM runner" in res.output
 
 
-def test_config_set_llm_command(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_set_llm_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
 
@@ -177,7 +179,7 @@ def test_config_set_llm_command(tmp_path: pytest.TempPathFactory, monkeypatch: p
     assert updated.llm_backend == "claude"
 
 
-def test_config_set_llm_invalid_backend(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_set_llm_invalid_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
 
@@ -189,7 +191,7 @@ def test_config_set_llm_invalid_backend(tmp_path: pytest.TempPathFactory, monkey
     assert "Invalid backend" in res.output
 
 
-def test_config_set_llm_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_set_llm_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg_path = tmp_path / "config.json"
     monkeypatch.setattr("ff.core.config._config_path", lambda: cfg_path)
 

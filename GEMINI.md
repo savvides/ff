@@ -1,1 +1,108 @@
-AGENTS.md
+# AGENTS.md
+
+This file provides guidance to AI coding agents (Antigravity, Codex, etc.) when working with code in this repository.
+
+## What this is
+
+ff is a command-line tool to manage a Sleeper dynasty fantasy football league using only free data. It joins free, auth-free, read-only APIs:
+
+- Sleeper (docs.sleeper.com): league, rosters, users, matchups, transactions, trending adds, the players file.
+- ESPN scoreboard (`site.api.espn.com`): kickoff times and game status cross-checked against Sleeper for weekly lineup decisions.
+- FantasyCalc (api.fantasycalc.com): dynasty trade values for players and draft picks.
+- KeepTradeCut (`keeptradecut.com`): secondary-market crowdsourced dynasty values, merged onto the same `Asset` as `secondary_value` (with `ktc_value` and `dealer_value` aliases).
+- Sleeper projections (`api.sleeper.com`): weekly stat lines for the lineup optimizer.
+
+The linchpin: every FantasyCalc player carries a `sleeperId`, so values join directly onto a Sleeper roster with no scraping and no manual ID mapping.
+
+## Commands
+
+venv-based, Python 3.9.
+
+- Install: `make install` (venv, editable install, enables the pre-commit hook). Manual: `python3 -m venv .venv && ./.venv/bin/python -m pip install -e ".[dev]"`.
+- Full check: `make check` (runs lint, typecheck, test, and build).
+- Lint & typecheck: `make lint` (`./.venv/bin/ruff check`) and `make typecheck` (`./.venv/bin/mypy src`).
+- Gate tests (offline, deterministic, under 2s, run by the pre-commit hook): `make test`, `uv run pytest -q`, or `./.venv/bin/pytest -q`.
+- One test: `./.venv/bin/pytest tests/test_trade.py::test_trade_with_players_and_picks`.
+- Live API checks (real network, excluded from the gate): `make test-live` or `./.venv/bin/pytest -m live`.
+- Jev routing eval (live, paid, opt-in; needs a saved key or `TYPESAFE_API_KEY`; never run by the gate): `./.venv/bin/python scripts/eval_jev.py`. See `evals/README.md`.
+- Run the CLI: `./.venv/bin/ff <command>` (entry point `ff = ff.cli:app`).
+- Snapshot a real league for inspection: `./.venv/bin/python scripts/record_fixtures.py <league_id>` (writes to `samples/`, does not touch gate fixtures).
+- Calculator oracle (Node 18+, no npm; prints only): `node scripts/calculator_oracle.mjs --check tests/fixtures/calculator_vectors.json` runs FantasyCalc's and KTC's own live trade-calculator code against the fixture vectors. `--generate > tests/fixtures/calculator_vectors.json` rebuilds them (after a site changes its calculator; then update `FINGERPRINTS`), and `--eval` prices JSON trades the way the sites do.
+- Find offers that pass the offer rule from live data: `./.venv/bin/python scripts/find_offers.py --sell "<asset>" --to <sleeper username>` (repeatable flags; `--years` sets the pick window, default 3). It ranks passing packages by roster fit: young value that starts for you or fills a below-median position, excluding surplus and flagged pieces, then lineup gain. Each incoming piece prints its role (the lineup slot it would start in, a need it fills, or surplus and who it sits behind) and flags (injury, a 30-day value drop of 300+, Sleeper's top drops).
+
+## Architecture
+
+Directory-per-concern modules under `src/ff/`, all sharing one contract. Data flows one direction:
+
+`cli.py` -> `sleeper/` (league + format) + `values/` (FantasyCalc book) -> `analysis/` (pure functions) -> rich tables.
+
+- `contracts/models.py` is the shared schema (pydantic models: `Format`, `Asset`, `DraftPickInfo`, `FuturePick`, `TeamPicks`, `Roster`, `RosterValuation`, `RosterSlot`, `RosterAudit`, `TradeSide`, `TradeEvaluation`, `OfferVerdict`, `ArbitrageMover`, `WaiverTarget`, `LineupSlot`, `Lineup`, `PositionStanding`, `TeamContext`, `DraftFit`, plus weekly/comparison models: `WeeklyPlayer`, `WeeklyContext`, `WeeklyWaiverTarget`, `WeeklyWaivers`, `ComparisonOption`, `PlayerComparison`, `NewsItem`). `Asset` covers both players and picks and carries optional `secondary_value` for the secondary market (`dealer_value` and `ktc_value` aliases). `Roster` also carries `taxi` and `reserve` (IR): subsets of `player_ids` that do not occupy an active slot. Changing a model here is a contract change; update both sides. Analysis still imports `ff.sleeper.player_name` and `ff.values.ValueBook` for convenience; do not add more cross-imports.
+- `core/` is cross-cutting infra with no football logic: `http.py` (disk-cached, retrying JSON GET) and `config.py` (`.ff/` state plus the saved `Config`).
+- `sleeper/client.py` wraps the API and, more importantly, holds `detect_format()` and `build_rosters()`, pure helpers that translate Sleeper's settings into the contract.
+- `values/client.py` fetches FantasyCalc and builds a `ValueBook` with three lookups: by sleeper id (exact, for rosters), by name (fuzzy, for typed trade input), and by pick label. `values/ktc.py` fetches KeepTradeCut values from `/trade-calculator`, reading the same field the page uses for the league's format and TE-premium tier, and records the page's top value (an input to KTC's trade adjustment), the page itself (the drift check reads its bundle version) and fetch time; `ValuesClient.fetch(fresh=True)` bypasses both markets' caches (`ff trade` uses it). `values/calculators_live.py` is the runtime drift check: it compares the sites' content-hashed bundle names, and on a new name the ported functions' normalized hashes, with `analysis.calculators.FINGERPRINTS`. `values/normalize.py` holds `normalize_name`/`normalize_pick` so client and ktc do not import each other.
+- `projections/client.py` fetches Sleeper's weekly projections (the `api.sleeper.com` host, not `api.sleeper.app`) and returns `{player_id: stat_line}`. It keeps the raw stats, not Sleeper's precomputed points, so the lineup optimizer can score them with the league's own settings.
+- `analysis/` (`roster.py`, `trade.py`, `calculators.py`, `waivers.py`, `weekly_waivers.py`, `depth.py`, `compare.py`, `movers.py`, `lineup.py`, `fit.py`, `cleanup.py`, `picks.py`, `draft.py`) is pure: same input, same output, no I/O.
+  - `calculators.py`: verbatim ports of both sites' trade-calculator math (FantasyCalc dynasty waiver adjustment; KTC `adjustPackageNew` value adjustment) with JS numeric semantics. KTC's "Fair Trade" rule is `TradeEvaluation.secondary_is_fair` in contracts, pinned to oracle vectors.
+  - `trade.py`: applies calculators in `analyze_trade` (totals match site displays, `raw_*` are plain sums). `offer_verdict()` is the offer rule: under 10% of the larger side in both markets and KTC's verdict Fair, else FAIL or CANNOT_JUDGE.
+  - `depth.py`: depth chart opportunity multipliers for handcuffs and backups.
+  - `compare.py`: head-to-head start/sit comparisons with lineup context and game lock checks.
+  - `movers.py`: ranks buy-low/sell-high via dynasty-vs-redraft value gap (with `min_value` floor) and FC-vs-Dealer arbitrage via `find_arbitrage_movers` (restating KTC values as FC values at the same rank before diffing).
+  - `lineup.py`: scores projected stats with league `scoring_settings` (TEP applied for TEs) and assigns **active** players to starting slots (taxi/IR never started). Greedy "most-restrictive slot first" assignment is optimal (laminar slot eligibility). Factored into `_assign()` primitive + `starting_slots`.
+  - `fit.py`: team-relative draft scorer; anchors on FantasyCalc value and layers bounded tilts for roster fit (starter-upgrade over *your own* lineup) and horizon (shared redraft gap). Never reads format scarcity or age to prevent double-counting.
+  - `waivers.py` & `weekly_waivers.py`: unrostered pool evaluation by dynasty opportunity or immediate weekly lineup gain.
+
+- `cli.py` wires the commands: `setup`, `roster`, `power`, `picks`, `values`, `lineup`, `compare`, `news`, `trade`, `movers`, `waivers`, `cleanup`, `draft`, `ask`, `qa`, `version`, `config`. The `@_guard` decorator turns unreachable-API and corrupt-config failures into clean one-line errors while preserving each command's Typer signature.
+- `services/llm/` powers `ff ask`: `TerminalRunner` shells out to local `agy`/`gemini`/`claude`/`ollama` in print/headless mode (no permission-bypass flags, 120s timeout). The model may return a JSON tool call; `dispatch_tool` runs only names in `ALLOWED_TOOLS` against deterministic analysis, using `_analysis_ctx` so the data matches structured commands. `onboard_user` writes config only when the league is unambiguous (one league or an explicit id); otherwise it tells the user to run `ff setup`. The optional Jev backend (`--backend jev` or `config set-llm jev`; `auto` never picks it) replaces the runner with TypeSafe's hosted API and sends only the question text: `jev.py` asks one request of fixed Choice questions (operation, per-operation guards in `USES`, team, position, limit), resolves teams locally (`mine` by owner id, any other team only by a full name or roster number the user typed), builds the tool arguments in code, and raises `Clarification` (exit 3) instead of guessing when an answer abstains or falls below `CONFIDENCE_FLOOR`. `jev_output.py` renders tables plus the command's domain QA footer, with no prose. The key is read from `TYPESAFE_API_KEY`, falling back to `FF_HOME/typesafe_api_key`. `ff config set-jev-key` prompts with hidden input and saves that gitignored file atomically with mode 0600, separate from league config.
+- `analysis/cleanup.py` powers `cleanup` (roster capacity + drop/IR/taxi suggestions). `audit_roster()` categorizes each player as START/BENCH/TAXI/IR, computes active vs taxi vs IR capacity, and ranks three levers: drop candidates (non-starters, worst value first, each flagged whether the drop frees an *active* slot), IR candidates (active players whose designation the league lets onto IR, longest absence first, capped at open IR slots; healthy scratches tagged Out/"Coach's Decision" are skipped), and taxi candidates (taxi-eligible bench players best-first, capped at open taxi slots, excluding IR picks). The key distinction it encodes: dropping a taxi/IR player frees a taxi/IR slot but no active room, so only a bench drop, a taxi stash, or an IR move opens a waiver slot. `taxi_eligible()` follows Sleeper's rule (`taxi_allow_vets` lets anyone stash; otherwise experience must be within the `taxi_years` rookie window). `ir_eligible_statuses()` is Sleeper's IR rule (IR/PUP always, plus each `reserve_allow_*` designation), shared with `services/weekly.py`'s IR-lock check along with `designation()`. Reads `taxi_slots`/`reserve_slots`/`taxi_allow_vets`/`taxi_years`/`reserve_allow_*` from the league `settings`.
+- `analysis/picks.py` powers `picks` (future draft capital by team). Sleeper has no per-team pick endpoint, so `pick_ledger()` derives ownership: every team owns its own pick per (season, round) unless a `traded_picks` row reassigns it, and a re-traded pick's LAST row is current (all rows keep `roster_id` = the original team). Valuation is tier-aware via `price_pick()`: FantasyCalc prices near-season rounds as Early/Mid/Late, and `pick_tier()` picks the tier from the ORIGINAL team's power rank (thirds: top = late, bottom = early — a bad team's own 1st is an early one), falling back to the flat round value, then 0 (never guessed). The CLI scopes "future" to seasons after the latest draft's season (the current year's board belongs to `draft`). Round count comes from the league's `draft_rounds` setting first, the latest draft's `settings.rounds` only as a fallback (in a first-year league that draft is the 20+-round startup, which would fabricate future picks), with `--rounds` as the explicit override; independently, `pick_ledger()` extends the round range to cover any traded pick's round so owned capital is never silently dropped.
+- `analysis/draft.py` powers `draft` (live draft board): `pick_number()` handles linear/snake/3rd-round-reversal ordering, `my_picks()` resolves owned picks through `slot_to_roster_id` + `traded_picks`, and `available()` ranks the undrafted/unrostered pool via `ValueBook.top(exclude=...)`. The `draft` command then runs that pool through `fit.rank_fits` so the board is scored FOR your team: it loads your roster and competitive status first (auto-detected from power rank, overridable with `--mode contend|rebuild|auto`), shows a "where you stand" table (your startable value per position vs the league median), and ranks "best available — FOR YOU" by FitScore with the raw market rank alongside. TEs carry a `*` flag only when the league's TE premium is one FantasyCalc cannot express (below +0.5), as an honest annotation, never a value bump. The draft endpoints in `sleeper/client.py` use `ttl=0` (the board moves pick to pick); the command must read the single `draft/{id}` endpoint, not the `drafts` list, because only the former returns `slot_to_roster_id`.
+- `qa/` (`models.py`, `validators.py`, `engine.py`) provides automated post-command verification and sanity audits across all commands and domain models. Invariant checks enforce mathematical invariants (totals match sum of components, starters <= totals, deltas match side differences), roster limits (no taxi players started in lineups, unvalued assets match Sleeper count), valid non-empty identity fields, and tool registrations. Telemetry is governed by `FF_QA` (`off`, `summary`, `verbose`, `strict`). `ff qa` runs diagnostic audits across all domains.
+
+### Why modules, not HTTP services
+
+The global services-first rule is satisfied here by module boundaries plus a shared schema package, which that rule explicitly allows. This is a local CLI that joins two read-only APIs; standing up running HTTP microservices would violate the same rulebook's "simplest vanilla wins." Each module is parallel-session-safe because it depends only on `contracts`, never on another module's internals. If this grows a long-running component, that is the point to revisit.
+
+### The keystone: format auto-detection
+
+`detect_format()` in `sleeper/client.py` derives superflex/1QB, PPR, and team count from the league's own Sleeper settings (`roster_positions`, `scoring_settings.rec`, `total_rosters`, `settings.type`). FantasyCalc returns different values per format, so this is what keeps values correct for the user's league. Never ask the user for format; Sleeper already knows it.
+
+### Picks
+
+FantasyCalc returns draft picks as assets with `position == "PICK"` and names like `2026 Pick 1.05`, `2026 1st`, `2027 1st`, and tiered `2027 1st (Early)/(Mid)/(Late)`. `normalize_pick()` in `values/normalize.py` canonicalizes user input to match across rounds 1–9 (including ordinals like `5th`, words like `fifth`, and tiered variants), keeping the tier as a key suffix (`2027 1 early`) — without it the three tiers collapse onto one key and the last one loaded silently overwrites the rest (a real bug that undervalued every early 1st). `ValueBook.resolve()` falls back from a slot pick (`2026 1.07`) to the round-level value, from a tiered ask to the flat round value when no tiered entry exists, and from a flat ask to Mid when only tiered entries exist.
+
+## Testing model
+
+Two lanes, per the repo's gate-vs-periodic split:
+
+- Gate tests (`tests/test_*.py`, the default `pytest` run): offline and deterministic. They use small curated fixtures in `tests/fixtures/`, not full recorded payloads (which would be large and would drift). The `ff_home` autouse fixture in `conftest.py` redirects `FF_HOME` to a tmp dir so tests never read or write the real config or cache. HTTP is mocked with `responses`.
+- Live tests (`tests/test_live.py`, marked `live`, excluded by default): hit the real APIs to catch upstream payload-shape drift. Run before shipping. They include calculator parity: the drift check, the oracle `--check`, and an end-to-end test that `analyze_trade` on today's values equals the sites' own lookup and code.
+- Calculator vectors (`tests/fixtures/calculator_vectors.json`) come from executing the sites' JS with the oracle, never from hand-computed numbers; `tests/test_calculators.py` pins the Python ports to every vector and requires every reachable KTC branch to have at least 5.
+
+### Why there are no evals
+
+Roster math and trade math stay deterministic and gate-tested. `ff ask` is a thin bridge: the local model only chooses a tool and writes prose around the Python result. Do not add an eval suite for the math. Add evals only if the model starts doing latent work (unstructured explanations that are themselves the product).
+
+The one bounded exception is Jev routing (`evals/jev.json`, `scripts/eval_jev.py`). A hosted classifier turns free text into an operation and arguments, and the gate tests mock that API, so they prove the plumbing but not the model. The eval is a live, opt-in, paid routing gate on synthetic questions and teams, never run by `pytest` or the pre-commit hook. It scores interpretation only (exact route, abstention, a fixed control), never the math. Rerun it after changing Jev's questions, `CONFIDENCE_FLOOR`, or the pinned model. Its thresholds live in `evals/README.md`; do not lower them to make the set pass.
+
+## Gotchas & Conventions
+
+- Target Python 3.9. Use `from __future__ import annotations` for modern type-hint syntax.
+- All local state lives under `FF_HOME` (default `./.ff`, gitignored): `config.json` and `cache/`. Clear with `make clean`.
+- Sleeper's limits are handled in `core/http.py`: the players file (~15MB) is cached 24h; everything stays well under 1000 req/min via per-endpoint TTLs and urllib3 retry/backoff.
+- Config persistence: `save_config()` in `core/config.py` is atomic (writes to temporary PID file and uses `os.replace` with UTF-8 encoding).
+- `values/dealer.py` is a deprecated legacy compatibility alias shim pointing to `KtcClient`; do not add new code there.
+- Mypy targets Python 3.10 in `pyproject.toml` (silencing deprecation warnings in modern Mypy) while the codebase preserves Python >=3.9 compatibility.
+
+## Out of scope (and why)
+
+- Pick value in `roster`/`power`: those total rostered players only. Whole-team pick ownership IS now reconciled (`analysis/picks.py` consumes `traded_picks`) and shown by `ff picks`, but it is deliberately kept out of the `roster`/`power` totals so player value and draft capital stay separately legible; each command's footer points at the other. Do not fold picks into roster/power without a decision to change that.
+- TEP (tight-end premium): `lineup` honors it by scoring raw projected stats with the league's `scoring_settings`, and dynasty values honor it too. FantasyCalc takes `tep=te+`/`te++` (a number returns 404, which is why it once looked unsupported), mapped with FantasyCalc's own rule in `Format.fantasycalc_tep()`; KTC reads its TE+/TE++ tier on the same cut points. Premiums below +0.5 have no FantasyCalc tier, so those leagues keep the draft `*` note.
+- Trade finder and tiers/league-VORP: `trade` evaluates a specified deal, it does not propose one (the offer search lives in `scripts/find_offers.py`, not an `ff` command); `values`/`roster`/`power` rankings are raw value with no tier breaks. Note `draft` *does* now apply a roster-relative starter-upgrade in `fit.py` (value over *your own* lineup), which is deliberately distinct from a format-VORP that would re-price the league scarcity FantasyCalc already bakes in; that format-VORP is intentionally NOT added (it would double-count). Tiers and a trade finder are still reasonable next features.
+- `ff ask` already exists under `services/llm/`. Keep calculations in `analysis/`; the runner is print-mode only. Do not pass `--dangerously-skip-permissions` or equivalent.
+
+## Health Stack
+
+- typecheck: ./.venv/bin/mypy src
+- lint: ./.venv/bin/ruff check
+- test: ./.venv/bin/pytest -q
+- build: uv build

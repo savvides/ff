@@ -99,3 +99,10 @@ The one bounded exception is Jev routing (`evals/jev.json`, `scripts/eval_jev.py
 - TEP (tight-end premium): `lineup` honors it by scoring raw projected stats with the league's `scoring_settings`, and dynasty values honor it too. FantasyCalc takes `tep=te+`/`te++` (a number returns 404, which is why it once looked unsupported), mapped with FantasyCalc's own rule in `Format.fantasycalc_tep()`; KTC reads its TE+/TE++ tier on the same cut points. Premiums below +0.5 have no FantasyCalc tier, so those leagues keep the draft `*` note.
 - Trade finder and tiers/league-VORP: `trade` evaluates a specified deal, it does not propose one (the offer search lives in `scripts/find_offers.py`, not an `ff` command); `values`/`roster`/`power` rankings are raw value with no tier breaks. Note `draft` *does* now apply a roster-relative starter-upgrade in `fit.py` (value over *your own* lineup), which is deliberately distinct from a format-VORP that would re-price the league scarcity FantasyCalc already bakes in; that format-VORP is intentionally NOT added (it would double-count). Tiers and a trade finder are still reasonable next features.
 - `ff ask` already exists under `services/llm/`. Keep calculations in `analysis/`; the runner is print-mode only. Do not pass `--dangerously-skip-permissions` or equivalent.
+
+## Health Stack
+
+- typecheck: ./.venv/bin/mypy src
+- lint: ./.venv/bin/ruff check
+- test: ./.venv/bin/pytest -q
+- build: uv build
