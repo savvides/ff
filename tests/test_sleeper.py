@@ -35,6 +35,37 @@ def test_detect_format_one_qb_half_ppr_redraft():
     assert fmt.label() == "10-team Redraft 1QB Half-PPR"
 
 
+def test_detect_format_two_qb_without_superflex():
+    league = {
+        "total_rosters": 12,
+        "roster_positions": ["QB", "QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "BN"],
+        "scoring_settings": {"rec": 1.0},
+        "settings": {"type": 2},
+    }
+    fmt = detect_format(league)
+    assert fmt.superflex is True
+    assert fmt.num_qbs == 2
+    assert "Superflex" in fmt.label()
+
+
+def test_detect_format_rec_te_premium():
+    league = {
+        "total_rosters": 12,
+        "roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "BN"],
+        "scoring_settings": {"rec": 1.0, "rec_te": 0.5},
+        "settings": {"type": 2},
+    }
+    fmt = detect_format(league)
+    assert fmt.tep == 0.5
+    assert fmt.fantasycalc_tep() == "te+"
+
+
+def test_fantasycalc_params_maps_unsupported_team_counts():
+    from ff.contracts import Format
+    assert Format(num_teams=16).fantasycalc_params()["numTeams"] == "14"
+    assert Format(num_teams=6).fantasycalc_params()["numTeams"] == "8"
+
+
 def test_fantasycalc_params_track_format():
     from ff.contracts import Format
     sf = Format(superflex=True, num_qbs=2, num_teams=12, ppr=1.0).fantasycalc_params()

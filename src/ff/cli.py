@@ -104,17 +104,39 @@ def _guard(fn: Callable) -> Callable:
 def _load() -> Tuple[Config, SleeperClient]:
     if not config_exists():
         _fail("no league configured. Run `ff setup <sleeper-username>` first.")
-    return load_config(), SleeperClient()
+    cfg = load_config()
+    sc = SleeperClient()
+    try:
+        league = sc.league(cfg.league_id)
+        if league:
+            fresh_fmt = detect_format(league)
+            if fresh_fmt != cfg.format:
+                cfg.format = fresh_fmt
+                try:
+                    save_config(cfg)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return cfg, sc
 
 
 def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True,
-          fresh: bool = False) -> ValueBook:
+          fresh: bool = False, sc: Optional[SleeperClient] = None) -> ValueBook:
+    fmt = cfg.format
+    if sc is not None:
+        try:
+            league = sc.league(cfg.league_id)
+            if league:
+                fmt = detect_format(league)
+        except Exception:
+            pass
     client = ValuesClient()
     should_include = include_secondary and include_ktc
     try:
-        return client.fetch(cfg.format, include_secondary=should_include, fresh=fresh)
+        return client.fetch(fmt, include_secondary=should_include, fresh=fresh)
     except TypeError:
-        return client.fetch(cfg.format, include_ktc=should_include)
+        return client.fetch(fmt, include_ktc=should_include)
 
 
 def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
@@ -205,7 +227,7 @@ class _LazyContext(dict):
         if key == "rosters":
             return _league_rosters(self._cfg, self._sc)
         elif key == "value_book":
-            return _book(self._cfg, include_secondary=self._include_secondary)
+            return _book(self._cfg, include_secondary=self._include_secondary, sc=self._sc)
         elif key == "players_meta":
             return self._sc.players()
         elif key == "projections":

@@ -126,9 +126,9 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
         league = {}
 
     positions: List[str] = league.get("roster_positions") or []
-    superflex = "SUPER_FLEX" in positions
     num_qbs = positions.count("QB") + positions.count("SUPER_FLEX")
     num_qbs = max(1, min(2, num_qbs))  # FantasyCalc supports 1 or 2
+    superflex = "SUPER_FLEX" in positions or num_qbs >= 2
 
     scoring = league.get("scoring_settings") or {}
     rec = float(scoring.get("rec", 0.0) or 0.0)
@@ -136,6 +136,7 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
 
     settings = league.get("settings") or {}
     league_type = settings.get("type", 2)  # 0 redraft, 1 keeper, 2 dynasty
+    tep = float(scoring.get("bonus_rec_te") or scoring.get("rec_te") or 0.0)
 
     return Format(
         is_dynasty=league_type == 2,
@@ -143,7 +144,7 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
         num_qbs=num_qbs,
         num_teams=int(league.get("total_rosters") or 12),
         ppr=ppr,
-        tep=float(scoring.get("bonus_rec_te", 0.0) or 0.0),
+        tep=tep,
         te_slots=positions.count("TE"),
     )
 

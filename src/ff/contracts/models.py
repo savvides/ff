@@ -46,10 +46,11 @@ class Format(BaseModel):
 
     def fantasycalc_params(self) -> Dict[str, str]:
         """Map to FantasyCalc's /values/current query params."""
+        teams = min((8, 10, 12, 14), key=lambda t: abs(t - self.num_teams))
         params = {
             "isDynasty": "true" if self.is_dynasty else "false",
             "numQbs": str(self.num_qbs),
-            "numTeams": str(self.num_teams),
+            "numTeams": str(teams),
             "ppr": str(self.ppr),
         }
         tep = self.fantasycalc_tep()
