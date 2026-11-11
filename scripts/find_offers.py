@@ -31,7 +31,7 @@ from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Set, T
 
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.analysis.fit import positional_standing, startable_value, starting_assets
-from ff.cli import _pick_window
+from ff.cli import _finish_ranks, _pick_window, _season_sim
 from ff.contracts import Asset, FuturePick, OfferVerdict, TradeEvaluation, TradeSide
 from ff.core.config import load_config
 from ff.sleeper import SleeperClient, build_rosters, detect_format
@@ -196,7 +196,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     meta = sc.players()
     valuations = value_all_rosters(rosters, book, meta)  # players priced, with injury/depth status
     val_of = {v.roster_id: v for v in valuations}
-    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ranks, _ = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
     roster_positions = league.get("roster_positions") or []
     seasons, rounds = _pick_window(sc, cfg, league, years=args.years)
     ledger = {tp.roster_id: tp.picks for tp in pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,

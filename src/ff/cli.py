@@ -48,13 +48,14 @@ from ff.analysis import (
     position_deltas,
     secondary_position_deltas,
     projected_points,
+    simulate_season,
     rank_fits,
     top_movers,
     value_all_rosters,
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Lineup, Roster
+from ff.contracts import Asset, Lineup, Roster, RosterValuation, StandingProjection
 from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
@@ -168,6 +169,45 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
     return seasons, rounds_n
 
 
+def _season_sim(cfg: Config, sc: SleeperClient, league: Dict[str, Any],
+                rosters: List[Roster]) -> List[StandingProjection]:
+    """Simulated rest of the regular season; empty before the first game."""
+    settings = league.get("settings") or {}
+    median = bool(settings.get("league_average_match"))
+    done = max((r.wins + r.losses + r.ties for r in rosters), default=0) // (2 if median else 1)
+    if not done:
+        return []
+    start = int(settings.get("start_week") or 1)
+    end = int(settings.get("playoff_week_start") or 15)
+    scores: Dict[int, List[float]] = {r.roster_id: [] for r in rosters}
+    remaining = []
+    for week in range(start, end):
+        final = week < start + done
+        rows = sc.matchups(cfg.league_id, week, ttl=24 * 3600 if final else 1800)
+        games: Dict[int, List[int]] = {}
+        for m in rows:
+            if m.get("matchup_id") is None or m.get("roster_id") not in scores:
+                continue
+            if final:
+                scores[m["roster_id"]].append(float(m.get("points") or 0))
+            else:
+                games.setdefault(m["matchup_id"], []).append(m["roster_id"])
+        if not final:
+            remaining.append([(g[0], g[1]) for g in games.values() if len(g) == 2])
+    return simulate_season(rosters, scores, remaining, median_game=median,
+                           playoff_teams=int(settings.get("playoff_teams") or 6))
+
+
+def _finish_ranks(sim: List[StandingProjection],
+                  valuations: List[RosterValuation]) -> Tuple[Dict[int, Optional[int]], str]:
+    """({roster_id: expected finish, 1 = best}, basis) for tiering next year's
+    picks: the simulated draft order once games exist, else roster value."""
+    if sim:
+        order = sorted(sim, key=lambda p: p.draft_slot, reverse=True)
+        return {p.roster_id: i for i, p in enumerate(order, 1)}, "projected finish"
+    return {v.roster_id: v.power_rank for v in valuations}, "power rank"
+
+
 def _current_week(state: Dict[str, Any]) -> int:
     """The NFL week whose lineup is still open: the later of Sleeper's `week` and
     `display_week`, never below 1.
@@ -243,6 +283,8 @@ class _LazyContext(dict):
             return self._get_league().get("roster_positions") or []
         elif key == "traded_picks":
             return self._sc.traded_picks(self._cfg.league_id)
+        elif key == "season_sim":
+            return _season_sim(self._cfg, self._sc, self._get_league(), self["rosters"])
         elif key == "seasons":
             return self._get_pick_window()[0]
         elif key == "rounds":
@@ -523,19 +565,63 @@ def power() -> None:
     valuations = value_all_rosters(rosters, book, sc.players())
     by_id = {r.roster_id: r for r in rosters}
 
+    league = sc.league(cfg.league_id) or {}
+    sim = _season_sim(cfg, sc, league, rosters)
+    seasons, rounds_n = _pick_window(sc, cfg, league, 3)
+    ledger = pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
+                         _finish_ranks(sim, valuations)[0], seasons=seasons, rounds=rounds_n)
+    pick_value = {tp.roster_id: tp.total_value for tp in ledger}
+    total = {v.roster_id: v.total_value + pick_value.get(v.roster_id, 0) for v in valuations}
+    total_rank = {rid: i for i, rid in enumerate(sorted(total, key=lambda k: -total[k]), 1)}
+
     t = Table(title=f"{cfg.name} - power rankings ({cfg.format.label()})")
-    for c in ("#", "team", "dynasty value", "record", "pts for"):
-        t.add_column(c, justify="right" if c in ("dynasty value", "pts for", "#") else "left")
+    for c in ("#", "team", "players", "picks", "total", "total #", "record", "pts for"):
+        t.add_column(c, justify="left" if c in ("team", "record") else "right")
     for v in valuations:
         r = by_id[v.roster_id]
         t.add_row(str(v.power_rank), v.team_name, f"{v.total_value:,}",
+                  f"{pick_value.get(v.roster_id, 0):,}", f"{total[v.roster_id]:,}",
+                  str(total_rank[v.roster_id]),
                   f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
                   f"{r.points_for:.0f}")
     console.print(t)
-    console.print("[dim]value = rostered players only; draft picks are not counted, "
-                  "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
+    console.print(f"[dim]# ranks rostered players (who wins now); picks = {seasons[0]}-{seasons[-1][2:]} "
+                  "draft capital (`ff picks`); total = both, the long-run asset base. "
+                  "Playoff odds: `ff standings`.[/]")
     qa_rep = run_qa("power", valuations=valuations, rosters=rosters)
     render_qa_footer(qa_rep, console)
+
+
+# --- standings -----------------------------------------------------------
+
+@app.command()
+@_guard
+def standings() -> None:
+    """Standings with simulated playoff odds and projected rookie-draft slot."""
+    cfg, sc = _load()
+    league = sc.league(cfg.league_id) or {}
+    rosters = _league_rosters(cfg, sc)
+    sim = _season_sim(cfg, sc, league, rosters)
+    if not sim:
+        _fail("no games played yet this season; standings start after week 1.")
+    by_id = {r.roster_id: r for r in rosters}
+    settings = league.get("settings") or {}
+    t = Table(title=f"{cfg.name} - standings and outlook")
+    for c in ("#", "team", "record", "pts for", "exp wins", "playoffs", "draft slot"):
+        t.add_column(c, justify="left" if c in ("team", "record") else "right")
+    for i, p in enumerate(sim, 1):
+        r = by_id[p.roster_id]
+        mine = r.owner_id == cfg.user_id
+        t.add_row(str(i), f"[bold]{p.team_name}[/]" if mine else p.team_name,
+                  f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
+                  f"{r.points_for:.0f}", f"{p.exp_wins:.1f}",
+                  f"{p.playoff_odds:.0%}", f"{p.draft_slot:.1f}")
+    console.print(t)
+    console.print(f"[dim]4,000 simulated finishes of the regular season (playoffs start week "
+                  f"{settings.get('playoff_week_start', '?')}, {settings.get('playoff_teams', '?')} teams): "
+                  "each team scores around its points per game, regressed toward the league "
+                  "average. Draft slot assumes reverse order of standings, playoff teams last; "
+                  "it sets early/mid/late pick prices in `ff picks`.[/]")
 
 
 # --- picks ---------------------------------------------------------------
@@ -558,7 +644,7 @@ def picks(
     seasons, rounds_n = _pick_window(sc, cfg, league, years, rounds)
 
     valuations = value_all_rosters(rosters, book, sc.players())
-    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ranks, basis = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
     traded = sc.traded_picks(cfg.league_id)
     ledger = pick_ledger(rosters, traded, book, ranks,
                          seasons=seasons, rounds=rounds_n)
@@ -594,9 +680,9 @@ def picks(
                       f"[cyan]from {p.original_team}[/]" if p.acquired else "own",
                       p.tier or "-", f"{p.value:,}")
         console.print(t)
-    console.print("[dim]picks only - players are `ff power`. 1sts/2nds are tiered "
-                  "early/mid/late by the ORIGINAL team's power rank (a bad team's own "
-                  "1st is an early one); other rounds use the flat round value; "
+    console.print("[dim]picks only - players are `ff power`. Picks FantasyCalc tiers are priced "
+                  f"early/mid/late by the ORIGINAL team's {basis} (a bad team's own "
+                  "1st is an early one; see `ff standings`); other picks use the flat round value; "
                   "0 = FantasyCalc does not price that round. This year's board: "
                   "`ff draft`.[/]")
     qa_rep = run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded)
@@ -1692,7 +1778,7 @@ def qa_cmd(
     start = base + 1 if latest else base
     seasons = [str(start + i) for i in range(2)]
     rounds_n = int((league.get("settings") or {}).get("draft_rounds") or 4)
-    ranks = {v.roster_id: v.power_rank for v in valuations}
+    ranks, _ = _finish_ranks(_season_sim(cfg, sc, league, rosters), valuations)
     traded = sc.traded_picks(cfg.league_id)
     ledger = pick_ledger(rosters, traded, book, ranks, seasons=seasons, rounds=rounds_n)
     reports.append(run_qa("picks", ledger=ledger, rosters=rosters, traded_picks=traded))

@@ -261,6 +261,18 @@ class Roster(BaseModel):
     losses: int = 0
     ties: int = 0
     points_for: float = 0.0
+    division: Optional[int] = None
+    fab_used: int = 0  # waiver budget spent this season
+
+
+class StandingProjection(BaseModel):
+    """One team's simulated rest-of-season outlook."""
+
+    roster_id: int
+    team_name: str
+    exp_wins: float  # expected final wins (ties count half)
+    playoff_odds: float  # 0..1
+    draft_slot: float  # expected pick slot in next year's rookie draft (1 = first)
 
 
 class RosterValuation(BaseModel):

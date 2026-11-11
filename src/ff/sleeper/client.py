@@ -49,8 +49,11 @@ class SleeperClient:
     def rosters(self, league_id: str, *, fresh: bool = False) -> List[Dict[str, Any]]:
         return self._get(f"league/{league_id}/rosters", ttl=0 if fresh else LEAGUE_TTL) or []
 
-    def matchups(self, league_id: str, week: int) -> List[Dict[str, Any]]:
-        return self._get(f"league/{league_id}/matchups/{week}", ttl=0) or []
+    def matchups(self, league_id: str, week: int, *, ttl: float = 0) -> List[Dict[str, Any]]:
+        return self._get(f"league/{league_id}/matchups/{week}", ttl=ttl) or []
+
+    def transactions(self, league_id: str, week: int) -> List[Dict[str, Any]]:
+        return self._get(f"league/{league_id}/transactions/{week}", ttl=LEAGUE_TTL) or []
 
     def player(self, player_id: str) -> Dict[str, Any]:
         return get_json(f"https://api.sleeper.com/players/nfl/{player_id}", ttl=0)
@@ -194,6 +197,8 @@ def build_rosters(rosters: List[Dict[str, Any]],
                 losses=int(settings.get("losses", 0) or 0),
                 ties=int(settings.get("ties", 0) or 0),
                 points_for=pts,
+                division=settings.get("division"),
+                fab_used=int(settings.get("waiver_budget_used", 0) or 0),
             )
         )
     return out
