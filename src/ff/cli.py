@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, NoReturn, Optional, Sequence, Set, Tuple
 
 import requests
 import typer
@@ -29,6 +29,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from ff import __version__
 from ff.analysis.compare import compare_players, resolve_player
@@ -53,13 +54,14 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Roster
+from ff.contracts import Asset, Lineup, Roster
+from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
 from ff.services.llm.jev import Clarification, JevClient, JevError, interpret, save_jev_key
-from ff.services.llm.jev_output import render_result, render_weekly_notes, render_comparison, render_weekly_waivers
+from ff.services.llm.jev_output import render_result
 from ff.services.llm.onboarding import onboard_user
 from ff.services.llm.runner import SUPPORTED_BACKENDS, TerminalRunner
 from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
@@ -810,6 +812,58 @@ def trade(
                               f"{', '.join(c.name for c in cands)}?[/]")
     qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
     render_qa_footer(qa_rep, console)
+
+
+def _render_table(console: Console, title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:
+    table = Table(title=Text(title))
+    for column in columns:
+        table.add_column(column)
+    count = 0
+    for row in rows:
+        table.add_row(*(Text(str(cell)) for cell in row))
+        count += 1
+    if count:
+        console.print(table)
+    else:
+        console.print(f"{title}: no results.", markup=False)
+
+
+def render_weekly_notes(lineup: Lineup, console: Console) -> None:
+    if lineup.as_of:
+        console.print(f"Availability and schedule checked {lineup.as_of.isoformat()} (UTC).")
+        console.print("Live games show actual points so far; totals exclude their unplayed remainder. Recheck Sleeper before making changes.")
+    if any(w.startswith("Conditional:") for w in lineup.warnings):
+        console.print("Each injury scenario changes one player at a time; backups may overlap.")
+    for warning in sorted(lineup.warnings, key=lambda w: 0 if w.startswith("Conditional:") else (2 if w.startswith("Reporting context") else 1)):
+        console.print(warning, markup=False)
+
+
+def render_comparison(result: PlayerComparison, target: Any, ctx: dict, console: Console) -> None:
+    console.print(result.recommendation, markup=False)
+    _render_table(console, "Start/sit comparison", ("start", "full-game projection", "availability", "whole-lineup total", "constraint"), (
+        (o.name, f"{o.projected_points:.2f}", o.availability,
+         f"{o.lineup.total:.2f}" if o.lineup else "-", o.reason or "other player sits") for o in result.options))
+    render_weekly_notes(result.baseline, console)
+    report = run_qa("compare", result=result, target_roster=target, weekly=ctx["weekly"])
+    render_qa_footer(report, console)
+
+
+def render_weekly_waivers(result: WeeklyWaivers, target: Any, ctx: dict, console: Console) -> None:
+    console.print(f"Weekly waiver lineup improvement: {result.baseline.season} week {result.baseline.week}; "
+                  f"baseline {result.baseline.total:.2f}; {result.candidates_evaluated} candidates evaluated.")
+    _render_table(console, "Unrostered players by lineup gain", ("player", "pos", "projection", "lineup gain", "displaces"), (
+        (t.name, t.position, f"{t.projected_points:.2f}", f"+{t.lineup_gain:.2f}", ", ".join(t.displaced) or "-") for t in result.targets))
+    for candidate in result.targets:
+        kickoff = candidate.kickoff.strftime("%a %m-%d %H:%M UTC") if candidate.kickoff else "unverified"
+        console.print(f"{candidate.name}: {candidate.availability}; kickoff {kickoff}.", markup=False)
+    console.print("Gains assume acquisition before kickoff and room on the active roster. No drop is selected. "
+                  "Unrostered does not establish claim status, waiver clearance or immediate pickup eligibility; check Sleeper. "
+                  "Zero gain means depth only; questionable players and the baseline remain conditional.")
+    render_weekly_notes(result.baseline, console)
+    for warning in result.warnings:
+        console.print(warning, markup=False)
+    render_qa_footer(run_qa("weekly_waivers", result=result, target_roster=target, rosters=ctx["rosters"],
+                            weekly=ctx["weekly"], roster_positions=ctx["roster_positions"]), console)
 
 
 # --- waivers -------------------------------------------------------------
