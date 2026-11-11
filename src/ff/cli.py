@@ -1,6 +1,10 @@
 """ff command-line interface.
 
     ff setup <username>     pick your league, auto-detect its format, save it
+    ff plan                 your team on one page: stance, this week's to-dos, who to shop/target
+    ff standings            playoff odds and projected draft slot, simulated
+    ff fab                  waiver budgets left and what this league pays for claims
+    ff offers --sell        packages for your asset that pass the offer rule
     ff roster [team]        price out a roster, with power rank + positions
     ff power                league power rankings by dynasty value
     ff picks [team]         future draft capital by team, tier-valued
