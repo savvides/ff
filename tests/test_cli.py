@@ -625,3 +625,11 @@ def test_standings_before_any_game(fake_clients, league):
     result = runner.invoke(app, ["standings"])
     assert result.exit_code == 1
     assert "no games played" in result.output
+
+
+def test_plan_command(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["plan"])
+    assert result.exit_code == 0, result.output
+    assert "stance:" in result.output
+    assert "trades" in result.output

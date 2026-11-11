@@ -34,6 +34,7 @@ from rich.text import Text
 
 from ff import __version__
 from ff.analysis.fab import bid_summary, winning_bids
+from ff.analysis.plan import buy_candidates, sell_candidates, trade_stance
 from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
@@ -624,6 +625,110 @@ def standings() -> None:
                   "each team scores around its points per game, regressed toward the league "
                   "average. Draft slot assumes reverse order of standings, playoff teams last; "
                   "it sets early/mid/late pick prices in `ff picks`.[/]")
+
+
+# --- plan ----------------------------------------------------------------
+
+@app.command()
+@_guard
+def plan() -> None:
+    """Your team in one page: where you stand and what to do about it now."""
+    cfg, sc = _load()
+    ctx = _analysis_ctx(cfg, sc, include_secondary=False)
+    league = ctx._get_league()
+    settings = league.get("settings") or {}
+    rosters: List[Roster] = ctx["rosters"]
+    me = _pick_roster(rosters, None, cfg.user_id)
+    if me is None:
+        _fail("your team is unknown. Re-run `ff setup <username>`.")
+    book: ValueBook = ctx["value_book"]
+    meta = ctx["players_meta"]
+    valuations = value_all_rosters(rosters, book, meta)
+    mine = next(v for v in valuations if v.roster_id == me.roster_id)
+    sim = ctx["season_sim"]
+    outlook = next((p for p in sim if p.roster_id == me.roster_id), None)
+    ledger = pick_ledger(rosters, ctx["traded_picks"], book, _finish_ranks(sim, valuations)[0],
+                         seasons=_pick_window(sc, cfg, league, 3)[0], rounds=ctx["rounds"])
+    pick_rank = next(i for i, tp in enumerate(ledger, 1) if tp.roster_id == me.roster_id)
+    my_picks_value = ledger[pick_rank - 1].total_value
+    stance = trade_stance(mine.power_rank, len(rosters), outlook.playoff_odds if outlook else None)
+    week = ctx["week"]
+    deadline = int(settings.get("trade_deadline") or 0)
+    budget = int(settings.get("waiver_budget") or 0)
+
+    head = [f"[bold]{me.team_name}[/]   {me.wins}-{me.losses}" + (f"-{me.ties}" if me.ties else "")]
+    if outlook:
+        head.append(f"playoff odds [bold]{outlook.playoff_odds:.0%}[/]   expected wins "
+                    f"{outlook.exp_wins:.1f}   projected draft slot [bold]{outlook.draft_slot:.1f}[/]")
+    head.append(f"players {mine.total_value:,} (#{mine.power_rank}/{len(rosters)})   "
+                f"picks {my_picks_value:,} (#{pick_rank}/{len(rosters)})")
+    head.append(f"stance: [bold cyan]{stance}[/] - " + {
+        "seller": "this season will not end in a title; turn points you cannot use into future value",
+        "buyer": "you are in the hunt; turn future value into points now",
+        "hold": "neither clearly in nor out; do not pay for either direction yet"}[stance])
+    console.print(Panel.fit("\n".join(head), title=f"plan - week {week}"))
+
+    console.print("[bold]this week[/]")
+    try:
+        target = _prepare_weekly(ctx, None)
+        lu = optimal_lineup(target, ctx["projections"], ctx["scoring"], ctx["roster_positions"],
+                            ctx["players_meta"], season=str(cfg.season), week=week, weekly=ctx["weekly"])
+        empty = sum(p == "0" for p in target.starters)
+        swaps = len({s.player_id for s in lu.slots if s.player_id} - set(target.starters))
+        if empty or swaps:
+            console.print(f"  [yellow]lineup:[/] {swaps} better starter(s) on your bench"
+                          + (f", {empty} empty starting slot(s)" if empty else "") + " - run `ff lineup`")
+        else:
+            console.print("  [green]lineup:[/] already optimal")
+        for w in lu.warnings:
+            if w.startswith("IR lock:"):
+                console.print(f"  [red]{w}[/]")
+    except (ValueError, requests.RequestException) as e:
+        console.print(f"  [dim]lineup check unavailable: {e}[/]")
+    audit = audit_roster(
+        me, book, meta, roster_positions=league.get("roster_positions") or [],
+        taxi_slots=int(settings.get("taxi_slots") or 0), reserve_slots=int(settings.get("reserve_slots") or 0),
+        taxi_allow_vets=bool(settings.get("taxi_allow_vets")), taxi_years=settings.get("taxi_years"),
+        is_superflex=bool(cfg.format.superflex), ir_statuses=ir_eligible_statuses(settings))
+    for label, moves in (("IR", audit.ir_candidates), ("taxi", audit.taxi_candidates)):
+        if moves:
+            console.print(f"  [yellow]free roster room:[/] move {', '.join(s.name for s in moves)} to {label}")
+    if budget:
+        left = sorted(((budget - r.fab_used, r.team_name) for r in rosters), reverse=True)
+        console.print(f"  waiver budget: ${budget - me.fab_used} left of ${budget} "
+                      f"(most in the league: ${left[0][0]}, {left[0][1]}) - bid history in `ff fab`")
+
+    console.print("[bold]trades[/]")
+    if deadline and week > deadline:
+        console.print(f"  [dim]the trade deadline (week {deadline}) has passed; this is your offseason list.[/]")
+    elif deadline:
+        console.print(f"  trade deadline: week {deadline} ({deadline - week + 1} lineup week(s) left, this one included)")
+    owner = {pid: r.team_name for r in rosters for pid in r.player_ids}
+    sells = sell_candidates(mine.assets, stance)
+    # Deal with teams going the other way: a seller's partners are the buyers.
+    odds = {p.roster_id: p.playoff_odds for p in sim}
+    other = {"seller": "buyer", "buyer": "seller"}.get(stance)
+    partners = [r for v in valuations for r in rosters if r.roster_id == v.roster_id != me.roster_id
+                and trade_stance(v.power_rank, len(rosters), odds.get(v.roster_id)) == other]
+    partner_ids = {pid for r in (partners or [r for r in rosters if r is not me]) for pid in r.player_ids}
+    buys = buy_candidates(book, {a.id for a in book.assets} - partner_ids, stance)
+    for title, rows, col in (("shop these", sells, None),
+                             (f"target these (on {other} rosters)", buys, "owner")):
+        if not rows:
+            continue
+        t = Table(title=title, title_justify="left")
+        for c in ("player", "pos", "age", "value", "win-now", *([col] if col else []), "why"):
+            t.add_column(c, justify="right" if c in ("age", "value", "win-now") else "left")
+        for a, why in rows:
+            t.add_row(a.name, a.position or "-", f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
+                      f"{a.redraft_value:,}" if a.redraft_value else "-",
+                      *([owner.get(a.id, "free agent")] if col else []), why)
+        console.print(t)
+    if not sells and not buys:
+        console.print("  [dim]nothing on your roster or the market stands out for your stance.[/]")
+    console.print("[dim]value = FantasyCalc dynasty value; win-now = its redraft value on the same scale. "
+                  "Price any deal with `ff trade`. Stance uses `ff standings` odds once games exist, "
+                  "else roster rank. ff is read-only.[/]")
 
 
 # --- fab -----------------------------------------------------------------
