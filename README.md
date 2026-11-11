@@ -209,7 +209,7 @@ $$\text{CLI } (cli.py) \longrightarrow \text{Clients } (sleeper/, values/, proje
 
 Every analysis module is pure (no I/O; deterministic inputs to outputs). Roster math, trade math, and draft valuations stay testable without network access.
 
-> For in-depth architecture notes, domain models, and developer guidelines, see [**`CLAUDE.md`**](CLAUDE.md).
+> For in-depth architecture notes, domain models, and developer guidelines, see [**`AGENTS.md`**](AGENTS.md) (or [`GEMINI.md`](GEMINI.md)).
 
 ### Testing
 

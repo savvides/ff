@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-How `ff` is put together, from the outside in. These diagrams were derived from the source at commit `ba6e5b8`. Node labels use real module and function names, so you can grep them, and a rename should update this file. For the prose version and design decisions, see [`CLAUDE.md`](../CLAUDE.md) and [`.ai/specs/system-architecture.md`](../.ai/specs/system-architecture.md).
+How `ff` is put together, from the outside in. These diagrams were derived from the source at commit `ba6e5b8`. Node labels use real module and function names, so you can grep them, and a rename should update this file. For the prose version and design decisions, see [`AGENTS.md`](../AGENTS.md) and [`.ai/specs/system-architecture.md`](../.ai/specs/system-architecture.md).
 
 1. [System context](#1-system-context): what `ff` talks to and what it stores
 2. [Module dependencies](#2-module-dependencies): the import graph between packages

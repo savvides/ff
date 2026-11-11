@@ -12,6 +12,7 @@ Manual equivalent: `python3 -m venv .venv && ./.venv/bin/python -m pip install -
 
 Two lanes:
 
+- **Full check** (`make check`) — runs lint (`make lint`), typecheck (`make typecheck`), test (`make test`), and build (`make build`).
 - **Gate suite** (`make test` or `./.venv/bin/pytest -q`) — offline, deterministic,
   under 2 seconds. Runs automatically before every commit via the pre-commit
   hook (`make hooks` to (re-)enable it), and in CI on every push/PR.
@@ -38,6 +39,6 @@ Run one test: `./.venv/bin/pytest tests/test_trade.py::test_trade_with_players_a
 
 ## Architecture
 
-See `CLAUDE.md` for the module layout, the contracts pattern, and the design
+See `AGENTS.md` (or `GEMINI.md`) for the module layout, the contracts pattern, and the design
 decisions behind them (format auto-detection, pick valuation, etc.) before
 making structural changes.

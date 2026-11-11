@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import sys
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Set, Tuple, TypedDict
 
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.analysis.fit import positional_standing, startable_value, starting_assets
@@ -80,7 +80,7 @@ def roles(get: Sequence[Asset], give: Sequence[Asset], my_players: Sequence[Asse
     return out, sum(a.value for _, a in new_start) - base
 
 
-def flags(a: Asset, dropped: Set[str]) -> List[str]:
+def flags(a: Asset, dropped: AbstractSet[str]) -> List[str]:
     """Warnings a manager should see before asking for this piece."""
     out = []
     if a.injury_tag:
@@ -92,10 +92,25 @@ def flags(a: Asset, dropped: Set[str]) -> List[str]:
     return out
 
 
+class OfferResult(TypedDict):
+    give: List[str]
+    get: List[str]
+    assets: List[Asset]
+    roles: Dict[str, str]
+    lineup_gain: int
+    fc_pct: Optional[float]
+    ktc_pct: Optional[float]
+    ktc_site_pct: Optional[float]
+    fc_totals: Tuple[int, int]
+    ktc_totals: Tuple[Optional[int], Optional[int]]
+    net_youth: int
+    their_winnow: int
+
+
 def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[Asset], *,
            top: Optional[int], is_dynasty: bool = True, max_age: float = 26, limit: int = 5,
            my_players: Sequence[Asset] = (), roster_positions: Sequence[str] = (),
-           needs: Optional[Set[str]] = None, dropped: Set[str] = frozenset()) -> List[Dict[str, object]]:
+           needs: Optional[Set[str]] = None, dropped: AbstractSet[str] = frozenset()) -> List[OfferResult]:
     """Packages that PASS, best rebuild fit first. Pure: no I/O."""
     needs = needs or set()
     give_options = [tuple(sale)] + [tuple(sale) + (b,) for b in balancers if b.id not in {s.id for s in sale}]
@@ -107,7 +122,7 @@ def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[A
         if key not in seen:
             seen.add(key)
             get_options.append(get)
-    rows: List[Dict[str, object]] = []
+    rows: List[OfferResult] = []
     for give in give_options:
         for get in get_options:
             ev, verdict = judge(give, get, top=top, is_dynasty=is_dynasty)
@@ -124,9 +139,9 @@ def search(sale: Sequence[Asset], theirs: Sequence[Asset], balancers: Sequence[A
                 "net_youth": sum(a.value for a in helps) - sum(a.value for a in give if _young(a)),
                 "their_winnow": sum(a.redraft_value or 0 for a in give) - sum(a.redraft_value or 0 for a in get),
             })
-    rows.sort(key=lambda r: (-int(r["net_youth"]), -int(r["lineup_gain"]),  # type: ignore[call-overload]
-                             -int(r["their_winnow"]),  # type: ignore[call-overload]
-                             max(float(r["fc_pct"]), float(r["ktc_pct"]))))  # type: ignore[arg-type]
+    rows.sort(key=lambda r: (-r["net_youth"], -r["lineup_gain"],
+                             -r["their_winnow"],
+                             max(r["fc_pct"] or 0.0, r["ktc_pct"] or 0.0)))
     return rows[:limit]
 
 
@@ -235,9 +250,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\nno manager named {username}")
             continue
         their_origins: Dict[str, str] = {}
+        target_rid = roster.roster_id
+
+        def their_origin(rid: int) -> str:
+            return "their own" if rid == target_rid else f"theirs, from {user_of[rid]}"
+
         theirs = _roster_assets(
             book, val_of[roster.roster_id].assets, ledger.get(roster.roster_id, []), tier_of,
-            lambda rid, r=roster: "their own" if rid == r.roster_id else f"theirs, from {user_of[rid]}",
+            their_origin,
             their_origins)
         rows = search(sale, theirs, balancers, top=book.secondary_top,
                       is_dynasty=cfg.format.is_dynasty, max_age=args.max_age, limit=args.limit,
@@ -245,18 +265,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       dropped=dropped)
         print(f"\n{username}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
         for r in rows:
-            fc_give, fc_get = r["fc_totals"]  # type: ignore[misc]
-            k_give, k_get = r["ktc_totals"]  # type: ignore[misc]
-            print(f"  give {' + '.join(r['give'])}  for  {' + '.join(r['get'])}")  # type: ignore[arg-type]
-            print(f"      FC {fc_give:,} vs {fc_get:,} ({r['fc_pct']:.2f}%)   KTC {k_give:,} vs {k_get:,} "
-                  f"({r['ktc_pct']:.2f}%, site {r['ktc_site_pct']:.1f}%)   lineup {r['lineup_gain']:+,}")
-            for a in r["assets"]:  # type: ignore[attr-defined]
+            fc_give, fc_get = r["fc_totals"]
+            k_give, k_get = r["ktc_totals"]
+            k_str = f"{k_give:,} vs {k_get:,}" if k_give is not None and k_get is not None else "-- vs --"
+            fc_pct_str = f"{r['fc_pct']:.2f}%" if r["fc_pct"] is not None else "--%"
+            ktc_pct_str = f"{r['ktc_pct']:.2f}%" if r["ktc_pct"] is not None else "--%"
+            ktc_site_str = f"{r['ktc_site_pct']:.1f}%" if r["ktc_site_pct"] is not None else "--%"
+            print(f"  give {' + '.join(r['give'])}  for  {' + '.join(r['get'])}")
+            print(f"      FC {fc_give:,} vs {fc_get:,} ({fc_pct_str})   KTC {k_str} "
+                  f"({ktc_pct_str}, site {ktc_site_str})   lineup {r['lineup_gain']:+,}")
+            for a in r["assets"]:
                 age = f", {a.age:.0f}" if a.age and not a.is_pick else ""
                 warn = flags(a, dropped)
-                print(f"      - {a.name} ({a.position}{age}): {r['roles'][a.name]}"  # type: ignore[index]
+                print(f"      - {a.name} ({a.position}{age}): {r['roles'][a.name]}"
                       + (f"  [!] {'; '.join(warn)}" if warn else ""))
-            picks = [f"{n} = {my_origins[n]}" for n in r["give"] if n in my_origins]  # type: ignore[union-attr]
-            picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]  # type: ignore[union-attr]
+            picks = [f"{n} = {my_origins[n]}" for n in r["give"] if n in my_origins]
+            picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]
             if picks:
                 print("      picks: " + "; ".join(picks) + " (tier projected from the original team's power rank)")
     return 0
