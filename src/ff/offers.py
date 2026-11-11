@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
-"""Find trade offers that pass the offer rule, from live data only.
+"""Find trade offers that pass the offer rule, from live data only (`ff offers`).
 
-    ./.venv/bin/python scripts/find_offers.py --sell "Kirk Cousins" --to troyharris --to devilz13s
+    ff offers --sell "Kirk Cousins" --to troyharris --to "Team Name"
 
-For each named manager (Sleeper username), tries packages of one or two of their
+For each manager (Sleeper username or team name; everyone else when none is
+named), tries packages of one or two of their
 assets (players, plus the picks they own, tiered like `ff picks`) against what you
 sell plus at most one balancer of yours. Every package is priced exactly as
 fantasycalc.com and keeptradecut.com would price it
@@ -171,7 +171,8 @@ def _roster_assets(book: ValueBook, players: Sequence[Asset], picks: Sequence[Fu
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--sell", action="append", required=True, help="asset you sell (repeatable)")
-    ap.add_argument("--to", action="append", required=True, help="manager's Sleeper username (repeatable)")
+    ap.add_argument("--to", action="append", default=None,
+                    help="manager's Sleeper username or team name (repeatable; default: every other team)")
     ap.add_argument("--with", dest="balancers", action="append", default=None,
                     help="asset of yours allowed as a balancer (default: your vets 27+ and picks after "
                          "round 1, each worth no more than what you sell)")
@@ -246,11 +247,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"values live: FantasyCalc + KTC (top {book.secondary_top:,}); calculators verified; "
           f"rule: under 10% in both markets and KTC says Fair; your needs: "
           f"{', '.join(sorted(needs)) or 'none below the league median'}")
-    for username in args.to:
-        roster = next((r for r in rosters if names.get(r.owner_id or "") == username), None)
+    for username in args.to or [user_of[r.roster_id] for r in rosters if r is not mine]:
+        roster = next((r for r in rosters if r is not mine and (
+            names.get(r.owner_id or "") == username or username.lower() in r.team_name.lower())), None)
         if roster is None:
             print(f"\nno manager named {username}")
             continue
+        username = f"{roster.team_name} ({user_of[roster.roster_id]})"
         their_origins: Dict[str, str] = {}
         target_rid = roster.roster_id
 
@@ -284,7 +287,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             picks = [f"{n} = {my_origins[n]}" for n in r["give"] if n in my_origins]
             picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]
             if picks:
-                print("      picks: " + "; ".join(picks) + " (tier projected from the original team's power rank)")
+                print("      picks: " + "; ".join(picks) + " (tier from the original team's projected finish)")
     return 0
 
 

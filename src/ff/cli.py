@@ -1127,6 +1127,28 @@ def _print_generic_pick_hints(cfg: Config, sc: SleeperClient, book: ValueBook,
                       f"'{season} early {flat.name.split()[1] if flat else 'round ' + rnd}'.[/]")
 
 
+@app.command()
+@_guard
+def offers(
+    sell: List[str] = typer.Option(..., "--sell", help="Asset you sell (repeatable)."),
+    to: Optional[List[str]] = typer.Option(None, "--to", help="Manager's Sleeper username or team name "
+                                           "(repeatable); default: every other team."),
+    with_: Optional[List[str]] = typer.Option(None, "--with", help="Asset of yours allowed as a balancer "
+                                              "(repeatable); default: your vets 27+ and picks after round 1."),
+    max_age: float = typer.Option(26, help="Oldest player you would take back."),
+    limit: int = typer.Option(5, help="Packages to show per manager."),
+) -> None:
+    """Find packages for what you sell that pass the offer rule in both markets,
+    ranked by how well they fit your roster."""
+    from ff.offers import main  # ff.offers imports this module
+
+    argv = ["--max-age", str(max_age), "--limit", str(limit)]
+    for flag, vals in (("--sell", sell), ("--to", to), ("--with", with_)):
+        for v in vals or []:
+            argv += [flag, v]
+    raise typer.Exit(main(argv))
+
+
 def _render_table(console: Console, title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> None:
     table = Table(title=Text(title))
     for column in columns:
