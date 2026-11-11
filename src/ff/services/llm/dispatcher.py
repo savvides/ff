@@ -14,7 +14,6 @@ def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, A
         return None
     if team_query:
         q = str(team_query).lower()
-        # Jev resolves team choices to canonical roster IDs before dispatch.
         for r in rosters:
             if q == str(getattr(r, "roster_id", "")).lower():
                 return r

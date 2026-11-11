@@ -28,25 +28,24 @@ There is no application database or database provider. State is local files plus
 | --- | --- |
 | `FF_HOME/config.json` | Pydantic `Config`: league ID, season, detected `Format`, user identity, names and LLM settings. Written by setup/onboarding and `config set-llm`; ordinary reads validate JSON. Config writes use `Path.write_text`, not the cache's atomic writer. |
 | `FF_HOME/cache/` | URL-and-parameters SHA-256 cache keys truncated to 24 hex characters. JSON responses are cached as JSON; KTC stores raw HTML/text using the same cache-file mechanism. Entries are written through a temporary file and `os.replace`. |
-| `FF_HOME/typesafe_api_key` | Optional TypeSafe key, stored separately from league config using an atomic replacement of a mode-0600 temporary file. An exported `TYPESAFE_API_KEY` takes precedence. |
-| Memory | `ValueBook` indexes, lazy per-command context, QA's last report and Jev request metrics. No background service or persistent job queue. |
+| Memory | `ValueBook` indexes, lazy per-command context and QA's last report. No background service or persistent job queue. |
 | `samples/` | Gitignored real-league inspection snapshots from `scripts/record_fixtures.py`; not the deterministic test fixtures or a production database. |
 
-`FF_HOME` defaults to `Path.cwd() / ".ff"`; overrides expand `~`. Application state and credential contents were not inspected. `.gitignore` excludes `.ff/`, `typesafe_api_key`, and `samples/`; custom state roots require care because `.ff/` only names the default directory. `make clean` deletes the default `.ff` directory, including a saved key.
+`FF_HOME` defaults to `Path.cwd() / ".ff"`; overrides expand `~`. Application state and credential contents were not inspected. `.gitignore` excludes `.ff/` and `samples/`; custom state roots require care because `.ff/` only names the default directory. `make clean` deletes the default `.ff` directory.
 
-There is no sign-in/session system or user-auth provider. Sleeper user IDs select a fantasy roster; they do not authenticate ownership or authorize mutations. Sleeper, FantasyCalc, KTC and ESPN reads use public feeds. Optional TypeSafe requests use Bearer API-key authentication. Local terminal AI binaries rely on their own installation/account configuration; ff does not implement those providers' authentication.
+There is no sign-in/session system or user-auth provider. Sleeper user IDs select a fantasy roster; they do not authenticate ownership or authorize mutations. Sleeper, FantasyCalc, KTC and ESPN reads use public feeds. Local terminal AI binaries rely on their own installation/account configuration; ff does not implement those providers' authentication.
 
 ## Module boundaries
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
 | Boundary/orchestration | `src/ff/cli.py` | Typer arguments, config loading, client calls, lazy analysis context, team selection, Rich tables, QA invocation and expected-error handling. Includes `compare`, weekly waivers and the hidden `doctor` alias. |
-| Shared contracts | `src/ff/contracts/models.py` | Pydantic domain models for assets, rosters, trades, picks, cleanup, draft fit, weekly context, lineups, comparisons, waivers, offer verdicts and news. `Config`, QA and Jev transport models live in their corresponding modules. |
+| Shared contracts | `src/ff/contracts/models.py` | Pydantic domain models for assets, rosters, trades, picks, cleanup, draft fit, weekly context, lineups, comparisons, waivers, offer verdicts and news. `Config` and QA report models live in their corresponding modules. |
 | Infrastructure | `src/ff/core/config.py`, `http.py` | Local state paths/config, cached retrying JSON GETs and browser-User-Agent text GETs with TLS-only curl fallback; no football calculations. |
 | Data clients | `sleeper/client.py`, `values/client.py`, `values/ktc.py`, `projections/client.py` | Fetch and normalize provider data. `values/normalize.py` shares player/pick normalization. `values/dealer.py` is a backward-compatibility adapter to KTC, not another active provider. `values/calculators_live.py` checks provider calculator bundle identities/formula fingerprints before trusting the direct trade offer rule. |
 | Weekly orchestration | `src/ff/services/weekly.py` | Cross-provider schedule validation, fresh per-player availability, matchup joins and UTC observation time. Builds `WeeklyContext`; recommendation calculations stay in analysis. |
 | Analysis | `src/ff/analysis/` | Deterministic calculations over contracts, metadata and `ValueBook`: roster valuation, trades, picks, opportunity, draft fit, lineup assignment, comparisons, weekly waivers and cleanup (including IR moves). `analysis/calculators.py` ports site trade adjustments and holds pure source-fingerprint helpers; it performs no network I/O. Existing imports of Sleeper's pure name helper and `ValueBook` do not introduce network calls here. |
-| Optional interpretation | `src/ff/services/llm/` | Local terminal runner or bounded TypeSafe Jev classification, allowlisted tool dispatch and output rendering. |
+| Optional interpretation | `src/ff/services/llm/` | Local terminal runner, allowlisted tool dispatch and output rendering. |
 | Validation | `src/ff/qa/` | Domain invariants and reports. QA is a mathematical/structural check, not proof of feed freshness, model accuracy or recommendation quality. |
 
 ## Data flow
@@ -74,7 +73,6 @@ flowchart TD
 4. **Weekly advice:** direct lineup refreshes league, rosters, state and projections. When the requested season/week matches fresh Sleeper state, `load_weekly` cross-checks Sleeper's schedule with ESPN's regular-season scoreboard, refreshes each owned player's status, and verifies roster/matchup starter alignment. `_prepare_weekly` supplies the shared current-week path for comparisons, weekly waivers and dispatched weekly tools; it also rejects a stale configured season. Weekly waiver snapshots include embedded projection metadata for unrostered candidates. Analysis freezes live/completed or unknown-timing assignments, uses actual scores for locked players, excludes taxi/IR and unavailable players, and produces conditional injury substitutions. Current week is `max(1, state.week, state.display_week)` through `_current_week`; neither state field alone determines the open slate. Other-week direct lineup requests are explicitly projection-only scenarios.
 5. **Picks/draft:** future ownership is default pick endowment reconciled with traded picks; the last re-trade row wins. Prices use the original team's rank to choose early/mid/late tiers. Future pick windows use league rookie draft rounds before falling back to draft settings. Live draft orchestration fetches the individual draft endpoint for `slot_to_roster_id`, excludes drafted/rostered assets and applies roster-relative fit scores. The generic `get_draft_fit` dispatcher ranks the unrostered pool; it does not fetch the live draft board itself.
 6. **Local `ask`:** backend resolution checks `agy`, `gemini`, `claude`, then `ollama` in PATH. A print/headless subprocess (120-second timeout) returns Markdown or a JSON `{tool, kwargs}` call. Only registered tool names dispatch. The same analysis context supplies deterministic results; a second runner call receives those results for prose synthesis. Local interpretation schemas are advertised to the model, but dispatch does not globally validate kwargs against them.
-7. **Jev `ask`:** explicitly selected `jev` makes one logical POST of the question and fixed Choice classification questions, without appended league data. Only HTTP 429/529 retry, at most twice (one/two-second delays; 15-second request timeout). Local code verifies answers, confidence and supported details, resolves exact named teams/roster numbers or the saved owner identity, builds kwargs, then dispatches existing analysis. Its tables are rendered without another prose model or secondary-market scrape. Unsupported/uncertain requests clarify with exit 3; service failures exit 1, with no fallback.
 
 ## Providers and freshness
 
@@ -85,7 +83,6 @@ flowchart TD
 | FantasyCalc | `https://api.fantasycalc.com/values/current` | Six-hour values normally; direct trade uses fresh values. Parameters are `isDynasty`, `numQbs`, `numTeams`, `ppr`, plus optional `tep=te+`/`te++`. |
 | KeepTradeCut | `https://keeptradecut.com/trade-calculator` | Embedded JSON in `script#ktc-players` (legacy `playersArray` and raw JSON also supported), six-hour text cache, superflex/1QB plus nested TE+/TE++ values. Optional and allowed to degrade; direct trade fetches fresh. |
 | ESPN | `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` | TTL 0; season/year/week and opponent-pair verification against Sleeper schedule before trusting kickoff/status. |
-| TypeSafe | `https://api.typesafe.ai/v1/systemone` | Optional paid Jev classification. Default `jev-1.13.0`, overridable by `TYPESAFE_MODEL`; confidence floor 0.80. No disk response cache. |
 
 
 ## Valuation, cleanup and auxiliary flows
@@ -104,7 +101,7 @@ Cleanup shares `designation` and `ir_eligible_statuses` with weekly verification
 
 ## Runtime controls and limits
 
-`FF_HOME` selects file state; `FF_QA` selects off/summary/verbose/strict (default off still runs checks and displays failures); `TYPESAFE_API_KEY` and `TYPESAFE_MODEL` configure Jev. `FF_LIVE_LEAGUE_ID` belongs to optional integration canaries, not ordinary runtime configuration. Saved `llm_backend` defaults to `auto` and `ollama_model` to `llama3.2`. `auto` never chooses Jev. Current local runners do not include a Codex binary despite older repository prose mentioning it.
+`FF_HOME` selects file state; `FF_QA` selects off/summary/verbose/strict (default off still runs checks and displays failures). `FF_LIVE_LEAGUE_ID` belongs to optional integration canaries, not ordinary runtime configuration. Saved `llm_backend` defaults to `auto` and `ollama_model` to `llama3.2`. Current local runners do not include a Codex binary despite older repository prose mentioning it.
 
 Weekly gates reject best-ball, AutoSubs, invalid/unverified IR eligibility, excess active capacity/capacity override and unsupported lineup slots. Unknown player timing is frozen/excluded rather than assumed safe; questionable/doubtful designations remain conditional. Current week uses the later of Sleeper `week` and `display_week`, never below one; it is not derived from a calendar. The schedule and player/news feeds are partly undocumented and require live canaries for upstream drift. No command submits claims, places bids, adds/drops players, changes lineups or executes trades.
 

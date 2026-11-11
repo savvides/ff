@@ -50,7 +50,7 @@ make install                 # create venv + install dependencies + enable pre-c
   ```
 
 - **`ff config set-llm <backend>`** — Configures the backend used by `ff ask`.
-  - `backend`: `auto`, `jev`, `agy`, `gemini`, `claude`, or `ollama`. `auto` selects terminal runners only.
+  - `backend`: `auto`, `agy`, `gemini`, `claude`, or `ollama`. `auto` selects terminal runners only.
   - `-m, --model M`: Model name when using Ollama (default: `llama3.2`).
   ```bash
   ff config set-llm agy
@@ -159,99 +159,13 @@ make install                 # create venv + install dependencies + enable pre-c
   ff draft -r --mode contend
   ```
 
-- **`ff ask "<query>"`** — Natural language Q&A using a terminal AI runner for explanations, or the optional hosted Jev pilot for deterministic tables.
+- **`ff ask "<query>"`** — Natural language Q&A using a terminal AI runner for explanations.
   - `query`: Natural language question.
-  - `--backend BACKEND`: Override backend: `auto`, `jev`, `agy`, `gemini`, `claude`, or `ollama`.
+  - `--backend BACKEND`: Override backend: `auto`, `agy`, `gemini`, `claude`, or `ollama`.
   ```bash
   ff ask "Should I trade Jahmyr Gibbs and a 2026 2nd for Bijan Robinson?"
   ff ask "Who should I start at FLEX this week?"
   ```
-
-#### Optional Jev pilot
-
-[Jev](https://docs.typesafe.ai/introduction) interprets a question into a supported
-operation and bounded arguments. Python calculates the result, and the CLI shows
-the interpretation followed by tables. No terminal AI runner is used on this path.
-
-Store your key once in your terminal. Input is hidden and the key is never a
-command-line argument or part of shell history:
-
-```bash
-./.venv/bin/ff config set-jev-key
-# After configuring your league with ff setup:
-./.venv/bin/ff ask "Which five available running backs should I target?" --backend jev
-./.venv/bin/ff ask "Show my roster" --backend jev
-./.venv/bin/ff config set-llm jev  # optional: save backend preference, never the key
-```
-
-The key is saved separately from league config in `.ff/typesafe_api_key` (or under
-`FF_HOME`), with owner-only read/write permissions (`0600`). It is a plaintext
-local file, not encrypted storage, and is gitignored. Run the same command to
-replace it; deleting the file or running `make clean` removes it. If you customize
-`FF_HOME`, keep that directory private and outside shared or synced folders.
-An exported `TYPESAFE_API_KEY` overrides the saved key. `TYPESAFE_MODEL` optionally
-overrides the tested default, `jev-1.13.0`. No additional dependency is required.
-
-| Request | Supported arguments / defaults |
-|---|---|
-| Roster valuation | Known team (default yours); top players (default 15) or entire roster |
-| League power rankings | Entire league, by dynasty player value |
-| Dynasty player rankings | QB/RB/WR/TE filter; limit (default 40) |
-| Waivers | Unrostered players in eligible league positions; optional position and trending-only filters; limit (default 20) |
-| Draft-pick ownership | Known team (default yours) or explicit whole league; the two seasons after the latest draft, league round count |
-| Roster cleanup | Known team (default yours); drop-candidate limit (default 8) |
-| Starting lineup | Known team (default yours); full current-week lineup with locks and availability |
-| Start/sit comparison | Exactly two named rostered players; current week, league scoring |
-| Weekly waivers | Explicit this-week objective; known team (default yours), optional position/count/trending; rank by lineup improvement |
-
-Result limits are 1–50, or the entire roster for roster and cleanup requests.
-Trade parsing, setup, draft recommendations, news analysis, dynasty/trade/add-drop comparisons,
-multiple operations, named players outside start/sit comparisons, player filters (such as age, rookies, or a
-position outside values and waivers), and other weeks or seasons are deferred with
-a direct-command hint, even when Jev is unsure of them; draft-pick requests check
-for multiple requests, the team, and explicit year/round or calculation-setting overrides. Lineup requests for another week use
-`ff lineup` instead. Teams are matched on your
-machine: "my team" is the team you own, and any other team must be named by its
-full team name or roster number. When one team's name contains another's (Kings and
-Gridiron Kings), neither can be named, and neither can a name made only of generic
-words or another team in a question that says "my" or "our" (other than "my
-league"): use the roster number. Unknown or ambiguous teams request clarification.
-Requests for a different market (KTC/Dealer), custom scoring, or specific draft
-years/rounds ask for clarification. Supported requests use FantasyCalc values,
-your league's scoring, and the pick seasons shown on the `Interpreted:` line.
-Missing projections produce an unavailable message. Weekly advice refreshes its small data feeds; the full Sleeper player dictionary remains cached daily.
-
-```bash
-ff ask "Should I start Nico Collins or Cooper Kupp?" --backend jev
-ff ask "Which five available RBs would improve my lineup this week?" --backend jev
-```
-Waiver results distinguish unrostered players from verified free agents: the public
-API does not establish immediate pickup or pending-claim status. Requests requiring
-that distinction ask you to check Sleeper. Requests to submit claims, place bids or
-change a roster are rejected explicitly; this integration is read-only. FA/FAs and
-position abbreviations are accepted. General waiver requests search active NFL
-players and market-listed prospects; explicit trending requests use the sampled
-trending list. A dash in the adds column means outside that sample, not zero adds.
-
-Every answer an operation uses must meet a provisional confidence threshold of 0.80.
-Options that resolve to the same argument, such as your team by name and "my team",
-or no count and the default count, count together. A request Jev cannot run as asked
-(low confidence, a deferred or unsupported detail, an unknown team, a stale season,
-or missing projections) prints guidance and exits with code 3. API errors exit with
-code 1. Rate-limit and overload replies (HTTP 429/529) are retried twice after a
-short pause, as TypeSafe recommends; there is no model fallback or other retry.
-This threshold measures interpretation confidence, not the chance a fantasy
-recommendation succeeds.
-
-Jev receives your question text and the fixed classification questions, in one request
-per query (plus any 429/529 retries). Names you type in your question are sent;
-the league's team list, roster contents, and values are not appended. Requests consume your API allowance.
-Only `config set-jev-key` stores the key; questions and responses are not stored. Existing Sleeper and
-market-data caching still applies. Automatic backend selection does not enable Jev.
-
-See [the live evaluations](evals/README.md) for the original 40-question gate and
-30 additional phrasing and boundary cases, plus focused waiver and weekly-decision sets. Some supported phrasings still ask for
-clarification; naming the operation explicitly, such as "roster", can help.
 
 ### 6. Diagnostics & Utilities
 

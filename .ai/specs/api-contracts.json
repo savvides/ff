@@ -1308,38 +1308,30 @@
           "required": false,
           "default": null,
           "python_type": "Optional[str]",
-          "help": "Override backend (jev, agy, gemini, claude, ollama)"
+          "help": "Override backend (agy, gemini, claude, ollama)"
         }
       ],
       "output": {
         "transport": "Rich terminal text",
         "python_return": "None",
-        "description": "Jev: interpretation summary and deterministic domain tables; local: Markdown response/synthesis",
-        "domain_models": [
-          {
-            "$ref": "#/$defs/Route"
-          }
-        ]
+        "description": "Markdown response/synthesis",
+        "domain_models": []
       },
       "side_effects": [
         "provider_reads",
         "may_write_http_cache",
         "may_write_config_via_local_onboarding",
-        "may_invoke_terminal_runner",
-        "explicit_jev_makes_paid_classification_request"
+        "may_invoke_terminal_runner"
       ],
       "errors": [
         "cli_usage",
         "cli_expected",
         "unexpected_exception",
         "qa_strict",
-        "jev_clarification",
-        "jev_service",
         "local_ask_printed_failure"
       ],
       "notes": [
-        "backend precedence: option > saved config > auto. Valid backends: auto, jev, agy, gemini, claude, ollama.",
-        "Jev requires saved league config and explicitly selected backend; local setup can run without saved config.",
+        "backend precedence: option > saved config > auto. Valid backends: auto, agy, gemini, claude, ollama.",
         "Local unknown-tool/onboarding/dispatch errors may return normally with exit 0; no universal success/error JSON response."
       ]
     },
@@ -1474,41 +1466,6 @@
       "notes": []
     },
     {
-      "path": "ff config set-jev-key",
-      "kind": "cli_command",
-      "hidden": false,
-      "source": "src/ff/cli.py",
-      "line": 1606,
-      "description": "Privately enter and save a TypeSafe API key for Jev.",
-      "input_schema": {
-        "type": "object",
-        "properties": {}
-      },
-      "parameters": [],
-      "output": {
-        "transport": "Rich terminal text",
-        "python_return": "None",
-        "description": "Hidden key prompt and saved-path confirmation; writes separate key file",
-        "domain_models": []
-      },
-      "side_effects": [
-        "writes_secret_file"
-      ],
-      "errors": [
-        "cli_usage",
-        "jev_service",
-        "unexpected_exception"
-      ],
-      "notes": [
-        "Input is interactive hidden text, not a positional argument or command option."
-      ],
-      "interactive_input": {
-        "type": "string",
-        "hidden": true,
-        "validation": "nonempty, ASCII and printable after stripping"
-      }
-    },
-    {
       "path": "ff config set-llm",
       "kind": "cli_command",
       "hidden": false,
@@ -1547,7 +1504,7 @@
           "required": true,
           "default": null,
           "python_type": "str",
-          "help": "LLM backend: auto, jev, agy, gemini, claude, ollama"
+          "help": "LLM backend: auto, agy, gemini, claude, ollama"
         },
         {
           "name": "model",
@@ -1629,8 +1586,7 @@
           "dispatcher_value_error"
         ],
         "notes": [
-          "Requires fresh weekly context or prepare_weekly callback; always excludes rostered players.",
-          "Jev may add free_agents_only=true, but this branch has no free_agents_only toggle."
+          "Requires fresh weekly context or prepare_weekly callback; always excludes rostered players."
         ]
       },
       {
@@ -1827,7 +1783,7 @@
         ],
         "notes": [
           "trending_only is accepted at runtime but absent from advertised schema.",
-          "Dispatcher limit defaults to 25, while direct CLI/Jev default to 20.",
+          "Dispatcher limit defaults to 25, while direct CLI default to 20.",
           "Advertised description says dynasty value; actual ranking uses dynasty opportunity. free_agents_only defaults true."
         ]
       },
@@ -1856,9 +1812,7 @@
         "errors": [
           "dispatcher_value_error"
         ],
-        "notes": [
-          "Jev constructs limit (default 15) for rendering; dispatcher returns the full valuation and does not slice assets."
-        ]
+        "notes": []
       },
       {
         "name": "get_power_rankings",
@@ -1913,7 +1867,7 @@
         ],
         "notes": [
           "CLI context supplies future seasons and rounds from _pick_window; raw dispatcher defaults are 2026/2027/2028 and four rounds if those context keys are absent.",
-          "An unmatched explicit team in this branch does not raise and can leave the whole ledger selected. Jev resolves teams before dispatch."
+          "An unmatched explicit team in this branch does not raise and can leave the whole ledger selected."
         ]
       },
       {
@@ -2058,157 +2012,6 @@
       }
     ],
     "validation": "Name allowlist plus per-branch checks; no generic advertised-schema kwargs validation"
-  },
-  "jev": {
-    "supported_operations": [
-      "get_roster",
-      "get_power_rankings",
-      "get_dynasty_values",
-      "get_weekly_waivers",
-      "get_waivers",
-      "get_picks",
-      "get_roster_cleanup",
-      "get_player_comparison",
-      "get_lineup"
-    ],
-    "deferred_operations": [
-      "trade",
-      "setup",
-      "draft",
-      "news",
-      "unsupported",
-      "ambiguous"
-    ],
-    "confidence_floor": 0.8,
-    "default_model": "jev-1.13.0",
-    "default_render_limits": {
-      "get_roster": 15,
-      "get_dynasty_values": 40,
-      "get_waivers": 20,
-      "get_weekly_waivers": 20,
-      "get_roster_cleanup": 8
-    },
-    "question_names": [
-      "operation",
-      "weekly_goal",
-      "comparison",
-      "action",
-      "availability",
-      "pool",
-      "parts",
-      "settings",
-      "players",
-      "time",
-      "filter",
-      "comparison_team",
-      "team",
-      "position",
-      "limit"
-    ],
-    "used_questions_by_operation": {
-      "get_roster": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "team",
-        "limit"
-      ],
-      "get_power_rankings": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action"
-      ],
-      "get_dynasty_values": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "limit"
-      ],
-      "get_waivers": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "availability",
-        "pool",
-        "limit"
-      ],
-      "get_weekly_waivers": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "availability",
-        "pool",
-        "limit",
-        "team",
-        "weekly_goal"
-      ],
-      "get_picks": [
-        "parts",
-        "settings",
-        "action",
-        "team"
-      ],
-      "get_roster_cleanup": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "team",
-        "limit"
-      ],
-      "get_lineup": [
-        "parts",
-        "players",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "team"
-      ],
-      "get_player_comparison": [
-        "parts",
-        "time",
-        "filter",
-        "position",
-        "settings",
-        "action",
-        "comparison_team",
-        "comparison"
-      ]
-    },
-    "route_schema": {
-      "$ref": "#/$defs/Route"
-    },
-    "errors": [
-      "jev_clarification",
-      "jev_service"
-    ],
-    "team_resolution": "mine by saved user_id == owner_id; named by explicit full name/roster number, resolved to canonical roster_id string",
-    "unsupported": "Transactions, alternate calculation settings/markets, other weeks, unsupported filters/counts, multiple operations and unverifiable acquisition conditions clarify; compare supports exactly two owned named players."
   },
   "outbound_endpoints": [
     {
@@ -3208,43 +3011,6 @@
       "notes": [
         "Version comes from already fetched KTC HTML; runtime fetched only if it differs from pinned fingerprint. Empty KTC HTML returns no drift problems, but missing prices still block offer rule."
       ]
-    },
-    {
-      "id": "typesafe.choose",
-      "direction": "outbound",
-      "provider": "TypeSafe",
-      "method": "POST",
-      "url_template": "https://api.typesafe.ai/v1/systemone",
-      "source": "src/ff/services/llm/jev.py",
-      "request": {
-        "path_parameters": {},
-        "query_schema": {
-          "type": "object",
-          "properties": {}
-        },
-        "body_schema": {
-          "$ref": "#/$defs/TypeSafeRequest"
-        },
-        "auth": "Bearer TYPESAFE_API_KEY or saved key"
-      },
-      "response": {
-        "schema": {
-          "$ref": "#/$defs/JevResponse"
-        },
-        "schema_scope": "validated Pydantic transport model",
-        "normalized_python": "Dict[str, ChoiceAnswer] -> local interpret -> Route(tool, kwargs)"
-      },
-      "cache_ttl_seconds": null,
-      "errors": [
-        "jev_service",
-        "jev_clarification"
-      ],
-      "notes": [
-        "state contains original query, without appended league data; questions are fixed Choice prompts plus query-derived limit criteria.",
-        "Default model jev-1.13.0; TYPESAFE_MODEL overrides. Timeout 15 seconds, redirects disabled, retries only 429/529 twice.",
-        "Answer names must equal requested questions; choice/probability keys must equal offered options, probabilities must be 0..1 with rounded sum tolerance, chosen option must be maximal.",
-        "Confidence floor 0.80 is applied to used questions after local equivalent-outcome handling; abstaining/unsupported details refuse routing."
-      ]
     }
   ],
   "analysis_functions": [
@@ -3720,36 +3486,6 @@
       ],
       "notes": "_guard also maps Pydantic ValidationError and JSONDecodeError to a corrupt/outdated-config message. It does not catch every exception."
     },
-    "jev_clarification": {
-      "boundary": "cli._ask_jev",
-      "exit_code": 3,
-      "shape": "Plain clarification message; no result/tool execution for interpretation refusal",
-      "internal_exception": "Clarification(ValueError)",
-      "internal_attributes": {
-        "question": "Optional[str]",
-        "confidence": "Optional[float]"
-      },
-      "triggers": [
-        "unsupported action/detail",
-        "unresolved team/player identity",
-        "abstaining or low-confidence answer"
-      ]
-    },
-    "jev_service": {
-      "boundary": "JevClient / cli._ask_jev / config set-jev-key",
-      "exit_code": 1,
-      "shape": "error: <safe fixed message>",
-      "internal_exception": "JevError(RuntimeError)",
-      "triggers": [
-        "missing/invalid key",
-        "401/403",
-        "exhausted 429",
-        "other non-200 HTTP status",
-        "timeout/network error",
-        "invalid reply",
-        "key-file I/O error"
-      ]
-    },
     "local_ask_printed_failure": {
       "boundary": "cli.ask local backends",
       "exit_code": 0,
@@ -4027,21 +3763,6 @@
     "QAReport": {
       "source": "src/ff/qa/models.py",
       "line": 18,
-      "ordinary_properties_not_in_model_dump": []
-    },
-    "ChoiceAnswer": {
-      "source": "src/ff/services/llm/jev.py",
-      "line": 83,
-      "ordinary_properties_not_in_model_dump": []
-    },
-    "JevResponse": {
-      "source": "src/ff/services/llm/jev.py",
-      "line": 90,
-      "ordinary_properties_not_in_model_dump": []
-    },
-    "Route": {
-      "source": "src/ff/services/llm/jev.py",
-      "line": 96,
       "ordinary_properties_not_in_model_dump": []
     }
   },
@@ -5816,88 +5537,6 @@
       "title": "QAReport",
       "type": "object"
     },
-    "ChoiceAnswer": {
-      "properties": {
-        "type": {
-          "const": "choice",
-          "title": "Type",
-          "type": "string"
-        },
-        "choice": {
-          "title": "Choice",
-          "type": "string"
-        },
-        "confidence": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Confidence",
-          "type": "number"
-        },
-        "probabilities": {
-          "additionalProperties": {
-            "type": "number"
-          },
-          "title": "Probabilities",
-          "type": "object"
-        }
-      },
-      "required": [
-        "type",
-        "choice",
-        "confidence",
-        "probabilities"
-      ],
-      "title": "ChoiceAnswer",
-      "type": "object"
-    },
-    "JevResponse": {
-      "properties": {
-        "model": {
-          "title": "Model",
-          "type": "string"
-        },
-        "answers": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ChoiceAnswer"
-          },
-          "title": "Answers",
-          "type": "object"
-        },
-        "usage": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Usage",
-          "type": "object"
-        }
-      },
-      "required": [
-        "model",
-        "answers",
-        "usage"
-      ],
-      "title": "JevResponse",
-      "type": "object"
-    },
-    "Route": {
-      "properties": {
-        "tool": {
-          "title": "Tool",
-          "type": "string"
-        },
-        "kwargs": {
-          "additionalProperties": true,
-          "title": "Kwargs",
-          "type": "object"
-        }
-      },
-      "required": [
-        "tool",
-        "kwargs"
-      ],
-      "title": "Route",
-      "type": "object"
-    },
     "MoverResult": {
       "type": "object",
       "properties": {
@@ -5944,50 +5583,6 @@
       },
       "required": [
         "tool"
-      ]
-    },
-    "TypeSafeChoiceQuestion": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "const": "choice"
-        },
-        "instructions": {
-          "type": "string"
-        },
-        "criteria": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "type",
-        "instructions",
-        "criteria"
-      ]
-    },
-    "TypeSafeRequest": {
-      "type": "object",
-      "properties": {
-        "model": {
-          "type": "string"
-        },
-        "state": {
-          "type": "string"
-        },
-        "questions": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/TypeSafeChoiceQuestion"
-          }
-        }
-      },
-      "required": [
-        "model",
-        "state",
-        "questions"
       ]
     },
     "SleeperState": {

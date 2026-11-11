@@ -28,31 +28,29 @@ players by improvement to this team's lineup. All advice remains read-only.
 
 ## 2. Named-player start/sit
 
-- Add `ff compare PLAYER_A PLAYER_B` for the current week and a bounded Jev route.
+- Add `ff compare PLAYER_A PLAYER_B` for the current week.
 - Resolve names/aliases locally to unique rostered Sleeper IDs; ambiguous and
   missing names clarify. Do not silently choose a fuzzy match.
 - Compare the best whole lineup with each player starting and the other sitting;
   explain when both fit, neither is legal, or a lock makes the choice unavailable.
 - Show per-player points/status and whole-lineup difference with injury conditions.
 - Verification: ID/name ambiguity, ownership, positional eligibility, locks,
-  both-fit cases, league scoring and unchanged roster control in live Jev evals.
+  both-fit cases, and league scoring.
 
 ## 3. Weekly waiver improvement
 
-- Add explicit `ff waivers --weekly` and a Jev weekly-waiver operation. Preserve
+- Add explicit `ff waivers --weekly`. Preserve
   existing dynasty ranking for requests without a weekly objective.
 - Evaluate all projected unrostered league-eligible candidates before truncation,
   using the same timing/availability constraints and whole-lineup scoring.
 - Report lineup gain and displaced starter. This is conditional on acquisition;
   pending claims, waiver clearance, FAAB and drop selection are not inferred.
 - Verification: candidates outside trending, filter-before-limit, no owned/locked/
-  unavailable candidates, zero-gain depth, missing projections and direct/Jev parity.
+  unavailable candidates, zero-gain depth, and missing projections.
 
 ## Release gate
 
-Run the relevant tests per stage, then `make check`, live API checks, all affected
-Jev regression sets and a dedicated weekly-decision set. Keep the original
-confidence floor, abstention requirements and `Show my roster` control. Inspect
+Run the relevant tests per stage, then `make check`, live API checks, and a dedicated weekly-decision set. Inspect
 real CLI output, commit only this task's files, push and update PR #35, inspect the
 actual PR diff and CI. Do not merge. Preserve the pre-existing uncommitted
 `CLAUDE.md` edit.
@@ -75,11 +73,6 @@ https://support.sleeper.com/en/articles/9731991-how-does-player-autosubs-work
 - Weekly waivers: `tests/test_weekly_waivers.py` checks the full pool, ownership,
   position-before-limit, injured/started/unknown exclusions, depth-only zero gain,
   explicit trending and locked incumbents.
-- `tests/test_cli_jev.py` checks real interpretation/dispatch/render wiring against
-  offline HTTP and direct-command parity under strict QA. Live CLI checks confirm
-  the corresponding journeys against the configured league.
-- Routing results and known clarification limits are recorded in
-  [evals/README.md](../evals/README.md). All gates passed without lowering thresholds.
 - Public data cannot verify AutoSub pairings or instant acquisition eligibility.
   Those cases explicitly refuse advice or require checking Sleeper, respectively.
   Availability uses fresh Sleeper designations and dated source-linked reporting;
