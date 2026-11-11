@@ -591,7 +591,3 @@ def test_cli_rejects_jev_backend(fake_clients, league):
     assert res_ask.exit_code != 0
     assert "Invalid backend 'jev'" in res_ask.output
 
-
-
-
-
