@@ -6,7 +6,7 @@ Built on two free, auth-free sources:
                        sleeper_id so they join straight onto your roster.
 
 The package is split into directory-per-concern modules that share one
-contract (`ff.contracts`). See CLAUDE.md for why this is in-process modules
+contract (`ff.contracts`). See AGENTS.md for why this is in-process modules
 rather than HTTP services.
 """
 

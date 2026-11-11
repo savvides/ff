@@ -1,7 +1,7 @@
 """The analysis layer - pure functions over the contract + a ValueBook.
 
 No I/O here. Everything is same-input-same-output, which is exactly why the test
-suite is deterministic gate tests (see CLAUDE.md): roster math and trade math are
+suite is deterministic gate tests (see AGENTS.md): roster math and trade math are
 deterministic-space work, not latent-space work.
 """
 
