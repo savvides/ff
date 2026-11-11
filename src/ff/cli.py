@@ -257,22 +257,22 @@ def _prepare_weekly(ctx: _LazyContext, team: Optional[str]) -> Roster:
     ctx._cache["_league"] = sc.league(cfg.league_id, fresh=True)
     ctx["week"] = _current_week(state)
     if str(state.get("season")) != str(cfg.season):
-        raise Clarification("The configured season is not current. Run `ff setup <username>`.")
+        raise ValueError("The configured season is not current. Run `ff setup <username>`.")
     if ctx._get_league().get("season_type", "regular") != "regular":
-        raise Clarification("Weekly advice supports regular-season leagues only.")
+        raise ValueError("Weekly advice supports regular-season leagues only.")
     ctx["rosters"] = build_rosters(sc.rosters(cfg.league_id, fresh=True), sc.league_users(cfg.league_id))
     target = next((r for r in ctx["rosters"] if str(r.roster_id) == team), None)
     if target is None:
         target = _pick_roster(ctx["rosters"], team, cfg.user_id)
     if target is None:
-        raise Clarification("Could not find that team in the fresh roster snapshot.")
+        raise ValueError("Could not find that team in the fresh roster snapshot.")
     candidates = None
     if ctx.get("weekly_candidates", False):
         ctx["projections"], candidates = ProjectionsClient().snapshot(str(cfg.season), ctx["week"], fresh=True)
     else:
         ctx["projections"] = ProjectionsClient().week(str(cfg.season), ctx["week"], fresh=True)
     if not ctx["projections"]:
-        raise Clarification(f"No projections available for {cfg.season} week {ctx['week']}.")
+        raise ValueError(f"No projections available for {cfg.season} week {ctx['week']}.")
     ctx["weekly"], ctx["players_meta"] = load_weekly(
         sc, cfg.league_id, target, str(cfg.season), ctx["week"], ctx._get_league(), ctx["players_meta"], candidate_meta=candidates)
     ctx["weekly_team"] = str(target.roster_id)
