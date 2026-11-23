@@ -157,6 +157,12 @@ def fake_clients(monkeypatch, book, multi_market_book, league, rosters_raw, user
         def traded_picks(self, lid):
             return traded_picks
 
+        def matchups(self, lid, week, *, ttl=0):
+            return []
+
+        def transactions(self, lid, week):
+            return []
+
         def player_news(self, pid):
             return [{
                 "published": 1724800000000,

@@ -54,7 +54,7 @@ Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: 
 - analysis reaches back into `sleeper` (`player_name`) and `values` (`ValueBook`) for convenience
 - `services.weekly` is a data loader, yet it reuses two rules from `analysis.cleanup`: `designation` and `ir_eligible_statuses`
 - `qa` re-runs `analysis.trade.apply_site_adjustments`, reuses lineup and waiver rules (`SLOT_ELIGIBILITY`, `game_locked`, `unavailable`, `waiver_positions`), and reads the `services.llm.tools` allowlist
-- `scripts/find_offers.py` imports `ff.cli._pick_window`
+- `ff/offers.py` imports `ff.cli._pick_window`, `_season_sim` and `_finish_ranks`
 
 `values/dealer.py` is a backward-compatibility shim that no command imports.
 
@@ -63,7 +63,7 @@ Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: 
 flowchart TD
   subgraph boundary["Boundary"]
     cli["cli.py<br/>Typer commands, Rich tables"]
-    scripts["scripts/<br/>find_offers, record_fixtures<br/>(calculator_oracle.mjs is Node, no ff imports)"]
+    scripts["scripts/<br/>record_fixtures<br/>(calculator_oracle.mjs is Node, no ff imports)"]
   end
   subgraph services["Services"]
     weekly["services/weekly.py<br/>load_weekly"]

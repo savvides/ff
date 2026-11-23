@@ -65,12 +65,22 @@ make install                 # create venv + install dependencies + enable pre-c
   ff roster "Gridiron Kings" --top 20
   ```
 
-- **`ff power`** — Generates league-wide power rankings by total dynasty player value, paired with current W-L records and total points scored.
+- **`ff plan`** — Your team on one page: record, simulated playoff odds and projected draft slot, a trade stance (seller, buyer or hold), this week's lineup and roster-lock checks, waiver budget left, the trade deadline, which of your players to shop and which players on opposite-stance rosters to target, each with the reason.
+  ```bash
+  ff plan
+  ```
+
+- **`ff standings`** — Standings with expected wins, playoff odds and projected rookie-draft slot, from 4,000 seeded simulations of the remaining schedule. Division winners seed first; an extra weekly game against the league median is honored when the league uses it.
+  ```bash
+  ff standings
+  ```
+
+- **`ff power`** — League power rankings by rostered player value, with each team's draft capital, the combined total and its rank, W-L record and points scored.
   ```bash
   ff power
   ```
 
-- **`ff picks [team]`** — Reconciles whole-team draft capital ownership across all trades, applying power-ranked tier valuation (Early, Mid, Late) to 1st and 2nd round picks.
+- **`ff picks [team]`** — Reconciles whole-team draft capital ownership across all trades, pricing every pick FantasyCalc tiers (Early, Mid, Late) by the original team's projected finish from `ff standings` (roster value before the first game).
   - `team`: Team name search (omit to view full league draft capital grid).
   - `--years N`: Number of future draft classes to show (default: 2).
   - `--rounds N`: Rookie rounds per draft (overrides auto-detected league setting).
@@ -89,12 +99,21 @@ make install                 # create venv + install dependencies + enable pre-c
 
 ### 3. Trading & Market Arbitrage
 
-- **`ff trade --give <assets> --get <assets>`** — Multi-market trade analyzer supporting players and draft picks. Prices each side exactly as fantasycalc.com and keeptradecut.com would, including both sites' package adjustments for uneven deals (and KTC's for 1-for-1s), on live values, and shows the offer rule (under 10% gap in both markets, and KTC's own verdict Fair), fairness, positional swings, market arbitrage, and where the numbers came from. If either site has changed its calculator code since ff's port was verified, the rule says "cannot judge" instead of guessing.
+- **`ff trade --give <assets> --get <assets>`** — Multi-market trade analyzer supporting players and draft picks. Prices each side exactly as fantasycalc.com and keeptradecut.com would, including both sites' package adjustments for uneven deals (and KTC's for 1-for-1s), on live values, and shows the offer rule (under 10% gap in both markets, and KTC's own verdict Fair), fairness, positional swings, market arbitrage, and where the numbers came from. A pick typed without a tier (`2027 1st`) is flagged as a generic price, with each tier's value and which teams' picks project to which tier. If either site has changed its calculator code since ff's port was verified, the rule says "cannot judge" instead of guessing.
   - `--give ASSETS`: Comma-separated assets you send (e.g. `--give "Jahmyr Gibbs, 2026 2nd"`).
   - `--get ASSETS`: Comma-separated assets you receive (e.g. `--get "Bijan Robinson, 2027 1st"`).
   - `-m, --market MARKET`: Valuation model: `both` (default), `fc`, or `ktc`.
   ```bash
   ff trade --give "Jahmyr Gibbs, 2026 2nd" --get "Bijan Robinson, 2027 1st" --market both
+  ```
+
+- **`ff offers --sell <asset>`** — Searches other managers' rosters and picks for packages that pass the offer rule (under 10% in both markets and KTC says Fair) for what you sell, ranked by roster fit: young value that starts for you or fills a below-median position first. Each incoming piece shows its role and warning flags (injury, falling value, heavily dropped).
+  - `--sell ASSET`: What you sell (repeatable).
+  - `--to NAME`: A manager's Sleeper username or team name (repeatable; default: every other team).
+  - `--with ASSET`: An asset of yours allowed as a balancer (repeatable).
+  - `--max-age N`, `--limit N`: Oldest player you would take back (default 26); packages per manager (default 5).
+  ```bash
+  ff offers --sell "Tee Higgins" --to "Team Name"
   ```
 
 - **`ff movers`** — Identifies high-leverage trade targets: buy-low / sell-high candidates (dynasty vs redraft value gaps) and cross-market arbitrage opportunities (FantasyCalc vs KeepTradeCut discrepancies).
@@ -126,6 +145,11 @@ make install                 # create venv + install dependencies + enable pre-c
   - `--drops N`: How many drop candidates to list (default: 8).
   ```bash
   ff cleanup
+  ```
+
+- **`ff fab`** — Every team's waiver budget left, this league's winning bids (median, 75th percentile and max; overall, contested only, and by position), and recent contested claims with the best losing bid, so a bid is anchored to what this league actually pays.
+  ```bash
+  ff fab
   ```
 
 - **`ff news [team]`** — Tracks player health, injury designations, depth-chart roles, and Sleeper 24-hour trending adds/drops across your league or for a specific team.
@@ -223,10 +247,12 @@ pytest tests/test_trade.py::test_trade_with_players_and_picks   # run single tes
 
 ## Limits (by design)
 
-- **`roster` and `power` value rostered players only**, not draft picks. Whole-team pick ownership is derived from `traded_picks` and tiered by `ff picks` — kept out of roster/power totals so player value and draft capital remain separately legible.
+- **`roster` values rostered players only**; `power` ranks by player value and shows draft capital and the combined total in separate columns, so who wins now and who owns the future stay legible.
+- **`standings` simulates scores, not rosters.** Each team scores around its points per game, regressed toward the league average; injuries and trades are not modeled. Draft slot assumes reverse order of standings with playoff teams last, so leagues that order the draft by max points or a lottery will differ.
+- **`fab` reports history, not a price.** Sleeper exposes a losing bid only when another team won the player.
 - **Lineup projections are single-source** (RotoWire, via Sleeper) and exclude K/DEF unless your league starts them. TEP is applied here because `lineup` scores raw projected stats with your league's rules; dynasty values are TEP-adjusted in both markets too (FantasyCalc `te+`/`te++`, KTC TE+/TE++).
 - **Weekly advice depends on undocumented public feeds.** Unknown game timing freezes existing assignments and excludes affected bench/waiver candidates. Conflicting or unavailable feeds can stop advice; they never fall back to stale injury tags as if fresh. AutoSub leagues, best-ball and unsupported lineup slots refuse actionable advice. Invalid IR eligibility or roster capacity must be resolved in Sleeper. News headlines retain their dates and sources; they do not produce invented injury odds or projection discounts. Actual points for in-progress games exclude the unplayed remainder.
-- **No trade *finder* command and no tiers/VORP yet.** `trade` evaluates a deal you specify; `scripts/find_offers.py` is a developer script that searches a manager's roster for packages passing the offer rule, ranked by roster fit (young pieces that start for you or fill a need first), with a reason and warning flags for each incoming piece. Rankings are raw values without tier breaks or league-wide replacement level.
+- **No tiers/VORP.** Rankings are raw values without tier breaks or league-wide replacement level.
 
 ## Contributing
 

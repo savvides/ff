@@ -69,11 +69,12 @@ def test_live_loader_refreshes_status_and_uses_matchup_actual_zero():
     assert len(responses.calls) == 4  # candidate status comes from the bulk projection snapshot
 
 
-def test_invalid_ir_and_autosubs_block_actionable_advice():
+def test_invalid_ir_warns_and_autosubs_block_actionable_advice():
     roster = Roster(roster_id=1, player_ids=["a"], starters=[], reserve=["a"])
     args = (roster, {"a": {"team": "WAS", "injury_status": None}}, {}, {"starters": []})
     context = build_weekly(*args, {}, ["WR"], datetime.now(timezone.utc))
-    assert "IR eligibility" in context.blocked_reason
+    assert context.blocked_reason is None  # Sleeper locks adds, not lineup changes
+    assert any(w.startswith("IR lock:") for w in context.warnings)
     roster.reserve = []
     context = build_weekly(*args, {"max_subs": 1}, ["WR"], datetime.now(timezone.utc))
     assert "AutoSubs" in context.blocked_reason

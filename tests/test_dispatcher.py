@@ -418,3 +418,25 @@ def test_dispatch_window_and_draft_fit_without_user_id_uses_fallback_and_never_l
     with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
         dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=anon_ctx)
     assert captured == ["contend"]
+
+
+def test_dispatch_standings_and_trade_plan() -> None:
+    from ff.contracts import Asset, Roster, StandingProjection
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    vet = Asset(id="vet", name="Vet", position="RB", age=29, value=3000, redraft_value=4500)
+    kid = Asset(id="kid", name="Kid", position="WR", age=22, value=4000, redraft_value=2000)
+    ctx = {
+        "rosters": [Roster(roster_id=1, owner_id="me", team_name="Mine", player_ids=["vet"]),
+                    Roster(roster_id=2, owner_id="x", team_name="Other", player_ids=["kid"])],
+        "value_book": ValueBook([vet, kid]),
+        "players_meta": {},
+        "season_sim": [StandingProjection(roster_id=1, team_name="Mine", exp_wins=2.0,
+                                          playoff_odds=0.0, draft_slot=1.0)],
+    }
+    assert dispatch_tool("get_standings", {}, ctx)[0]["draft_slot"] == 1.0
+    res = dispatch_tool("get_trade_plan", {"team": "Mine"}, ctx)
+    assert res["stance"] == "seller"
+    assert [r["player"] for r in res["shop"]] == ["Vet"]
+    assert [r["player"] for r in res["target"]] == ["Kid"]

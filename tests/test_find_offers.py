@@ -1,16 +1,8 @@
-"""scripts/find_offers.py: only packages that pass the offer rule on site-adjusted
+"""ff.offers: only packages that pass the offer rule on site-adjusted
 numbers come back, best rebuild fit first."""
 
-import importlib.util
-from pathlib import Path
-
+from ff import offers as find_offers
 from ff.contracts import Asset
-
-_spec = importlib.util.spec_from_file_location(
-    "find_offers", Path(__file__).resolve().parent.parent / "scripts" / "find_offers.py")
-assert _spec is not None and _spec.loader is not None
-find_offers = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(find_offers)
 
 TOP = 9999
 SALE = Asset(id="1", name="Vet QB", position="QB", age=38, value=3000, secondary_value=5000, redraft_value=2800)

@@ -97,7 +97,7 @@ Arbitrage movers preserve raw FC/KTC numbers but compare ranks: `secondary_scale
 
 Cleanup shares `designation` and `ir_eligible_statuses` with weekly verification. It recommends active-to-IR moves only for league-permitted designations, capped by open IR slots, ordered by expected absence then value/name, and excludes Coach's Decision scratches. Recommended IR moves and taxi moves do not duplicate a player. Clearing an IR designation can block later Sleeper changes until the occupant returns to the active roster.
 
-`scripts/find_offers.py` is a separate read-only offer search, not an `ff` command: it loads live markets, validates calculator parity, resolves selected managers' owned players and tiered future picks, enumerates packages with at most one owned balancer and retains passing offers. It ranks incoming young need-filling value, lineup improvement, counterparty win-now gain and gap closeness, with role/injury/trend flags. CBS ranking links in `docs/expert-ranking-sources.md` are manual references, not a scraped/authenticated provider or automatic projection override.
+`ff offers` (`src/ff/offers.py`) is a read-only offer search: it loads live markets, validates calculator parity, resolves selected managers' owned players and tiered future picks, enumerates packages with at most one owned balancer and retains passing offers. It ranks incoming young need-filling value, lineup improvement, counterparty win-now gain and gap closeness, with role/injury/trend flags. CBS ranking links in `docs/expert-ranking-sources.md` are manual references, not a scraped/authenticated provider or automatic projection override.
 
 ## Runtime controls and limits
 
