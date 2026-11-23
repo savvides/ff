@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -261,6 +261,7 @@ class Roster(BaseModel):
     losses: int = 0
     ties: int = 0
     points_for: float = 0.0
+    max_pf: float = 0.0
 
 
 class RosterValuation(BaseModel):
@@ -864,3 +865,79 @@ class NewsItem(BaseModel):
         if not self.published:
             return "-"
         return datetime.fromtimestamp(self.published / 1000).strftime("%Y-%m-%d")
+
+
+class SeasonPhase(BaseModel):
+    """Current NFL seasonal liquidity regime."""
+
+    phase: Literal[
+        "in_season_early",
+        "in_season_peak",
+        "playoffs",
+        "offseason_draft",
+        "offseason_quiet",
+    ]
+    label: str
+    liquidity_bias: str
+    week: Optional[int] = None
+    season_type: Optional[str] = None
+    summary: str
+
+
+class AssetDurationFlag(BaseModel):
+    """Duration or RB option-decay diagnostic flag for a rostered player."""
+
+    player_id: str
+    name: str
+    position: Optional[str] = None
+    age: Optional[float] = None
+    value: int = 0
+    kind: Literal[
+        "RB_OFFSEASON_DECAY",
+        "RB_WINDOW_MISMATCH",
+        "RB_CLIFF_WATCH",
+        "RB_CALL_OPTION",
+        "SELL_POINTS",
+        "TRADEABLE_LIQUIDITY",
+    ]
+    severity: Literal["HIGH", "MODERATE", "INFO"]
+    reason: str
+
+
+class DecisionFilter(BaseModel):
+    """Deterministic strategy filter verdict for trade evaluation."""
+
+    name: str
+    signal: Literal[
+        "ALIGNED",
+        "TAILWIND",
+        "NEUTRAL",
+        "CAUTION",
+        "HEADWIND",
+        "MISMATCH",
+        "N/A",
+    ]
+    summary: str
+    details: List[str] = Field(default_factory=list)
+
+
+class TeamWindow(BaseModel):
+    """A team's competitive window diagnosis, equity scores, and asset flags."""
+
+    roster_id: int
+    team_name: str
+    diagnosed: Literal["CONTEND", "MIDDLE_TRAP", "REBUILD"]
+    effective_target: Literal["contend", "rebuild", "middle_trap"]
+    target_source: Literal["auto", "config", "override"]
+    pivot_lean: Optional[Literal["PIVOT_CONTEND", "PIVOT_REBUILD"]] = None
+    pivot_reason: Optional[str] = None
+    win_now_score: float
+    win_now_rank: int
+    future_score: float
+    future_rank: int
+    starter_win_now_value: int
+    max_pf: float = 0.0
+    dynasty_player_value: int = 0
+    pick_value: int = 0
+    season_phase: SeasonPhase
+    flags: List[AssetDurationFlag] = Field(default_factory=list)

@@ -180,6 +180,8 @@ def build_rosters(rosters: List[Dict[str, Any]],
         settings = r.get("settings") or {}
         pts = float(settings.get("fpts", 0) or 0)
         pts += float(settings.get("fpts_decimal", 0) or 0) / 100.0
+        max_pf = float(settings.get("ppts", 0) or 0)
+        max_pf += float(settings.get("ppts_decimal", 0) or 0) / 100.0
         owner_id = str(r.get("owner_id") or "")
         out.append(
             Roster(
@@ -194,6 +196,7 @@ def build_rosters(rosters: List[Dict[str, Any]],
                 losses=int(settings.get("losses", 0) or 0),
                 ties=int(settings.get("ties", 0) or 0),
                 points_for=pts,
+                max_pf=max_pf,
             )
         )
     return out

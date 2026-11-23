@@ -45,6 +45,7 @@ class Config(BaseModel):
     # Ask backend: terminal runners (agy, gemini, claude, ollama) or auto.
     llm_backend: str = "auto"  # "auto" | "agy" | "gemini" | "claude" | "ollama"
     ollama_model: str = "llama3.2"
+    window_mode: str = "auto"  # "auto" | "contend" | "rebuild"
 
 
 def load_config(path: Optional[Path] = None) -> Config:
