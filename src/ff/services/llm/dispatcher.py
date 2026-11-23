@@ -358,14 +358,9 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         cfg = ctx.get("config")
         wm = getattr(cfg, "window_mode", None) if cfg else None
         target_r = _find_roster(rosters, team, ctx) if rosters else None
-        user_id = (getattr(cfg, "user_id", "") or "").lower() if cfg else ""
-        is_rival = bool(
-            team
-            and target_r is not None
-            and user_id
-            and (getattr(target_r, "owner_id", "") or "").lower() != user_id
-        )
-        if not is_rival and isinstance(wm, str) and wm in ("contend", "rebuild"):
+        mine = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(mine is not None and target_r is not None and target_r.roster_id == mine.roster_id)
+        if is_mine and isinstance(wm, str) and wm in ("contend", "rebuild"):
             status = wm
         else:
             status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
@@ -409,9 +404,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         book = value_book if value_book is not None else ValueBook([])
         players_meta = ctx.get("players_meta")
         season_phase = window.detect_season_phase(ctx.get("state"))
-        user_id = (getattr(cfg, "user_id", "") or "").lower() if cfg else ""
-        owner_id = (getattr(target_r, "owner_id", "") or "").lower()
-        is_mine = bool(user_id and owner_id == user_id)
+        mine = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(mine is not None and target_r is not None and target_r.roster_id == mine.roster_id)
         wm = getattr(cfg, "window_mode", "auto") if cfg else "auto"
         cfg_mode = wm if (is_mine and isinstance(wm, str)) else "auto"
         windows = _compute_league_windows(
