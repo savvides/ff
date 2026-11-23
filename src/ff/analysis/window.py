@@ -11,11 +11,13 @@ from ff.analysis.movers import value_redraft_gap
 from ff.contracts import (
     Asset,
     AssetDurationFlag,
+    DecisionFilter,
     Roster,
     RosterValuation,
     SeasonPhase,
     TeamPicks,
     TeamWindow,
+    TradeEvaluation,
 )
 from ff.sleeper import player_name
 from ff.values import ValueBook
@@ -32,6 +34,10 @@ TargetMode = Literal["contend", "rebuild", "middle_trap"]
 TargetSource = Literal["auto", "config", "override"]
 PivotLean = Literal["PIVOT_CONTEND", "PIVOT_REBUILD"]
 FlagSeverity = Literal["HIGH", "MODERATE", "INFO"]
+FilterSignal = Literal["ALIGNED", "TAILWIND", "NEUTRAL", "CAUTION", "HEADWIND", "MISMATCH", "N/A"]
+
+_MEANINGFUL_SHIFT = 1000
+_SEASONAL_SHIFT = 1500
 
 _DIAG_TO_TARGET: Dict[DiagnosedWindow, TargetMode] = {
     "CONTEND": "contend",
@@ -555,3 +561,280 @@ def analyze_league_windows(
 
     windows.sort(key=lambda w: w.win_now_rank)
     return windows
+
+
+def _win_now_side(assets: Sequence[Asset]) -> Tuple[int, List[str]]:
+    """Sum known redraft values on one side (picks = 0); collect players missing redraft_value."""
+    total = 0
+    missing: List[str] = []
+    for a in assets:
+        if a.is_pick:
+            continue
+        if a.redraft_value is None:
+            missing.append(a.name)
+            continue
+        total += a.redraft_value
+    return total, missing
+
+
+def _future_side(assets: Sequence[Asset]) -> int:
+    """Sum future equity across picks, ascending players, and unredrafted rookies/stashes."""
+    total = 0
+    for a in assets:
+        if a.is_pick:
+            total += a.value
+        elif a.redraft_value is None:
+            if a.value >= 1000:
+                total += a.value
+        else:
+            gap = value_redraft_gap(a, 1000)
+            if gap is not None and gap > 0:
+                total += a.value
+    return total
+
+
+def _duration_filter(
+    evaluation: TradeEvaluation,
+    team_window: Optional[TeamWindow],
+) -> DecisionFilter:
+    if team_window is None:
+        return DecisionFilter(
+            name="Duration",
+            signal="N/A",
+            summary="No team window available; set config user/team to evaluate window fit.",
+        )
+
+    win_a, missing_a = _win_now_side(evaluation.side_a.assets)
+    win_b, missing_b = _win_now_side(evaluation.side_b.assets)
+    net_win_now = win_a - win_b
+
+    fut_a = _future_side(evaluation.side_a.assets)
+    fut_b = _future_side(evaluation.side_b.assets)
+    net_future = fut_a - fut_b
+
+    details = [
+        f"Net win-now shift: {net_win_now:+,d}",
+        f"Net future shift: {net_future:+,d}",
+    ]
+    missing_names = list(dict.fromkeys([*missing_a, *missing_b]))
+    if missing_names:
+        details.append(
+            f"Excluded from win-now delta (no redraft value): {', '.join(missing_names)}"
+        )
+
+    target = team_window.effective_target
+    signal: FilterSignal
+    summary: str
+
+    if target == "contend":
+        if net_win_now >= _MEANINGFUL_SHIFT:
+            signal = "ALIGNED"
+            summary = f"Contender adds {net_win_now:+,d} win-now redraft value."
+        elif net_win_now <= -_MEANINGFUL_SHIFT and net_future > 0:
+            signal = "MISMATCH"
+            summary = f"Contender gives up {abs(net_win_now):,d} win-now value for future equity."
+        else:
+            signal = "NEUTRAL"
+            summary = "Minimal net change to immediate contending production."
+    elif target == "rebuild":
+        if net_future >= _MEANINGFUL_SHIFT and net_win_now <= 0:
+            signal = "ALIGNED"
+            summary = f"Rebuilder gains {net_future:+,d} future equity without adding win-now bloat."
+        elif net_win_now >= _MEANINGFUL_SHIFT and net_future < 0:
+            signal = "MISMATCH"
+            summary = (
+                f"Rebuilder spends {abs(net_future):,d} future equity for {net_win_now:+,d} win-now points."
+            )
+        elif net_win_now >= _MEANINGFUL_SHIFT:
+            signal = "CAUTION"
+            summary = f"Rebuilder takes on {net_win_now:+,d} win-now value that can inflate Max PF."
+        else:
+            signal = "NEUTRAL"
+            summary = "Minimal net impact on rebuild timeline."
+    else:
+        if abs(net_win_now) >= _MEANINGFUL_SHIFT or abs(net_future) >= _MEANINGFUL_SHIFT:
+            direction = "contend" if net_win_now >= net_future else "rebuild"
+            signal = "CAUTION"
+            summary = (
+                f"Middle-trap team makes a meaningful shift pushing toward {direction} "
+                f"(win-now {net_win_now:+,d}, future {net_future:+,d})."
+            )
+        else:
+            signal = "NEUTRAL"
+            summary = "Small horizon shift leaves middle-trap posture unchanged."
+
+    return DecisionFilter(name="Duration", signal=signal, summary=summary, details=details)
+
+
+def _is_aging_expensive_rb(a: Asset) -> bool:
+    return (
+        not a.is_pick
+        and a.position == "RB"
+        and a.value >= 1500
+        and a.age is not None
+        and a.age >= 26
+    )
+
+
+def _is_cheap_rb2(a: Asset) -> bool:
+    return (
+        not a.is_pick
+        and a.position == "RB"
+        and a.depth_chart_order == 2
+        and a.value < 2000
+    )
+
+
+def _format_aging_rbs(rbs: Sequence[Asset]) -> str:
+    return ", ".join(
+        f"{a.name} (age {a.age:.0f}, val {a.value:,})"
+        for a in rbs
+        if a.age is not None
+    )
+
+
+def _rb_option_filter(
+    evaluation: TradeEvaluation,
+    team_window: Optional[TeamWindow],
+    season_phase: SeasonPhase,
+) -> DecisionFilter:
+    acquired_aging = [a for a in evaluation.side_a.assets if _is_aging_expensive_rb(a)]
+    sold_aging = [a for a in evaluation.side_b.assets if _is_aging_expensive_rb(a)]
+    acquired_rb2 = [a for a in evaluation.side_a.assets if _is_cheap_rb2(a)]
+
+    is_offseason = season_phase.phase in ("offseason_draft", "offseason_quiet")
+    target = team_window.effective_target if team_window is not None else None
+
+    details: List[str] = []
+    if acquired_aging:
+        details.append(f"Acquiring aging RB(s): {_format_aging_rbs(acquired_aging)}")
+    if sold_aging:
+        details.append(f"Selling aging RB(s): {_format_aging_rbs(sold_aging)}")
+    if acquired_rb2:
+        details.append(
+            "Acquiring RB2 backup call option(s): "
+            + ", ".join(f"{a.name} (val {a.value:,})" for a in acquired_rb2)
+        )
+
+    signal: FilterSignal
+    summary: str
+
+    if acquired_aging:
+        max_age = max(a.age for a in acquired_aging if a.age is not None)
+        if is_offseason or target == "rebuild":
+            signal = "MISMATCH"
+            why = "in offseason" if is_offseason else "while rebuilding"
+            summary = f"Acquiring age-{max_age:.0f} RB {why} absorbs decay with no title equity."
+        elif target in ("contend", "middle_trap"):
+            if max_age >= 28:
+                signal = "CAUTION"
+                summary = f"Acquiring age-{max_age:.0f} RB carries steep age-cliff risk in-season."
+            else:
+                signal = "ALIGNED"
+                summary = f"In-season age-{max_age:.0f} RB acquisition fits win-now usage."
+        else:
+            if max_age >= 28:
+                signal = "CAUTION"
+                summary = f"Acquiring age-{max_age:.0f} RB carries age-cliff risk (team window unknown)."
+            else:
+                signal = "NEUTRAL"
+                summary = f"In-season age-{max_age:.0f} RB option depends on unconfigured team window."
+    elif sold_aging and (is_offseason or target == "rebuild"):
+        max_sold_age = max(a.age for a in sold_aging if a.age is not None)
+        signal = "TAILWIND"
+        why = "during offseason" if is_offseason else "while rebuilding"
+        summary = f"Offloading age-{max_sold_age:.0f} RB option {why} avoids uncompensated decay."
+    elif acquired_rb2:
+        signal = "ALIGNED"
+        summary = "Acquiring cheap RB2 backup adds asymmetric contingent call-option upside."
+    else:
+        signal = "NEUTRAL"
+        summary = "No material RB option-decay or backup call-option exposure."
+
+    return DecisionFilter(name="RB Option Risk", signal=signal, summary=summary, details=details)
+
+
+def _side_liquidity(assets: Sequence[Asset]) -> Tuple[int, int, int]:
+    picks = sum(a.value for a in assets if a.is_pick)
+    injured_stars = sum(
+        a.value for a in assets if not a.is_pick and a.value >= 2500 and bool(a.injury_tag)
+    )
+    discounted = picks + injured_stars
+    vets = 0
+    for a in assets:
+        if a.is_pick or a.injury_tag:
+            continue
+        if a.value >= 2000 and (a.redraft_value or 0) >= 2500:
+            gap = value_redraft_gap(a, 1000)
+            if (gap if gap is not None else 0.0) <= 10.0:
+                vets += a.value
+    return picks, discounted, vets
+
+
+def _seasonal_liquidity_filter(
+    evaluation: TradeEvaluation,
+    season_phase: SeasonPhase,
+) -> DecisionFilter:
+    picks_get, discounted_get, vets_get = _side_liquidity(evaluation.side_a.assets)
+    picks_give, discounted_give, vets_give = _side_liquidity(evaluation.side_b.assets)
+
+    details = [
+        f"Phase: {season_phase.label} ({season_phase.liquidity_bias})",
+        f"Picks get/give: {picks_get:,} / {picks_give:,}",
+        f"Discounted (picks + injured stars) get/give: {discounted_get:,} / {discounted_give:,}",
+        f"Healthy proven vets get/give: {vets_get:,} / {vets_give:,}",
+    ]
+
+    signal: FilterSignal
+    summary: str
+
+    if season_phase.phase == "in_season_peak":
+        if (discounted_get - discounted_give) >= _SEASONAL_SHIFT and vets_give >= _SEASONAL_SHIFT:
+            signal = "TAILWIND"
+            summary = "Selling peak-priced Oct-Nov points for discounted picks/injured stars."
+        elif (discounted_give - discounted_get) >= _SEASONAL_SHIFT and vets_get >= _SEASONAL_SHIFT:
+            signal = "CAUTION"
+            summary = "Paying peak Oct-Nov contender liquidity premium for immediate vet points."
+        else:
+            signal = "NEUTRAL"
+            summary = f"No major Oct-Nov liquidity imbalance ({season_phase.label})."
+    elif season_phase.phase == "offseason_draft":
+        if (picks_give - picks_get) >= _SEASONAL_SHIFT and vets_get >= _SEASONAL_SHIFT:
+            signal = "TAILWIND"
+            summary = "Selling Mar-May rookie-draft hype for discounted proven veterans."
+        elif (picks_get - picks_give) >= _SEASONAL_SHIFT and vets_give >= _SEASONAL_SHIFT:
+            signal = "HEADWIND"
+            summary = "Buying rookie picks at peak offseason draft liquidity premium."
+        else:
+            signal = "NEUTRAL"
+            summary = f"No major Mar-May rookie-pick liquidity imbalance ({season_phase.label})."
+    else:
+        signal = "NEUTRAL"
+        summary = f"Neutral seasonal liquidity timing during {season_phase.label}: {season_phase.summary}"
+
+    return DecisionFilter(
+        name="Seasonal Liquidity",
+        signal=signal,
+        summary=summary,
+        details=details,
+    )
+
+
+def evaluate_trade_filters(
+    evaluation: TradeEvaluation,
+    team_window: Optional[TeamWindow],
+    season_phase: SeasonPhase,
+) -> List[DecisionFilter]:
+    """Evaluate Duration, RB Option Risk, and Seasonal Liquidity filters without mutating the trade."""
+    if not evaluation.is_dynasty:
+        msg = "Dynasty strategy filters do not apply to redraft leagues."
+        return [
+            DecisionFilter(name="Duration", signal="N/A", summary=msg),
+            DecisionFilter(name="RB Option Risk", signal="N/A", summary=msg),
+            DecisionFilter(name="Seasonal Liquidity", signal="N/A", summary=msg),
+        ]
+    return [
+        _duration_filter(evaluation, team_window),
+        _rb_option_filter(evaluation, team_window, season_phase),
+        _seasonal_liquidity_filter(evaluation, season_phase),
+    ]

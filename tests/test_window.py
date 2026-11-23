@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from ff.analysis.roster import value_all_rosters
-from ff.analysis.window import analyze_league_windows, detect_season_phase
-from ff.contracts import Asset, FuturePick, Roster, SeasonPhase, TeamPicks
+from ff.analysis.window import analyze_league_windows, detect_season_phase, evaluate_trade_filters
+from ff.contracts import Asset, FuturePick, Roster, SeasonPhase, TeamPicks, TeamWindow, TradeEvaluation, TradeSide
 from ff.values import ValueBook
 
 
@@ -602,3 +602,290 @@ def test_analyze_windows_roster_duration_and_rb_flags() -> None:
     }
     meta_flags = {(f.player_id, f.kind): f for f in meta_windows[2].flags}
     assert ("r_rb_meta", "RB_CALL_OPTION") in meta_flags
+
+
+def _pick(name: str, value: int, *, redraft_value: Optional[int] = 0) -> Asset:
+    return Asset(
+        id=name.lower(),
+        name=name,
+        kind="pick",
+        position="PICK",
+        value=value,
+        redraft_value=redraft_value,
+    )
+
+
+def _window(
+    effective_target: str,
+    season_phase: SeasonPhase,
+    *,
+    diagnosed: Optional[str] = None,
+    pivot_lean: Optional[str] = None,
+) -> TeamWindow:
+    diag = diagnosed or {"contend": "CONTEND", "rebuild": "REBUILD", "middle_trap": "MIDDLE_TRAP"}[effective_target]
+    return TeamWindow(
+        roster_id=1,
+        team_name="My Team",
+        diagnosed=diag,  # type: ignore[arg-type]
+        effective_target=effective_target,  # type: ignore[arg-type]
+        target_source="auto",
+        pivot_lean=pivot_lean,  # type: ignore[arg-type]
+        win_now_score=50.0,
+        win_now_rank=5,
+        future_score=50.0,
+        future_rank=5,
+        starter_win_now_value=20000,
+        season_phase=season_phase,
+    )
+
+
+def _trade(
+    get_assets: List[Asset],
+    give_assets: List[Asset],
+    *,
+    is_dynasty: bool = True,
+) -> TradeEvaluation:
+    return TradeEvaluation(
+        side_a=TradeSide(assets=get_assets, adjustment=100, secondary_adjustment=50),
+        side_b=TradeSide(assets=give_assets, adjustment=0, secondary_adjustment=0),
+        label_a="You get",
+        label_b="You give",
+        adjusted=True,
+        is_dynasty=is_dynasty,
+    )
+
+
+def test_trade_filters_non_mutating_and_redraft_guard() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    draft_phase = detect_season_phase({"season_type": "off"}, today=date(2026, 4, 10))
+    rb27 = _player("rb27", "Aging RB", "RB", 3000, redraft=3400, age=27.0)
+    pick27 = _pick("2027 1st", 3500)
+    vet = _player("vet", "Steady WR", "WR", 3500, redraft=3600, age=27.0)
+
+    ev_dyn = _trade([rb27, pick27], [vet], is_dynasty=True)
+    win = _window("contend", peak)
+    snapshot = ev_dyn.model_dump()
+    res_dyn = evaluate_trade_filters(ev_dyn, win, peak)
+    assert ev_dyn.model_dump() == snapshot
+    assert [f.name for f in res_dyn] == ["Duration", "RB Option Risk", "Seasonal Liquidity"]
+    assert all(f.summary for f in res_dyn)
+
+    # Redraft guard: all three filters return N/A
+    ev_redraft = _trade([rb27, pick27], [vet], is_dynasty=False)
+    res_redraft = evaluate_trade_filters(ev_redraft, win, peak)
+    assert [f.name for f in res_redraft] == ["Duration", "RB Option Risk", "Seasonal Liquidity"]
+    assert all(f.signal == "N/A" and f.summary for f in res_redraft)
+
+    # team_window=None in dynasty: Duration -> N/A, RB & Seasonal still evaluate
+    res_no_win_off = evaluate_trade_filters(_trade([pick27, rb27], [vet]), None, draft_phase)
+    by_name_off = {f.name: f for f in res_no_win_off}
+    assert by_name_off["Duration"].signal == "N/A"
+    assert by_name_off["RB Option Risk"].signal == "MISMATCH"
+    assert by_name_off["Seasonal Liquidity"].signal == "HEADWIND"
+
+    # team_window=None in-season: age >= 28 RB -> CAUTION, age 26-27 RB -> NEUTRAL
+    rb28 = _player("rb28", "Cliff RB", "RB", 3000, redraft=3400, age=28.0)
+    by_name_28 = {f.name: f for f in evaluate_trade_filters(_trade([rb28], [vet]), None, peak)}
+    assert by_name_28["Duration"].signal == "N/A"
+    assert by_name_28["RB Option Risk"].signal == "CAUTION"
+
+    by_name_27 = {f.name: f for f in evaluate_trade_filters(_trade([rb27], [vet]), None, peak)}
+    assert by_name_27["Duration"].signal == "N/A"
+    assert by_name_27["RB Option Risk"].signal == "NEUTRAL"
+
+
+def test_trade_filters_duration_by_window_and_missing_redraft() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    contend_win = _window("contend", peak)
+    rebuild_win = _window("rebuild", peak)
+    mid_win = _window("middle_trap", peak, pivot_lean="PIVOT_CONTEND")
+
+    win_now_vet = _player("v1", "Win Now WR", "WR", 3000, redraft=4200, age=29.0)
+    young_wr = _player("y1", "Young WR", "WR", 4500, redraft=2500, age=22.0)
+    pick27 = _pick("2027 1st", 3500)
+    small_vet_a = _player("sa", "Small A", "WR", 2200, redraft=2400, age=26.0)
+    small_vet_b = _player("sb", "Small B", "WR", 2000, redraft=2000, age=26.0)
+
+    # Contender: buying win-now points >= 1000 -> ALIGNED
+    f_c_buy = evaluate_trade_filters(_trade([win_now_vet], [young_wr]), contend_win, peak)[0]
+    assert f_c_buy.signal == "ALIGNED"
+
+    # Contender: selling points <= -1000 for picks (net_future > 0) -> MISMATCH
+    f_c_sell = evaluate_trade_filters(_trade([pick27], [win_now_vet]), contend_win, peak)[0]
+    assert f_c_sell.signal == "MISMATCH"
+
+    # Contender: shift < 1000 -> NEUTRAL
+    f_c_small = evaluate_trade_filters(_trade([small_vet_a], [small_vet_b]), contend_win, peak)[0]
+    assert f_c_small.signal == "NEUTRAL"
+
+    # Rebuilder: buying future >= 1000 with net_win_now <= 0 -> ALIGNED
+    f_r_buy_fut = evaluate_trade_filters(_trade([pick27], [win_now_vet]), rebuild_win, peak)[0]
+    assert f_r_buy_fut.signal == "ALIGNED"
+
+    # Rebuilder: buying points >= 1000 while losing future (< 0) -> MISMATCH
+    f_r_buy_pts = evaluate_trade_filters(_trade([win_now_vet], [pick27]), rebuild_win, peak)[0]
+    assert f_r_buy_pts.signal == "MISMATCH"
+
+    # Rebuilder: buying points >= 1000 with net_future >= 0 -> CAUTION
+    vet_high_dyn = _player("vhd", "Prime Vet WR", "WR", 5000, redraft=4500, age=26.0)
+    cheap_vet = _player("cv", "Cheap Vet WR", "WR", 1500, redraft=1500, age=29.0)
+    f_r_caution = evaluate_trade_filters(_trade([vet_high_dyn], [cheap_vet]), rebuild_win, peak)[0]
+    assert f_r_caution.signal == "CAUTION"
+
+    # Rebuilder: small shift -> NEUTRAL
+    f_r_small = evaluate_trade_filters(_trade([small_vet_a], [small_vet_b]), rebuild_win, peak)[0]
+    assert f_r_small.signal == "NEUTRAL"
+
+    # Middle trap: meaningful shift -> CAUTION naming pivot direction
+    f_m_contend = evaluate_trade_filters(_trade([win_now_vet], [pick27]), mid_win, peak)[0]
+    assert f_m_contend.signal == "CAUTION"
+    assert "contend" in f_m_contend.summary.lower()
+
+    f_m_rebuild = evaluate_trade_filters(_trade([pick27], [win_now_vet]), mid_win, peak)[0]
+    assert f_m_rebuild.signal == "CAUTION"
+    assert "rebuild" in f_m_rebuild.summary.lower()
+
+    f_m_small = evaluate_trade_filters(_trade([small_vet_a], [small_vet_b]), mid_win, peak)[0]
+    assert f_m_small.signal == "NEUTRAL"
+
+
+def test_trade_filters_missing_redraft_rookie_vs_pick() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    contend_win = _window("contend", peak)
+    rebuild_win = _window("rebuild", peak)
+
+    rookie = Asset(
+        id="rk1",
+        name="Unredrafted Rookie",
+        kind="player",
+        position="WR",
+        value=4000,
+        redraft_value=None,
+        age=21.0,
+    )
+    pick27 = _pick("2027 1st", 3000, redraft_value=0)
+    depth = Asset(
+        id="dp1",
+        name="Depth Vet",
+        kind="player",
+        position="WR",
+        value=500,
+        redraft_value=500,
+        age=27.0,
+    )
+
+    # Buying rookie (redraft=None, val=4000) + 2027 1st (3000) for depth (redraft=500):
+    # - rookie excluded from win-now (not treated as 4000 fallback) -> net_win_now == -500
+    # - rookie name recorded in details
+    # - both rookie and pick (+7000) counted in net_future
+    ev = _trade([rookie, pick27], [depth])
+    dur_contend = evaluate_trade_filters(ev, contend_win, peak)[0]
+    assert dur_contend.signal == "NEUTRAL"
+    joined_details = " ".join(dur_contend.details)
+    assert "Unredrafted Rookie" in joined_details
+    assert "+7,000" in joined_details or "+7000" in joined_details
+    assert "-500" in joined_details
+
+    dur_rebuild = evaluate_trade_filters(ev, rebuild_win, peak)[0]
+    assert dur_rebuild.signal == "ALIGNED"
+    assert "Unredrafted Rookie" in " ".join(dur_rebuild.details)
+
+    # Checked against a starter vet (redraft_value=2000): still lists rookie in details and counts +4000 future
+    vet = _player("vet2k", "Starter Vet", "WR", 2000, redraft=2000, age=28.0)
+    ev_vs_vet = _trade([rookie], [vet])
+    dur_vs_vet_reb = evaluate_trade_filters(ev_vs_vet, rebuild_win, peak)[0]
+    assert dur_vs_vet_reb.signal == "ALIGNED"
+    assert "Unredrafted Rookie" in " ".join(dur_vs_vet_reb.details)
+    assert "+4,000" in " ".join(dur_vs_vet_reb.details) or "+4000" in " ".join(dur_vs_vet_reb.details)
+
+
+def test_trade_filters_rb_option_risk() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    off_draft = detect_season_phase({"season_type": "off"}, today=date(2026, 4, 10))
+    off_quiet = detect_season_phase({"season_type": "off"}, today=date(2026, 7, 10))
+
+    contend_peak = _window("contend", peak)
+    rebuild_peak = _window("rebuild", peak)
+    middle_peak = _window("middle_trap", peak, pivot_lean="PIVOT_CONTEND")
+    contend_off_draft = _window("contend", off_draft)
+    contend_off_quiet = _window("contend", off_quiet)
+
+    rb26 = _player("rb26", "Prime RB26", "RB", 3000, redraft=3300, age=26.0)
+    rb27 = _player("rb27", "Aging RB27", "RB", 3000, redraft=3400, age=27.0)
+    rb28 = _player("rb28", "Cliff RB28", "RB", 3000, redraft=3500, age=28.0)
+    rb2_bkp = _player("rb_bkp", "Backup RB2", "RB", 900, redraft=900, age=23.0, depth_chart_order=2)
+    wr = _player("wr1", "Comparable WR", "WR", 3000, redraft=3000, age=24.0)
+    wr_other = _player("wr2", "Other WR", "WR", 3000, redraft=3000, age=25.0)
+
+    # Acquiring age-27 RB in offseason_draft -> MISMATCH
+    assert evaluate_trade_filters(_trade([rb27], [wr]), contend_off_draft, off_draft)[1].signal == "MISMATCH"
+    # Acquiring age-27 RB in-season while rebuilding -> MISMATCH
+    assert evaluate_trade_filters(_trade([rb27], [wr]), rebuild_peak, peak)[1].signal == "MISMATCH"
+    # Acquiring age-26 RB in-season while contending -> ALIGNED; age-28 -> CAUTION
+    assert evaluate_trade_filters(_trade([rb26], [wr]), contend_peak, peak)[1].signal == "ALIGNED"
+    assert evaluate_trade_filters(_trade([rb28], [wr]), contend_peak, peak)[1].signal == "CAUTION"
+    # Middle trap in-season mirrors contend for RB option risk
+    assert evaluate_trade_filters(_trade([rb26], [wr]), middle_peak, peak)[1].signal == "ALIGNED"
+    assert evaluate_trade_filters(_trade([rb28], [wr]), middle_peak, peak)[1].signal == "CAUTION"
+    # Selling age-27 RB in offseason_quiet or while rebuilding -> TAILWIND
+    assert evaluate_trade_filters(_trade([wr], [rb27]), contend_off_quiet, off_quiet)[1].signal == "TAILWIND"
+    assert evaluate_trade_filters(_trade([wr], [rb27]), rebuild_peak, peak)[1].signal == "TAILWIND"
+    # Acquiring only cheap RB2 backup -> ALIGNED
+    assert evaluate_trade_filters(_trade([rb2_bkp], [wr]), rebuild_peak, peak)[1].signal == "ALIGNED"
+    # Pure WR swap -> NEUTRAL
+    assert evaluate_trade_filters(_trade([wr], [wr_other]), contend_peak, peak)[1].signal == "NEUTRAL"
+
+
+def test_trade_filters_seasonal_liquidity() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    off_draft = detect_season_phase({"season_type": "off"}, today=date(2026, 4, 10))
+    early = detect_season_phase({"season_type": "regular", "week": 2})
+    playoffs = detect_season_phase({"season_type": "regular", "week": 15})
+    off_quiet = detect_season_phase({"season_type": "off"}, today=date(2026, 7, 10))
+
+    healthy_vet = _player("hvet", "Healthy Vet", "WR", 3500, redraft=3800, age=28.0)
+    proven_vet = _player("pvet", "Proven Vet", "WR", 3500, redraft=3600, age=27.0)
+    ir_star = _player("irstar", "Injured Star", "WR", 5000, redraft=1200, age=25.0, injury_status="IR")
+    pick27 = _pick("2027 1st", 3500)
+    pick_small = _pick("2027 3rd", 1000)
+    small_vet = _player("svet", "Small Vet", "WR", 1200, redraft=1300, age=28.0)
+
+    # in_season_peak (Oct-Nov): sell healthy vet for 2027 1st + IR star -> TAILWIND; reverse -> CAUTION
+    assert (
+        evaluate_trade_filters(_trade([pick27, ir_star], [healthy_vet]), _window("rebuild", peak), peak)[2].signal
+        == "TAILWIND"
+    )
+    assert (
+        evaluate_trade_filters(_trade([healthy_vet], [pick27, ir_star]), _window("contend", peak), peak)[2].signal
+        == "CAUTION"
+    )
+    # Below 1500 threshold -> NEUTRAL
+    assert (
+        evaluate_trade_filters(_trade([pick_small], [small_vet]), _window("contend", peak), peak)[2].signal
+        == "NEUTRAL"
+    )
+
+    # offseason_draft (Mar-May): sell 2027 1st for proven vet -> TAILWIND; reverse -> HEADWIND
+    assert (
+        evaluate_trade_filters(_trade([proven_vet], [pick27]), _window("contend", off_draft), off_draft)[2].signal
+        == "TAILWIND"
+    )
+    assert (
+        evaluate_trade_filters(_trade([pick27], [proven_vet]), _window("rebuild", off_draft), off_draft)[2].signal
+        == "HEADWIND"
+    )
+    assert (
+        evaluate_trade_filters(_trade([pick_small], [small_vet]), _window("rebuild", off_draft), off_draft)[2].signal
+        == "NEUTRAL"
+    )
+
+    # Other phases always NEUTRAL
+    for phase in (early, playoffs, off_quiet):
+        assert (
+            evaluate_trade_filters(_trade([pick27], [proven_vet]), _window("contend", phase), phase)[2].signal
+            == "NEUTRAL"
+        )
+        assert (
+            evaluate_trade_filters(_trade([proven_vet], [pick27]), _window("contend", phase), phase)[2].signal
+            == "NEUTRAL"
+        )

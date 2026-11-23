@@ -36,7 +36,11 @@ from ff.analysis.trade import (
     secondary_position_deltas,
 )
 from ff.analysis.waivers import waiver_targets
-from ff.analysis.window import analyze_league_windows, detect_season_phase
+from ff.analysis.window import (
+    analyze_league_windows,
+    detect_season_phase,
+    evaluate_trade_filters,
+)
 from ff.contracts import ArbitrageMover
 
 __all__ = [
@@ -79,5 +83,6 @@ __all__ = [
     "precompute_starter_injuries",
     "detect_season_phase",
     "analyze_league_windows",
+    "evaluate_trade_filters",
 ]
 
