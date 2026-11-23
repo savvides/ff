@@ -259,6 +259,22 @@ def validate_window(windows: List[TeamWindow], rosters: List[Roster]) -> List[QA
         message="" if flags_owned else "AssetDurationFlag references player not owned by its roster",
     ))
 
+    pivot_consistent = True
+    for w in windows:
+        if w.effective_target == "middle_trap":
+            kinds = {f.kind for f in w.flags}
+            if w.pivot_lean == "PIVOT_CONTEND" and kinds & {"SELL_POINTS", "RB_WINDOW_MISMATCH"}:
+                pivot_consistent = False
+                break
+            if w.pivot_lean == "PIVOT_REBUILD" and kinds & {"TRADEABLE_LIQUIDITY", "RB_CLIFF_WATCH"}:
+                pivot_consistent = False
+                break
+    checks.append(QACheck(
+        name="Window Pivot Flag Consistency",
+        passed=pivot_consistent,
+        message="" if pivot_consistent else "Middle-trap AssetDurationFlag conflicts with team pivot_lean",
+    ))
+
     return checks
 
 

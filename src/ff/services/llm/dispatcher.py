@@ -157,6 +157,15 @@ def _compute_league_windows(
     )
 
 
+def _parse_mode_override(mode_raw: Any) -> Optional[str]:
+    if mode_raw is None:
+        return None
+    mode_clean = str(mode_raw).strip().lower()
+    if mode_clean not in ("auto", "contend", "rebuild"):
+        raise ValueError("mode must be auto, contend, or rebuild")
+    return mode_clean
+
+
 def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
     if tool_name not in ALLOWED_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -357,10 +366,33 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             raise ValueError("could not find that team")
         cfg = ctx.get("config")
         wm = getattr(cfg, "window_mode", None) if cfg else None
+        mode_override = _parse_mode_override(kwargs.get("mode"))
         target_r = _find_roster(rosters, team, ctx) if rosters else None
         mine = _find_roster(rosters, None, ctx) if cfg else None
         is_mine = bool(mine is not None and target_r is not None and target_r.roster_id == mine.roster_id)
-        if is_mine and isinstance(wm, str) and wm in ("contend", "rebuild"):
+        if value_book is not None and rosters and all_vals and target_r is not None:
+            season_phase = window.detect_season_phase(ctx.get("state"))
+            windows = _compute_league_windows(
+                ctx,
+                rosters=rosters,
+                value_book=value_book,
+                players_meta=players_meta,
+                season_phase=season_phase,
+                target_roster_id=target_r.roster_id,
+                window_mode=wm if (is_mine and isinstance(wm, str)) else "auto",
+                mode_override=mode_override,
+            )
+            tw = next((w for w in windows if w.roster_id == target_r.roster_id), None)
+            target_to_status = {"contend": "contend", "rebuild": "rebuild", "middle_trap": "balanced"}
+            if mode_override in ("contend", "rebuild"):
+                status = mode_override
+            elif tw is not None:
+                status = target_to_status.get(tw.effective_target, "balanced")
+            else:
+                status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
+        elif mode_override in ("contend", "rebuild"):
+            status = mode_override
+        elif mode_override is None and is_mine and isinstance(wm, str) and wm in ("contend", "rebuild"):
             status = wm
         else:
             status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
@@ -392,13 +424,7 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         rosters = ctx.get("rosters", [])
         team = kwargs.get("team")
         target_r = _require_roster(rosters, team, ctx)
-        mode_raw = kwargs.get("mode")
-        mode_override: Optional[str] = None
-        if mode_raw is not None:
-            mode_clean = str(mode_raw).strip().lower()
-            if mode_clean not in ("auto", "contend", "rebuild"):
-                raise ValueError("mode must be auto, contend, or rebuild")
-            mode_override = mode_clean
+        mode_override = _parse_mode_override(kwargs.get("mode"))
         cfg = ctx.get("config")
         value_book = ctx.get("value_book")
         book = value_book if value_book is not None else ValueBook([])

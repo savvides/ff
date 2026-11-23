@@ -336,6 +336,14 @@ def test_dispatch_get_draft_fit_honors_config_window_mode() -> None:
         dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=ctx)
     assert captured == ["contend", "rebuild"]
 
+    # Explicit mode="auto" clears saved cfg.window_mode and uses live window diagnosis; mode="rebuild" overrides
+    cfg.window_mode = "rebuild"
+    captured.clear()
+    with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+        dispatch_tool("get_draft_fit", {"mode": "auto"}, ctx=ctx)
+        dispatch_tool("get_draft_fit", {"team": "Mid", "mode": "contend"}, ctx=ctx)
+    assert captured == ["contend", "contend"]
+
 
 def test_dispatch_window_and_draft_fit_without_user_id_uses_fallback_and_never_leaks_to_rival() -> None:
     from ff.contracts import Asset, Format, Roster

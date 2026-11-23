@@ -698,6 +698,8 @@ def test_trade_shows_strategy_filters_and_honors_mode(fake_clients, league):
     assert "Duration" in res.output
     assert "RB Option Risk" in res.output
     assert "Seasonal Liquidity" in res.output
+    assert "Net win-now shift:" in res.output
+    assert "Net future shift:" in res.output
 
     # --market fc must never leak Dealer or KTC strings in Strategy Filters
     res_fc = runner.invoke(
@@ -750,6 +752,11 @@ def test_draft_honors_config_window_mode(fake_clients, league):
     res_ovr = runner.invoke(app, ["draft", "--draft-id", "DR1", "--mode", "contend"])
     assert res_ovr.exit_code == 0, res_ovr.output
     assert "CONTEND" in res_ovr.output
+
+    # Explicit --mode auto clears saved config window_mode and uses live window diagnosis
+    res_auto = runner.invoke(app, ["draft", "--draft-id", "DR1", "--mode", "auto"])
+    assert res_auto.exit_code == 0, res_auto.output
+    assert "BALANCED" in res_auto.output
 
 
 def test_window_renders_duration_and_rb_exposure_table(fake_clients, league, book, monkeypatch):

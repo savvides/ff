@@ -195,6 +195,8 @@ def _active_starter_win_now(
     roster: Roster,
     assets: List[Asset],
     roster_positions: List[str],
+    *,
+    has_redraft: bool = True,
 ) -> Tuple[int, Set[str]]:
     """Sum win-now value and return starter IDs for active (non-taxi/IR) players."""
     excluded = set(roster.taxi) | set(roster.reserve)
@@ -203,6 +205,8 @@ def _active_starter_win_now(
         return 0, set()
 
     def _win_score(asset: Asset) -> float:
+        if has_redraft:
+            return float(asset.redraft_value or 0)
         return float(asset.redraft_value if asset.redraft_value is not None else asset.value)
 
     ordered = sorted(active, key=lambda a: (-_win_score(a), -a.value, a.id))
@@ -385,7 +389,10 @@ def _asset_flags(
                 )
             )
 
-        if effective_target in ("rebuild", "middle_trap") and pos != "QB" and not rb_decay_flagged:
+        sell_window = effective_target == "rebuild" or (
+            effective_target == "middle_trap" and pivot_lean == "PIVOT_REBUILD"
+        )
+        if sell_window and pos != "QB" and not rb_decay_flagged:
             gap_sell = gap is not None and gap <= -20.0
             age_sell = age is not None and age >= 28 and (a.redraft_value or 0) >= 1500
             if gap_sell or age_sell:
@@ -405,8 +412,11 @@ def _asset_flags(
                 )
 
         is_ir = a.id in reserve_set or a.status == "Injured Reserve" or a.injury_status == "IR"
+        buy_window = effective_target == "contend" or (
+            effective_target == "middle_trap" and pivot_lean == "PIVOT_CONTEND"
+        )
         if (
-            effective_target in ("contend", "middle_trap")
+            buy_window
             and a.id not in optimal_starter_ids
             and a.value >= 2500
             and ((gap is not None and gap >= 40.0) or is_ir)
@@ -450,6 +460,13 @@ def analyze_league_windows(
     meta = players_meta or {}
     val_by_id = {v.roster_id: v for v in valuations}
     picks_by_id = {tp.roster_id: tp.total_value for tp in pick_ledger} if pick_ledger else {}
+    has_redraft = any(
+        not a.is_pick and a.redraft_value is not None for a in book.assets
+    ) or any(
+        not a.is_pick and a.redraft_value is not None
+        for v in valuations
+        for a in v.assets
+    )
 
     team_assets: List[List[Asset]] = []
     starter_values: List[int] = []
@@ -461,7 +478,9 @@ def analyze_league_windows(
     for r in rosters:
         val = val_by_id.get(r.roster_id)
         assets = _roster_assets(r, val, book, meta)
-        starter_val, starter_ids = _active_starter_win_now(r, assets, roster_positions)
+        starter_val, starter_ids = _active_starter_win_now(
+            r, assets, roster_positions, has_redraft=has_redraft
+        )
         dyn_val = val.total_value if val is not None else sum(a.value for a in assets)
         pick_val = picks_by_id.get(r.roster_id, 0)
         games = r.wins + r.losses + r.ties
@@ -634,9 +653,12 @@ def _duration_filter(
         if net_win_now >= _MEANINGFUL_SHIFT:
             signal = "ALIGNED"
             summary = f"Contender adds {net_win_now:+,d} win-now redraft value."
-        elif net_win_now <= -_MEANINGFUL_SHIFT and net_future > 0:
+        elif net_win_now <= -_MEANINGFUL_SHIFT:
             signal = "MISMATCH"
-            summary = f"Contender gives up {abs(net_win_now):,d} win-now value for future equity."
+            if net_future > 0:
+                summary = f"Contender gives up {abs(net_win_now):,d} win-now value for future equity."
+            else:
+                summary = f"Contender loses {abs(net_win_now):,d} win-now redraft value."
         else:
             signal = "NEUTRAL"
             summary = "Minimal net change to immediate contending production."
@@ -644,11 +666,14 @@ def _duration_filter(
         if net_future >= _MEANINGFUL_SHIFT and net_win_now <= 0:
             signal = "ALIGNED"
             summary = f"Rebuilder gains {net_future:+,d} future equity without adding win-now bloat."
-        elif net_win_now >= _MEANINGFUL_SHIFT and net_future < 0:
+        elif net_future <= -_MEANINGFUL_SHIFT:
             signal = "MISMATCH"
-            summary = (
-                f"Rebuilder spends {abs(net_future):,d} future equity for {net_win_now:+,d} win-now points."
-            )
+            if net_win_now >= _MEANINGFUL_SHIFT:
+                summary = (
+                    f"Rebuilder spends {abs(net_future):,d} future equity for {net_win_now:+,d} win-now points."
+                )
+            else:
+                summary = f"Rebuilder loses {abs(net_future):,d} future equity."
         elif net_win_now >= _MEANINGFUL_SHIFT:
             signal = "CAUTION"
             summary = f"Rebuilder takes on {net_win_now:+,d} win-now value that can inflate Max PF."
@@ -656,11 +681,50 @@ def _duration_filter(
             signal = "NEUTRAL"
             summary = "Minimal net impact on rebuild timeline."
     else:
-        if abs(net_win_now) >= _MEANINGFUL_SHIFT or abs(net_future) >= _MEANINGFUL_SHIFT:
-            direction = "contend" if net_win_now >= net_future else "rebuild"
-            signal = "CAUTION"
+        adds_win_now = net_win_now >= _MEANINGFUL_SHIFT
+        loses_win_now = net_win_now <= -_MEANINGFUL_SHIFT
+        adds_future = net_future >= _MEANINGFUL_SHIFT
+        loses_future = net_future <= -_MEANINGFUL_SHIFT
+        lean = team_window.pivot_lean
+
+        if adds_win_now and adds_future:
+            signal = "ALIGNED"
             summary = (
-                f"Middle-trap team makes a meaningful shift pushing toward {direction} "
+                f"Middle-trap team improves both win-now ({net_win_now:+,d}) "
+                f"and future ({net_future:+,d}) equity."
+            )
+        elif adds_win_now and not adds_future:
+            if lean == "PIVOT_REBUILD":
+                signal = "MISMATCH"
+                summary = (
+                    f"Middle-trap team (pivot rebuild) adds {net_win_now:+,d} win-now value "
+                    "against its rebuild lean."
+                )
+            else:
+                signal = "CAUTION"
+                note = "matches PIVOT_CONTEND lean" if lean == "PIVOT_CONTEND" else "commits toward contend"
+                summary = (
+                    f"Middle-trap team pushes toward contend ({note}; "
+                    f"win-now {net_win_now:+,d}, future {net_future:+,d})."
+                )
+        elif adds_future and not adds_win_now:
+            if lean == "PIVOT_CONTEND":
+                signal = "MISMATCH"
+                summary = (
+                    f"Middle-trap team (pivot contend) sells {abs(net_win_now):,d} win-now value "
+                    f"for future equity ({net_future:+,d})."
+                )
+            else:
+                signal = "CAUTION"
+                note = "matches PIVOT_REBUILD lean" if lean == "PIVOT_REBUILD" else "commits toward rebuild"
+                summary = (
+                    f"Middle-trap team pushes toward rebuild ({note}; "
+                    f"win-now {net_win_now:+,d}, future {net_future:+,d})."
+                )
+        elif loses_win_now or loses_future:
+            signal = "MISMATCH"
+            summary = (
+                f"Middle-trap team loses horizon value without offsetting gain "
                 f"(win-now {net_win_now:+,d}, future {net_future:+,d})."
             )
         else:
@@ -708,6 +772,15 @@ def _rb_option_filter(
 
     is_offseason = season_phase.phase in ("offseason_draft", "offseason_quiet")
     target = team_window.effective_target if team_window is not None else None
+    effective_lean: Optional[str] = None
+    if target == "contend" or (
+        target == "middle_trap" and team_window is not None and team_window.pivot_lean == "PIVOT_CONTEND"
+    ):
+        effective_lean = "contend"
+    elif target == "rebuild" or (
+        target == "middle_trap" and team_window is not None and team_window.pivot_lean == "PIVOT_REBUILD"
+    ):
+        effective_lean = "rebuild"
 
     details: List[str] = []
     if acquired_aging:
@@ -725,11 +798,11 @@ def _rb_option_filter(
 
     if acquired_aging:
         max_age = max(a.age for a in acquired_aging if a.age is not None)
-        if is_offseason or target == "rebuild":
+        if is_offseason or effective_lean == "rebuild":
             signal = "MISMATCH"
             why = "in offseason" if is_offseason else "while rebuilding"
             summary = f"Acquiring age-{max_age:.0f} RB {why} absorbs decay with no title equity."
-        elif target in ("contend", "middle_trap"):
+        elif effective_lean == "contend":
             if max_age >= 28:
                 signal = "CAUTION"
                 summary = f"Acquiring age-{max_age:.0f} RB carries steep age-cliff risk in-season."
@@ -743,7 +816,7 @@ def _rb_option_filter(
             else:
                 signal = "NEUTRAL"
                 summary = f"In-season age-{max_age:.0f} RB option depends on unconfigured team window."
-    elif sold_aging and (is_offseason or target == "rebuild"):
+    elif sold_aging and (is_offseason or effective_lean == "rebuild"):
         max_sold_age = max(a.age for a in sold_aging if a.age is not None)
         signal = "TAILWIND"
         why = "during offseason" if is_offseason else "while rebuilding"

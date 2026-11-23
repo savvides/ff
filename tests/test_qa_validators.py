@@ -362,6 +362,18 @@ def test_validate_window_valid_and_failures():
     enum_failed = [c.name for c in validate_window([bad_enum, w2], [r1, r2]) if not c.passed]
     assert "Window Enum Domains Valid" in enum_failed
 
+    bad_pivot_flag = flag.model_copy(update={"kind": "SELL_POINTS", "severity": "HIGH"})
+    w_mid_bad = w1.model_copy(
+        update={
+            "diagnosed": "MIDDLE_TRAP",
+            "effective_target": "middle_trap",
+            "pivot_lean": "PIVOT_CONTEND",
+            "flags": [bad_pivot_flag],
+        }
+    )
+    pivot_failed = [c.name for c in validate_window([w_mid_bad, w2], [r1, r2]) if not c.passed]
+    assert "Window Pivot Flag Consistency" in pivot_failed
+
 
 def test_validate_power_rejects_negative_max_pf():
     v1 = RosterValuation(roster_id=1, team_name="A", total_value=10000, power_rank=1)

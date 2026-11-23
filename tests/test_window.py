@@ -737,14 +737,41 @@ def test_trade_filters_duration_by_window_and_missing_redraft() -> None:
     f_r_small = evaluate_trade_filters(_trade([small_vet_a], [small_vet_b]), rebuild_win, peak)[0]
     assert f_r_small.signal == "NEUTRAL"
 
-    # Middle trap: meaningful shift -> CAUTION naming pivot direction
+    # Contender losing >= 1000 win-now with net_future <= 0 -> MISMATCH (not NEUTRAL)
+    big_redraft_vet = _player("brv", "Big Redraft Vet", "WR", 4000, redraft=4200, age=28.0)
+    mid_redraft_vet = _player("mrv", "Mid Redraft Vet", "WR", 2000, redraft=2000, age=25.0)
+    f_c_loss_only = evaluate_trade_filters(_trade([mid_redraft_vet], [big_redraft_vet]), contend_win, peak)[0]
+    assert f_c_loss_only.signal == "MISMATCH"
+    assert "minimal" not in f_c_loss_only.summary.lower()
+
+    # Rebuilder losing >= 1000 future equity with net_win_now < 1000 -> MISMATCH (not NEUTRAL)
+    scrub = _player("scb", "Scrub Vet", "WR", 500, redraft=800, age=30.0)
+    f_r_fut_loss = evaluate_trade_filters(_trade([scrub], [pick27]), rebuild_win, peak)[0]
+    assert f_r_fut_loss.signal == "MISMATCH"
+    assert "minimal" not in f_r_fut_loss.summary.lower()
+
+    # Middle trap: meaningful shift -> ALIGNED / CAUTION / MISMATCH respecting pivot_lean
+    mid_rebuild_win = _window("middle_trap", peak, pivot_lean="PIVOT_REBUILD")
+    # Adding both win-now and future (young starter) -> ALIGNED
+    young_starter = _player("ys", "Young Starter", "WR", 6000, redraft=4800, age=23.0)
+    f_m_both = evaluate_trade_filters(_trade([young_starter], [cheap_vet]), mid_win, peak)[0]
+    assert f_m_both.signal == "ALIGNED"
+
+    # Pushing toward contend: CAUTION on PIVOT_CONTEND, MISMATCH on PIVOT_REBUILD
     f_m_contend = evaluate_trade_filters(_trade([win_now_vet], [pick27]), mid_win, peak)[0]
     assert f_m_contend.signal == "CAUTION"
     assert "contend" in f_m_contend.summary.lower()
+    assert evaluate_trade_filters(_trade([win_now_vet], [pick27]), mid_rebuild_win, peak)[0].signal == "MISMATCH"
 
+    # Pushing toward rebuild: MISMATCH on PIVOT_CONTEND, CAUTION on PIVOT_REBUILD
     f_m_rebuild = evaluate_trade_filters(_trade([pick27], [win_now_vet]), mid_win, peak)[0]
-    assert f_m_rebuild.signal == "CAUTION"
-    assert "rebuild" in f_m_rebuild.summary.lower()
+    assert f_m_rebuild.signal == "MISMATCH"
+    f_m_reb_aligned = evaluate_trade_filters(_trade([pick27], [win_now_vet]), mid_rebuild_win, peak)[0]
+    assert f_m_reb_aligned.signal == "CAUTION"
+    assert "rebuild" in f_m_reb_aligned.summary.lower()
+
+    # Pure loss without offsetting gain -> MISMATCH
+    assert evaluate_trade_filters(_trade([mid_redraft_vet], [big_redraft_vet]), mid_win, peak)[0].signal == "MISMATCH"
 
     f_m_small = evaluate_trade_filters(_trade([small_vet_a], [small_vet_b]), mid_win, peak)[0]
     assert f_m_small.signal == "NEUTRAL"
@@ -825,9 +852,12 @@ def test_trade_filters_rb_option_risk() -> None:
     # Acquiring age-26 RB in-season while contending -> ALIGNED; age-28 -> CAUTION
     assert evaluate_trade_filters(_trade([rb26], [wr]), contend_peak, peak)[1].signal == "ALIGNED"
     assert evaluate_trade_filters(_trade([rb28], [wr]), contend_peak, peak)[1].signal == "CAUTION"
-    # Middle trap in-season mirrors contend for RB option risk
+    # Middle trap in-season follows pivot_lean for RB option risk
+    middle_rebuild_peak = _window("middle_trap", peak, pivot_lean="PIVOT_REBUILD")
     assert evaluate_trade_filters(_trade([rb26], [wr]), middle_peak, peak)[1].signal == "ALIGNED"
     assert evaluate_trade_filters(_trade([rb28], [wr]), middle_peak, peak)[1].signal == "CAUTION"
+    assert evaluate_trade_filters(_trade([rb27], [wr]), middle_rebuild_peak, peak)[1].signal == "MISMATCH"
+    assert evaluate_trade_filters(_trade([wr], [rb27]), middle_rebuild_peak, peak)[1].signal == "TAILWIND"
     # Selling age-27 RB in offseason_quiet or while rebuilding -> TAILWIND
     assert evaluate_trade_filters(_trade([wr], [rb27]), contend_off_quiet, off_quiet)[1].signal == "TAILWIND"
     assert evaluate_trade_filters(_trade([wr], [rb27]), rebuild_peak, peak)[1].signal == "TAILWIND"
@@ -925,6 +955,95 @@ def test_trade_filters_seasonal_questionable_and_suspended_players() -> None:
         evaluate_trade_filters(_trade([out_star], [healthy_vet]), _window("rebuild", peak), peak)[2].signal
         == "TAILWIND"
     )
+
+
+def test_analyze_windows_middle_trap_flags_follow_pivot_lean() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    positions = ["QB", "WR"]
+    assets: List[Asset] = []
+    rosters: List[Roster] = []
+    ledger: List[TeamPicks] = []
+
+    vet_cont = _player("vet_c", "Middle Vet C", "WR", 1800, redraft=3200, age=29.0)
+    stash_cont = _player("sth_c", "Middle Stash C", "WR", 3500, redraft=1200, age=21.0)
+    vet_reb = _player("vet_r", "Middle Vet R", "WR", 1800, redraft=3200, age=29.0)
+    stash_reb = _player("sth_r", "Middle Stash R", "WR", 3500, redraft=1200, age=21.0)
+    assets.extend([vet_cont, stash_cont, vet_reb, stash_reb])
+
+    for i in range(1, 13):
+        qb_val = 10000 - i * 500
+        qb = _player(f"qb{i}", f"QB {i}", "QB", qb_val, redraft=qb_val, age=26.0)
+        assets.append(qb)
+        if i == 4:
+            pids = [qb.id, vet_cont.id, stash_cont.id]
+            pick_val = 7000
+        elif i == 8:
+            pids = [qb.id, vet_reb.id, stash_reb.id]
+            pick_val = 1000
+        else:
+            wr = _player(f"wr{i}", f"WR {i}", "WR", 4000, redraft=4000 - i * 100, age=25.0)
+            assets.append(wr)
+            pids = [qb.id, wr.id]
+            pick_val = 3000
+        rosters.append(Roster(roster_id=i, team_name=f"Team {i}", player_ids=pids, max_pf=2000.0 - i * 80))
+        ledger.append(
+            TeamPicks(
+                roster_id=i,
+                team_name=f"Team {i}",
+                picks=[FuturePick(season="2027", round=1, original_roster_id=i, value=pick_val)],
+            )
+        )
+
+    book = ValueBook(assets)
+    vals = value_all_rosters(rosters, book)
+    windows = analyze_league_windows(
+        rosters, vals, book, positions, season_phase=peak, pick_ledger=ledger, is_dynasty=True
+    )
+    by_id = {w.roster_id: w for w in windows}
+
+    w4 = by_id[4]
+    assert w4.diagnosed == "MIDDLE_TRAP"
+    assert w4.pivot_lean == "PIVOT_CONTEND"
+    assert {f.kind for f in w4.flags} == {"TRADEABLE_LIQUIDITY"}
+
+    w8 = by_id[8]
+    assert w8.diagnosed == "MIDDLE_TRAP"
+    assert w8.pivot_lean == "PIVOT_REBUILD"
+    kinds8 = {f.kind for f in w8.flags}
+    assert "SELL_POINTS" in kinds8
+    assert "TRADEABLE_LIQUIDITY" not in kinds8
+
+
+def test_analyze_windows_ignores_unredrafted_rookie_when_book_has_redraft() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    positions = ["WR"]
+
+    rookie = Asset(id="rk", name="Unredrafted Rookie", kind="player", position="WR", value=6000, redraft_value=None, age=21.0)
+    vet_low = _player("vl", "Low Vet", "WR", 500, redraft=500, age=28.0)
+    starter_a = _player("sa", "Starter A", "WR", 4000, redraft=4000, age=26.0)
+    starter_b = _player("sb", "Starter B", "WR", 2000, redraft=2000, age=27.0)
+
+    book = ValueBook([rookie, vet_low, starter_a, starter_b])
+    r1 = Roster(roster_id=1, team_name="Rebuilder", player_ids=["rk", "vl"])
+    r2 = Roster(roster_id=2, team_name="Contender", player_ids=["sa"])
+    r3 = Roster(roster_id=3, team_name="Middle", player_ids=["sb"])
+    rosters = [r1, r2, r3]
+    vals = value_all_rosters(rosters, book)
+
+    windows = analyze_league_windows(rosters, vals, book, positions, season_phase=peak)
+    by_id = {w.roster_id: w for w in windows}
+    assert by_id[1].starter_win_now_value == 500
+    assert by_id[1].diagnosed == "REBUILD"
+
+    # All-dynasty book (no redraft_value anywhere) still falls back to asset.value
+    dyn_only_book = ValueBook([
+        _player("d1", "Dyn 1", "WR", 6000, redraft=None),
+        _player("d2", "Dyn 2", "WR", 2000, redraft=None),
+    ])
+    dr1 = Roster(roster_id=1, team_name="D1", player_ids=["d1"])
+    dr2 = Roster(roster_id=2, team_name="D2", player_ids=["d2"])
+    d_wins = analyze_league_windows([dr1, dr2], value_all_rosters([dr1, dr2], dyn_only_book), dyn_only_book, positions, season_phase=peak)
+    assert {w.roster_id: w.starter_win_now_value for w in d_wins} == {1: 6000, 2: 2000}
 
 
 def test_trade_filters_seasonal_mixed_two_sided_net_vet_shift() -> None:

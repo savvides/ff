@@ -42,7 +42,6 @@ from ff.analysis import (
     audit_roster,
     available,
     detect_season_phase,
-    detect_status,
     evaluate_trade_filters,
     find_arbitrage_movers,
     ir_eligible_statuses,
@@ -1016,7 +1015,10 @@ def trade(
     ft.add_column("Summary")
     for fl in filters:
         st = signal_styles.get(fl.signal, "white")
-        ft.add_row(fl.name, f"[{st}]{fl.signal}[/]", fl.summary)
+        summary_cell = fl.summary
+        if fl.details:
+            summary_cell += f"\n[dim]{' | '.join(fl.details)}[/]"
+        ft.add_row(fl.name, f"[{st}]{fl.signal}[/]", summary_cell)
     console.print(ft)
 
     if market in ("dealer", "ktc") and has_secondary:
@@ -1570,21 +1572,20 @@ def draft(
                                            help="QB/RB/WR/TE; filter the available list."),
     limit: int = typer.Option(30, help="How many available players to list."),
     rookies: bool = typer.Option(False, "--rookies", "-r", help="Available rookies only."),
-    mode: str = typer.Option("auto", "--mode",
-                             help="contend|rebuild|auto (auto reads your power rank)."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="contend|rebuild|auto (auto uses live window diagnosis, ignoring saved config).",
+    ),
     draft_id: Optional[str] = typer.Option(None, "--draft-id",
                                            help="Override the auto-detected draft."),
 ) -> None:
     """Live draft board scored FOR your team: your picks, where you stand, and the
     best available ranked by fit (roster need + win-now/rebuild horizon), not raw
     market value alone."""
+    mode_clean = _validate_window_mode(mode)
     cfg, sc = _load()
     if not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you.")
-
-    mode = mode.lower()
-    if mode not in ("auto", "contend", "rebuild"):
-        _fail("--mode must be auto, contend, or rebuild.")
 
     if not draft_id:
         summary = _active_draft(sc, cfg.league_id)
@@ -1679,14 +1680,24 @@ def draft(
     all_vals = value_all_rosters(rosters, book, players_meta)
     my_rank = next((v.power_rank for v in all_vals if v.roster_id == mine.roster_id), None)
     val.power_rank = my_rank
-    # Status thirds are over the ranked rosters (len(all_vals)), the same
-    # denominator as TeamContext.num_teams, not the draft-settings team count.
-    if mode in ("contend", "rebuild"):
-        status = mode
-    elif cfg.window_mode in ("contend", "rebuild"):
+    windows = _league_windows(
+        sc, cfg, book, rosters, all_vals,
+        league=league,
+        players_meta=players_meta,
+        mode_override=mode_clean,
+        target_roster_id=mine.roster_id,
+        window_mode=cfg.window_mode,
+    )
+    tw = next((w for w in windows if w.roster_id == mine.roster_id), None)
+    target_to_status = {"contend": "contend", "rebuild": "rebuild", "middle_trap": "balanced"}
+    if mode_clean in ("contend", "rebuild"):
+        status = mode_clean
+    elif tw is not None:
+        status = target_to_status.get(tw.effective_target, "balanced")
+    elif mode_clean is None and cfg.window_mode in ("contend", "rebuild"):
         status = cfg.window_mode
     else:
-        status = detect_status(my_rank, len(all_vals))
+        status = "balanced"
 
     pool = available(book, taken, position=position)
     if rookies:

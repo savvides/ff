@@ -120,7 +120,12 @@ TOOL_SCHEMAS = [
             "properties": {
                 "team": {"type": "string", "description": "Team name or roster owner"},
                 "position": {"type": "string", "description": "Positional filter (QB, RB, WR, TE)"},
-                "limit": {"type": "integer", "description": "Number of fit candidates to return"}
+                "limit": {"type": "integer", "description": "Number of fit candidates to return"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "contend", "rebuild"],
+                    "description": "Optional status override (auto uses live window diagnosis, ignoring saved config)"
+                }
             }
         }
     },
