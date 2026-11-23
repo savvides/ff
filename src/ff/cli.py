@@ -309,6 +309,8 @@ class _LazyContext(dict):
             return self._get_pick_window()[0]
         elif key == "rounds":
             return self._get_pick_window()[1]
+        elif key == "state":
+            return self._get_state()
         elif key == "week":
             state = self._get_state()
             return _current_week(state)
@@ -1742,6 +1744,45 @@ def draft(
 
 
 _LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto"]
+MAX_ASK_TOOLS = 3
+
+
+def _extract_ask_payload(response: str) -> Optional[Dict[str, Any]]:
+    candidates = [response.strip()]
+    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL):
+        candidates.append(match.group(1).strip())
+    for cand in candidates:
+        if not cand.startswith("{"):
+            continue
+        try:
+            data = json.loads(cand)
+        except Exception:
+            continue
+        if isinstance(data, dict) and ("tools" in data or "tool" in data):
+            return data
+    return None
+
+
+def _parse_ask_calls(response: str) -> List[Tuple[Any, Dict[str, Any]]]:
+    payload = _extract_ask_payload(response)
+    if payload is None:
+        return []
+    if "tools" in payload and isinstance(payload["tools"], list):
+        raw_items = payload["tools"]
+    elif "tool" in payload:
+        raw_items = [payload]
+    else:
+        return []
+    calls: List[Tuple[Any, Dict[str, Any]]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            calls.append((item, {}))
+            continue
+        kwargs = item.get("kwargs") or {}
+        if not isinstance(kwargs, dict):
+            kwargs = {}
+        calls.append((item.get("tool"), kwargs))
+    return calls
 
 
 @app.command()
@@ -1765,9 +1806,11 @@ def ask(
     system_prompt = (
         f"You are an AI assistant for a Sleeper dynasty fantasy football CLI (`ff`).\n"
         f"Available tools: {json.dumps(TOOL_SCHEMAS)}\n"
-        f"If the query requires league data, trade calculations, lineup optimization, waivers, draft fit, or onboarding, "
-        f"respond with ONLY a JSON tool call block in this format:\n"
+        f"If the query requires league data, competitive window diagnosis, trade calculations, lineup optimization, "
+        f"waivers, draft fit, or onboarding, respond with ONLY a JSON tool call block in either format:\n"
         f'{{"tool": "<tool_name>", "kwargs": {{ ... }}}}\n'
+        f'Or for cross-cutting questions requiring up to {MAX_ASK_TOOLS} tools:\n'
+        f'{{"tools": [{{"tool": "<tool_name>", "kwargs": {{ ... }}}}, ...]}}\n'
         f"Do NOT include conversational text when issuing a tool call. If no tool is needed, respond in plain Markdown."
     )
 
@@ -1776,48 +1819,38 @@ def ask(
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
         _fail(f"LLM runner failed ({e}).")
 
-    tool_call = None
-    try:
-        data = json.loads(first_response.strip())
-        if isinstance(data, dict) and "tool" in data:
-            tool_call = data
-    except Exception:
-        match = re.search(r"```(?:json)?\s*(\{\s*\"tool\".*?\})\s*```", first_response, re.DOTALL)
-        if match:
-            try:
-                tool_call = json.loads(match.group(1))
-            except Exception:
-                pass
-
-    if not tool_call:
+    raw_calls = _parse_ask_calls(first_response)
+    if not raw_calls:
         console.print(Markdown(first_response))
         qa_rep = run_qa("ask", tool_name=None, result={}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
-    tool_name = tool_call.get("tool")
-    kwargs = tool_call.get("kwargs") or {}
-    if not isinstance(kwargs, dict):
-        kwargs = {}
-
-    if tool_name not in ALLOWED_TOOLS:
-        console.print(f"[red]Unknown tool '{tool_name}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
-        qa_rep = run_qa("ask", tool_name=str(tool_name), result={"error": f"Unknown tool: {tool_name}"}, query=query)
+    unknown = [name for name, _ in raw_calls if not isinstance(name, str) or name not in ALLOWED_TOOLS]
+    if unknown:
+        bad = unknown[0]
+        console.print(f"[red]Unknown tool '{bad}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
+        qa_rep = run_qa("ask", tool_name=str(bad), result={"error": f"Unknown tool: {bad}"}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
-    if tool_name == "setup_league":
-        username = kwargs.get("username")
+    setup_call = next(((n, kw) for n, kw in raw_calls if n == "setup_league"), None)
+    if setup_call is not None:
+        _, setup_kwargs = setup_call
+        username = setup_kwargs.get("username")
         if not username:
             console.print("[yellow]Please provide your Sleeper username to complete onboarding.[/]")
             return
         try:
-            cfg = onboard_user(username=username, league_id=kwargs.get("league_id"))
+            cfg = onboard_user(username=username, league_id=setup_kwargs.get("league_id"))
         except ValueError as e:
             console.print(f"[red]{e}[/]")
             return
-        console.print(f"[bold green]Successfully onboarded Sleeper league[/] [cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!")
-        qa_rep = run_qa("ask", tool_name=tool_name, result={"username": username}, query=query)
+        console.print(
+            f"[bold green]Successfully onboarded Sleeper league[/] "
+            f"[cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!"
+        )
+        qa_rep = run_qa("ask", tool_name="setup_league", result={"username": username}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
@@ -1825,31 +1858,93 @@ def ask(
         console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
         return
 
+    calls: List[Tuple[str, Dict[str, Any]]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for name, kwargs in raw_calls:
+        tool_str = str(name)
+        key = (tool_str, json.dumps(kwargs, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        calls.append((tool_str, kwargs))
+        if len(calls) >= MAX_ASK_TOOLS:
+            break
+
     sc = SleeperClient()
     ctx = _analysis_ctx(cfg, sc)
 
-    try:
-        if tool_name == "get_waivers":
-            ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
-        result = dispatch_tool(tool_name, kwargs, ctx)
-    except Exception as e:
-        console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")
-        qa_rep = run_qa("ask", tool_name=tool_name, result={"error": str(e)}, query=query)
+    executed_names: List[str] = []
+    batch_results: List[Dict[str, Any]] = []
+    success_count = 0
+    for tool_name, kwargs in calls:
+        executed_names.append(tool_name)
+        try:
+            if tool_name == "get_waivers":
+                ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
+            res = dispatch_tool(tool_name, kwargs, ctx)
+            batch_results.append({"tool": tool_name, "kwargs": kwargs, "result": res})
+            success_count += 1
+        except Exception as e:
+            batch_results.append({"tool": tool_name, "kwargs": kwargs, "error": str(e)})
+
+    if success_count == 0:
+        if len(calls) == 1:
+            only_name = executed_names[0]
+            only_err = batch_results[0]["error"]
+            console.print(f"[red]Error executing tool calculation '{only_name}':[/] {only_err}")
+            qa_rep = run_qa(
+                "ask",
+                tool_name=only_name,
+                tool_names=executed_names,
+                result={"error": only_err},
+                query=query,
+            )
+        else:
+            details = "; ".join(f"{r['tool']}: {r['error']}" for r in batch_results)
+            console.print(f"[red]Error executing tool calculation:[/] {details}")
+            qa_rep = run_qa(
+                "ask",
+                tool_name=None,
+                tool_names=executed_names,
+                result=batch_results,
+                query=query,
+            )
         render_qa_footer(qa_rep, console)
         return
 
-    synthesis_prompt = (
-        f"User Query: '{query}'\n"
-        f"Executed Tool: '{tool_name}' with args {json.dumps(kwargs)}\n"
-        f"Deterministic Calculation Result:\n{json.dumps(result, indent=2)}\n\n"
-        f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
-    )
+    qa_tool_name: Optional[str]
+    qa_result: Any
+    if len(calls) == 1:
+        single_name, single_kwargs = calls[0]
+        qa_tool_name = single_name
+        qa_result = batch_results[0]["result"]
+        synthesis_prompt = (
+            f"User Query: '{query}'\n"
+            f"Executed Tool: '{single_name}' with args {json.dumps(single_kwargs)}\n"
+            f"Deterministic Calculation Result:\n{json.dumps(qa_result, indent=2)}\n\n"
+            f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
+        )
+    else:
+        qa_tool_name = None
+        qa_result = batch_results
+        synthesis_prompt = (
+            f"User Query: '{query}'\n"
+            f"Executed Tools ({len(batch_results)}):\n{json.dumps(batch_results, indent=2)}\n\n"
+            f"Provide a concise, helpful, human-friendly explanation synthesizing all deterministic results in plain Markdown."
+        )
+
     try:
         final_response = runner_inst.run(prompt=synthesis_prompt)
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
         _fail(f"LLM runner failed ({e}).")
     console.print(Markdown(final_response))
-    qa_rep = run_qa("ask", tool_name=tool_name, result=result, query=query)
+    qa_rep = run_qa(
+        "ask",
+        tool_name=qa_tool_name,
+        tool_names=executed_names,
+        result=qa_result,
+        query=query,
+    )
     render_qa_footer(qa_rep, console)
 
 

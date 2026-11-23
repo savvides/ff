@@ -30,7 +30,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "evaluate_trade",
-        "description": "Evaluate trade fairness between given assets and received assets.",
+        "description": "Evaluate trade fairness and window/duration/RB/seasonal strategy filters between given assets and received assets.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,7 +42,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "get_lineup",
-        "description": "Get optimal starting lineup for a team/week.",
+        "description": "Get optimal starting lineup for a single team and NFL week.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -132,6 +132,24 @@ TOOL_SCHEMAS = [
             "properties": {
                 "position": {"type": "string", "description": "Positional filter (QB, RB, WR, TE)"},
                 "limit": {"type": "integer", "description": "Number of players to return"}
+            }
+        }
+    },
+    {
+        "name": "get_team_window",
+        "description": (
+            "Diagnose a team's competitive window (contend, middle trap with pivot lean, or rebuild) "
+            "using starters, Max PF, future pick capital, RB option exposure, and seasonal liquidity timing."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "team": {"type": "string", "description": "Team name or roster owner"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "contend", "rebuild"],
+                    "description": "Optional target window override"
+                }
             }
         }
     }
