@@ -27,6 +27,7 @@ from ff.qa.validators import (
     validate_trade,
     validate_values,
     validate_waivers,
+    validate_window,
 )
 
 VALIDATOR_MAP: Dict[str, Callable[..., List[QACheck]]] = {
@@ -44,6 +45,7 @@ VALIDATOR_MAP: Dict[str, Callable[..., List[QACheck]]] = {
     "news": validate_news,
     "waivers": validate_waivers,
     "draft": validate_draft,
+    "window": validate_window,
     "ask": validate_ask,
 }
 

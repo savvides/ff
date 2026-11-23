@@ -327,3 +327,68 @@ def test_validate_ask_unknown_tool():
     checks = validate_ask("unregistered_tool", {}, "Run query")
     failed = [c for c in checks if not c.passed]
     assert len(failed) >= 1
+
+
+def test_validate_window_valid_and_failures():
+    from ff.contracts import AssetDurationFlag, SeasonPhase, TeamWindow
+    from ff.qa.engine import VALIDATOR_MAP
+    from ff.qa.validators import validate_window
+
+    assert VALIDATOR_MAP["window"] is validate_window
+
+    sp = SeasonPhase(phase="in_season_peak", label="Peak", liquidity_bias="points_premium", summary="Oct-Nov.")
+    r1 = Roster(roster_id=1, team_name="A", player_ids=["p1"])
+    r2 = Roster(roster_id=2, team_name="B", player_ids=["p2"])
+    flag = AssetDurationFlag(player_id="p1", name="P1", kind="RB_CLIFF_WATCH", severity="MODERATE", reason="Age 28")
+    w1 = TeamWindow(
+        roster_id=1, team_name="A", diagnosed="CONTEND", effective_target="contend", target_source="auto",
+        win_now_score=100.0, win_now_rank=1, future_score=0.0, future_rank=2,
+        starter_win_now_value=5000, season_phase=sp, flags=[flag],
+    )
+    w2 = TeamWindow(
+        roster_id=2, team_name="B", diagnosed="REBUILD", effective_target="rebuild", target_source="auto",
+        win_now_score=0.0, win_now_rank=2, future_score=100.0, future_rank=1,
+        starter_win_now_value=1000, season_phase=sp,
+    )
+    assert all(c.passed for c in validate_window([w1, w2], [r1, r2]))
+
+    bad_flag = flag.model_copy(update={"player_id": "unowned"})
+    bad_w1 = w1.model_copy(update={"win_now_rank": 1, "win_now_score": 120.0, "flags": [bad_flag]})
+    bad_w2 = w2.model_copy(update={"win_now_rank": 1, "future_rank": 2, "future_score": -1.0})
+    failed = [c.name for c in validate_window([bad_w1, bad_w2], [r1, r2]) if not c.passed]
+    assert len(failed) >= 4
+
+    bad_enum = TeamWindow.model_construct(**{**w1.__dict__, "diagnosed": "INVALID"})
+    enum_failed = [c.name for c in validate_window([bad_enum, w2], [r1, r2]) if not c.passed]
+    assert "Window Enum Domains Valid" in enum_failed
+
+
+def test_validate_power_rejects_negative_max_pf():
+    v1 = RosterValuation(roster_id=1, team_name="A", total_value=10000, power_rank=1)
+    r1 = Roster(roster_id=1, team_name="A", max_pf=-1.0)
+    failed = [c for c in validate_power([v1], [r1]) if not c.passed]
+    assert failed
+
+
+def test_validate_trade_with_filters_and_ask_batch():
+    from ff.contracts import DecisionFilter
+    a1 = Asset(id="1", name="P1", value=5000)
+    a2 = Asset(id="2", name="P2", value=5000)
+    ev = TradeEvaluation(side_a=TradeSide(assets=[a1]), side_b=TradeSide(assets=[a2]), label_a="You get", label_b="You give")
+    f_ok = DecisionFilter(name="Duration", signal="ALIGNED", summary="Good.")
+    assert all(c.passed for c in validate_trade(ev, filters=[f_ok]))
+
+    f_empty = DecisionFilter(name="Duration", signal="ALIGNED", summary="   ")
+    f_bad_sig = DecisionFilter.model_construct(name="Duration", signal="BOGUS", summary="Ok.")
+    filter_failed = [c.name for c in validate_trade(ev, filters=[f_empty, f_bad_sig]) if not c.passed]
+    assert "Trade Strategy Filter Signals Valid" in filter_failed
+    assert "Trade Strategy Filter Summaries Non-Empty" in filter_failed
+
+    assert all(c.passed for c in validate_ask(None, None, "What is PPR?"))
+    assert all(c.passed for c in validate_ask(None, [{"tool": "get_power_rankings"}], "Analyze", tool_names=["get_power_rankings", "get_movers"]))
+    too_many = validate_ask(None, [], "Analyze", tool_names=["get_power_rankings", "get_movers", "get_roster", "get_picks"])
+    assert any(not c.passed for c in too_many)
+    bad_tool = validate_ask(None, [], "Analyze", tool_names=["get_power_rankings", "bad_tool"])
+    assert any(not c.passed for c in bad_tool)
+    missing_result = validate_ask(None, None, "Analyze", tool_names=["get_power_rankings"])
+    assert any(not c.passed for c in missing_result)

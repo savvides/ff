@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Set, Tuple
 from ff.contracts import (
     ArbitrageMover,
     Asset,
+    DecisionFilter,
     DraftFit,
     DraftPickInfo,
     Lineup,
@@ -16,6 +17,7 @@ from ff.contracts import (
     RosterSlot,
     RosterValuation,
     TeamPicks,
+    TeamWindow,
     TradeEvaluation,
     WaiverTarget,
 )
@@ -183,6 +185,80 @@ def validate_power(valuations: List[RosterValuation], rosters: List[Roster]) -> 
         message="" if records_valid else "One or more teams have negative record statistics",
     ))
 
+    max_pf_valid = all(r.max_pf >= 0.0 for r in rosters)
+    checks.append(QACheck(
+        name="Power Max PF Non-Negative",
+        passed=max_pf_valid,
+        message="" if max_pf_valid else "One or more teams have negative max_pf",
+    ))
+
+    return checks
+
+
+_VALID_DIAGNOSED = {"CONTEND", "MIDDLE_TRAP", "REBUILD"}
+_VALID_TARGETS = {"contend", "rebuild", "middle_trap"}
+_VALID_TARGET_SOURCES = {"auto", "config", "override"}
+_VALID_FILTER_SIGNALS = {"ALIGNED", "TAILWIND", "NEUTRAL", "CAUTION", "HEADWIND", "MISMATCH", "N/A"}
+
+
+def validate_window(windows: List[TeamWindow], rosters: List[Roster]) -> List[QACheck]:
+    """Validate competitive window diagnosis and duration flag invariants."""
+    checks: List[QACheck] = []
+
+    count_match = len(windows) == len(rosters)
+    checks.append(QACheck(
+        name="Window Team Count Match",
+        passed=count_match,
+        message="" if count_match else f"Windows count ({len(windows)}) != rosters count ({len(rosters)})",
+    ))
+
+    expected_ranks = list(range(1, len(windows) + 1))
+    win_ranks = [w.win_now_rank for w in windows]
+    win_ranks_ok = sorted(win_ranks) == expected_ranks
+    checks.append(QACheck(
+        name="Window Win-Now Ranks Sequence Valid",
+        passed=win_ranks_ok,
+        message="" if win_ranks_ok else f"Win-now ranks {win_ranks} do not form exact sequence 1..{len(windows)}",
+    ))
+
+    fut_ranks = [w.future_rank for w in windows]
+    fut_ranks_ok = sorted(fut_ranks) == expected_ranks
+    checks.append(QACheck(
+        name="Window Future Ranks Sequence Valid",
+        passed=fut_ranks_ok,
+        message="" if fut_ranks_ok else f"Future ranks {fut_ranks} do not form exact sequence 1..{len(windows)}",
+    ))
+
+    scores_ok = all(0.0 <= w.win_now_score <= 100.0 and 0.0 <= w.future_score <= 100.0 for w in windows)
+    checks.append(QACheck(
+        name="Window Score Bounds Valid",
+        passed=scores_ok,
+        message="" if scores_ok else "One or more teams have win_now_score or future_score outside [0.0, 100.0]",
+    ))
+
+    enums_ok = all(
+        w.diagnosed in _VALID_DIAGNOSED
+        and w.effective_target in _VALID_TARGETS
+        and w.target_source in _VALID_TARGET_SOURCES
+        for w in windows
+    )
+    checks.append(QACheck(
+        name="Window Enum Domains Valid",
+        passed=enums_ok,
+        message="" if enums_ok else "Invalid diagnosed, effective_target, or target_source value",
+    ))
+
+    roster_players = {r.roster_id: set(r.player_ids) for r in rosters}
+    flags_owned = all(
+        w.roster_id in roster_players and all(f.player_id in roster_players[w.roster_id] for f in w.flags)
+        for w in windows
+    )
+    checks.append(QACheck(
+        name="Window Flag Ownership Valid",
+        passed=flags_owned,
+        message="" if flags_owned else "AssetDurationFlag references player not owned by its roster",
+    ))
+
     return checks
 
 
@@ -269,6 +345,7 @@ def validate_trade(
     evaluation: TradeEvaluation,
     give_tokens: Optional[List[str]] = None,
     get_tokens: Optional[List[str]] = None,
+    filters: Optional[List[DecisionFilter]] = None,
 ) -> List[QACheck]:
     """Validate trade analyzer mathematical and arbitrage invariants."""
     checks: List[QACheck] = []
@@ -342,6 +419,20 @@ def validate_trade(
             name="Trade Secondary Delta Calculation",
             passed=sec_delta_match,
             message="" if sec_delta_match else f"secondary_delta ({evaluation.secondary_delta}) != secondary_a ({evaluation.secondary_value_a}) - secondary_b ({evaluation.secondary_value_b})",
+        ))
+
+    if filters is not None:
+        signals_valid = all(f.signal in _VALID_FILTER_SIGNALS for f in filters)
+        checks.append(QACheck(
+            name="Trade Strategy Filter Signals Valid",
+            passed=signals_valid,
+            message="" if signals_valid else "One or more strategy filters have an invalid signal",
+        ))
+        summaries_valid = all(bool(f.summary and f.summary.strip()) for f in filters)
+        checks.append(QACheck(
+            name="Trade Strategy Filter Summaries Non-Empty",
+            passed=summaries_valid,
+            message="" if summaries_valid else "One or more strategy filters have an empty summary",
         ))
 
     return checks
@@ -700,7 +791,12 @@ def validate_draft(
     return checks
 
 
-def validate_ask(tool_name: Optional[str], result: Any, query: str) -> List[QACheck]:
+def validate_ask(
+    tool_name: Optional[str],
+    result: Any,
+    query: str,
+    tool_names: Optional[List[str]] = None,
+) -> List[QACheck]:
     """Validate natural language query tool execution invariants."""
     checks: List[QACheck] = []
 
@@ -711,7 +807,29 @@ def validate_ask(tool_name: Optional[str], result: Any, query: str) -> List[QACh
         message="" if has_query else "Ask query string is empty",
     ))
 
-    if tool_name is not None:
+    if tool_names:
+        batch_within_limit = len(tool_names) <= 3
+        checks.append(QACheck(
+            name="Ask Tool Batch Count Within Limit",
+            passed=batch_within_limit,
+            message="" if batch_within_limit else f"Batch called {len(tool_names)} tools (max 3)",
+        ))
+
+        unknown = [t for t in tool_names if t not in ALLOWED_TOOLS and t != "setup_league"]
+        batch_allowed = not unknown
+        checks.append(QACheck(
+            name="Ask Batch Tools in ALLOWED_TOOLS",
+            passed=batch_allowed,
+            message="" if batch_allowed else f"Tools {unknown} not permitted in ALLOWED_TOOLS",
+        ))
+
+        result_valid = result is not None
+        checks.append(QACheck(
+            name="Ask Tool Execution Result Present",
+            passed=result_valid,
+            message="" if result_valid else "Tool execution returned None",
+        ))
+    elif tool_name is not None:
         tool_allowed = tool_name in ALLOWED_TOOLS or tool_name == "setup_league"
         checks.append(QACheck(
             name=f"Ask Tool '{tool_name}' in ALLOWED_TOOLS",

@@ -35,10 +35,12 @@ from ff import __version__
 from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
+    analyze_league_windows,
     analyze_trade,
     offer_verdict,
     audit_roster,
     available,
+    detect_season_phase,
     detect_status,
     find_arbitrage_movers,
     ir_eligible_statuses,
@@ -1725,6 +1727,22 @@ def qa_cmd(
     # 7. Movers / Arbitrage audit
     arb_movers = find_arbitrage_movers(rosters=rosters, book=book, min_value=1000, limit=20)
     reports.append(run_qa("movers", movers=arb_movers, mode="arbitrage"))
+
+    # 8. Window audit
+    season_phase = detect_season_phase(sc.state())
+    windows = analyze_league_windows(
+        rosters,
+        valuations,
+        book,
+        league.get("roster_positions") or [],
+        season_phase=season_phase,
+        pick_ledger=ledger,
+        players_meta=players_meta,
+        is_dynasty=cfg.format.is_dynasty,
+        window_mode=cfg.window_mode,
+        target_roster_id=my_roster.roster_id if my_roster else None,
+    )
+    reports.append(run_qa("window", windows=windows, rosters=rosters))
 
     if verbose:
         for r in reports:
