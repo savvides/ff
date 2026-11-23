@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from statistics import median
-from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Literal, Optional, Sequence, Set, Tuple
 
 from ff.analysis.lineup import _assign, starting_slots
 from ff.analysis.movers import value_redraft_gap
@@ -38,6 +38,10 @@ FilterSignal = Literal["ALIGNED", "TAILWIND", "NEUTRAL", "CAUTION", "HEADWIND", 
 
 _MEANINGFUL_SHIFT = 1000
 _SEASONAL_SHIFT = 1500
+_SERIOUS_INJURY_STATUSES: FrozenSet[str] = frozenset(
+    {"ir", "injured reserve", "pup", "physically unable to perform", "out", "doubtful"}
+)
+_NON_ACTIVE_VET_STATUSES: FrozenSet[str] = _SERIOUS_INJURY_STATUSES | frozenset({"sus", "suspended"})
 
 _DIAG_TO_TARGET: Dict[DiagnosedWindow, TargetMode] = {
     "CONTEND": "contend",
@@ -754,15 +758,25 @@ def _rb_option_filter(
     return DecisionFilter(name="RB Option Risk", signal=signal, summary=summary, details=details)
 
 
+def _has_status(a: Asset, statuses: FrozenSet[str]) -> bool:
+    if a.is_pick:
+        return False
+    status_l = (a.status or "").strip().lower()
+    inj_l = (a.injury_status or "").strip().lower()
+    return status_l in statuses or inj_l in statuses
+
+
 def _side_liquidity(assets: Sequence[Asset]) -> Tuple[int, int, int]:
     picks = sum(a.value for a in assets if a.is_pick)
     injured_stars = sum(
-        a.value for a in assets if not a.is_pick and a.value >= 2500 and bool(a.injury_tag)
+        a.value
+        for a in assets
+        if not a.is_pick and a.value >= 2500 and _has_status(a, _SERIOUS_INJURY_STATUSES)
     )
     discounted = picks + injured_stars
     vets = 0
     for a in assets:
-        if a.is_pick or a.injury_tag:
+        if a.is_pick or _has_status(a, _NON_ACTIVE_VET_STATUSES):
             continue
         if a.value >= 2000 and (a.redraft_value or 0) >= 2500:
             gap = value_redraft_gap(a, 1000)
@@ -789,20 +803,28 @@ def _seasonal_liquidity_filter(
     summary: str
 
     if season_phase.phase == "in_season_peak":
-        if (discounted_get - discounted_give) >= _SEASONAL_SHIFT and vets_give >= _SEASONAL_SHIFT:
+        if (discounted_get - discounted_give) >= _SEASONAL_SHIFT and (
+            vets_give - vets_get
+        ) >= _SEASONAL_SHIFT:
             signal = "TAILWIND"
             summary = "Selling peak-priced Oct-Nov points for discounted picks/injured stars."
-        elif (discounted_give - discounted_get) >= _SEASONAL_SHIFT and vets_get >= _SEASONAL_SHIFT:
+        elif (discounted_give - discounted_get) >= _SEASONAL_SHIFT and (
+            vets_get - vets_give
+        ) >= _SEASONAL_SHIFT:
             signal = "CAUTION"
             summary = "Paying peak Oct-Nov contender liquidity premium for immediate vet points."
         else:
             signal = "NEUTRAL"
             summary = f"No major Oct-Nov liquidity imbalance ({season_phase.label})."
     elif season_phase.phase == "offseason_draft":
-        if (picks_give - picks_get) >= _SEASONAL_SHIFT and vets_get >= _SEASONAL_SHIFT:
+        if (picks_give - picks_get) >= _SEASONAL_SHIFT and (
+            vets_get - vets_give
+        ) >= _SEASONAL_SHIFT:
             signal = "TAILWIND"
             summary = "Selling Mar-May rookie-draft hype for discounted proven veterans."
-        elif (picks_get - picks_give) >= _SEASONAL_SHIFT and vets_give >= _SEASONAL_SHIFT:
+        elif (picks_get - picks_give) >= _SEASONAL_SHIFT and (
+            vets_give - vets_get
+        ) >= _SEASONAL_SHIFT:
             signal = "HEADWIND"
             summary = "Buying rookie picks at peak offseason draft liquidity premium."
         else:

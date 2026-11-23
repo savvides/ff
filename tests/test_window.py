@@ -677,7 +677,8 @@ def test_trade_filters_non_mutating_and_redraft_guard() -> None:
     assert all(f.signal == "N/A" and f.summary for f in res_redraft)
 
     # team_window=None in dynasty: Duration -> N/A, RB & Seasonal still evaluate
-    res_no_win_off = evaluate_trade_filters(_trade([pick27, rb27], [vet]), None, draft_phase)
+    vet2 = _player("vet2", "Steady WR 2", "WR", 3000, redraft=3200, age=28.0)
+    res_no_win_off = evaluate_trade_filters(_trade([pick27, rb27], [vet, vet2]), None, draft_phase)
     by_name_off = {f.name: f for f in res_no_win_off}
     assert by_name_off["Duration"].signal == "N/A"
     assert by_name_off["RB Option Risk"].signal == "MISMATCH"
@@ -889,3 +890,72 @@ def test_trade_filters_seasonal_liquidity() -> None:
             evaluate_trade_filters(_trade([proven_vet], [pick27]), _window("contend", phase), phase)[2].signal
             == "NEUTRAL"
         )
+
+
+def test_trade_filters_seasonal_questionable_and_suspended_players() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    healthy_vet = _player("hvet", "Healthy Vet", "WR", 3500, redraft=3800, age=28.0)
+    q_star = _player("qstar", "Questionable Star", "WR", 5000, redraft=5000, age=26.0, injury_status="Questionable")
+    q_vet = _player("qvet", "Questionable Vet", "WR", 3500, redraft=3800, age=28.0, injury_status="Questionable")
+    sus_star = _player("sstar", "Suspended Star", "WR", 4000, redraft=4000, age=25.0, injury_status="Suspended")
+    out_star = _player("ostar", "Out Star", "WR", 3500, redraft=2500, age=25.0, injury_status="Out")
+    pick27 = _pick("2027 1st", 3500)
+
+    # Questionable star is NOT a discounted injured star (must be NEUTRAL, not TAILWIND)
+    assert (
+        evaluate_trade_filters(_trade([q_star], [healthy_vet]), _window("rebuild", peak), peak)[2].signal
+        == "NEUTRAL"
+    )
+    # Suspended player is NOT a discounted injured star
+    assert (
+        evaluate_trade_filters(_trade([sus_star], [healthy_vet]), _window("rebuild", peak), peak)[2].signal
+        == "NEUTRAL"
+    )
+    # Mid-week Questionable vet still counts as active vet points when sold for a 1st (and vice versa)
+    assert (
+        evaluate_trade_filters(_trade([pick27], [q_vet]), _window("rebuild", peak), peak)[2].signal
+        == "TAILWIND"
+    )
+    assert (
+        evaluate_trade_filters(_trade([q_vet], [pick27]), _window("contend", peak), peak)[2].signal
+        == "CAUTION"
+    )
+    # Out star DOES count as a serious injury absence
+    assert (
+        evaluate_trade_filters(_trade([out_star], [healthy_vet]), _window("rebuild", peak), peak)[2].signal
+        == "TAILWIND"
+    )
+
+
+def test_trade_filters_seasonal_mixed_two_sided_net_vet_shift() -> None:
+    peak = detect_season_phase({"season_type": "regular", "week": 8})
+    off_draft = detect_season_phase({"season_type": "off"}, today=date(2026, 4, 10))
+
+    vet_big = _player("vbig", "Big Vet", "WR", 4500, redraft=4800, age=28.0)
+    vet_mid = _player("vmid", "Mid Vet", "WR", 3500, redraft=3600, age=27.0)
+    vet_small = _player("vsm", "Small Vet", "WR", 2500, redraft=2800, age=27.0)
+    vet_tiny = _player("vtiny", "Tiny Vet", "WR", 2000, redraft=2500, age=27.0)
+    pick_1st = _pick("2027 1st", 3500)
+    pick_2nd = _pick("2027 2nd", 1500)
+
+    # in_season_peak mixed trade: gaining discounted net +2000 AND gaining net vets +2000 -> NEUTRAL
+    # (gross vets_give=2500 >= 1500, but net vets_give - vets_get = -2000)
+    ev_peak_mixed_neutral = _trade([vet_big, pick_1st], [vet_small, pick_2nd])
+    assert evaluate_trade_filters(ev_peak_mixed_neutral, _window("rebuild", peak), peak)[2].signal == "NEUTRAL"
+
+    # in_season_peak mixed trade with >= 1500 net shift on both discounted and vets -> TAILWIND / CAUTION
+    ev_peak_mixed_tailwind = _trade([vet_small, pick_1st], [vet_big, pick_2nd])
+    assert evaluate_trade_filters(ev_peak_mixed_tailwind, _window("rebuild", peak), peak)[2].signal == "TAILWIND"
+    ev_peak_mixed_caution = _trade([vet_big, pick_2nd], [vet_small, pick_1st])
+    assert evaluate_trade_filters(ev_peak_mixed_caution, _window("contend", peak), peak)[2].signal == "CAUTION"
+
+    # offseason_draft mixed trade: net picks_give - picks_get = +2000, gross vets_get=3500 >= 1500,
+    # but net vets_get - vets_give = -1000 -> NEUTRAL (not TAILWIND)
+    ev_off_mixed_neutral = _trade([vet_mid, pick_2nd], [vet_big, pick_1st])
+    assert evaluate_trade_filters(ev_off_mixed_neutral, _window("contend", off_draft), off_draft)[2].signal == "NEUTRAL"
+
+    # offseason_draft mixed trade with >= 1500 net shift on both picks and vets -> TAILWIND / HEADWIND
+    ev_off_mixed_tailwind = _trade([vet_big, pick_2nd], [vet_tiny, pick_1st])
+    assert evaluate_trade_filters(ev_off_mixed_tailwind, _window("contend", off_draft), off_draft)[2].signal == "TAILWIND"
+    ev_off_mixed_headwind = _trade([vet_tiny, pick_1st], [vet_big, pick_2nd])
+    assert evaluate_trade_filters(ev_off_mixed_headwind, _window("rebuild", off_draft), off_draft)[2].signal == "HEADWIND"
