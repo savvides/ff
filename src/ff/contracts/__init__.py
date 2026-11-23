@@ -5,9 +5,13 @@ from each other's internals. Change a model here and you have made a contract
 change - update both sides.
 """
 
+from __future__ import annotations
+
 from ff.contracts.models import (
     ArbitrageMover,
     Asset,
+    AssetDurationFlag,
+    DecisionFilter,
     DraftFit,
     DraftPickInfo,
     FabClaim,
@@ -15,24 +19,28 @@ from ff.contracts.models import (
     FuturePick,
     Lineup,
     LineupSlot,
+    NewsItem,
+    OfferVerdict,
     PositionStanding,
     Roster,
     RosterAudit,
     RosterSlot,
     RosterValuation,
+    SeasonPhase,
     StandingProjection,
     TeamContext,
     TeamPicks,
+    TeamWindow,
     TradeEvaluation,
     TradeSide,
     WaiverTarget,
-    NewsItem,
-    OfferVerdict,
 )
 
 __all__ = [
     "ArbitrageMover",
     "Asset",
+    "AssetDurationFlag",
+    "DecisionFilter",
     "Format",
     "NewsItem",
     "OfferVerdict",
@@ -40,6 +48,7 @@ __all__ = [
     "RosterSlot",
     "RosterAudit",
     "RosterValuation",
+    "SeasonPhase",
     "StandingProjection",
     "TradeSide",
     "TradeEvaluation",
@@ -50,6 +59,7 @@ __all__ = [
     "FabClaim",
     "FuturePick",
     "TeamPicks",
+    "TeamWindow",
     "PositionStanding",
     "TeamContext",
     "DraftFit",

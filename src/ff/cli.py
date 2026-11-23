@@ -13,6 +13,7 @@
     ff waivers              trending free agents worth grabbing, by value
     ff cleanup [team]       roster capacity: who to drop / move to IR / stash on taxi for room
     ff draft [-p QB] [-r]   live draft board: your picks + best available by value
+    ff window [team]        competitive window, Max PF, middle-trap pivot, and RB risk
 """
 
 from __future__ import annotations
@@ -42,11 +43,13 @@ from ff.analysis.plan import buy_candidates, sell_candidates, trade_stance
 from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
 from ff.analysis import (
+    analyze_league_windows,
     analyze_trade,
     offer_verdict,
     audit_roster,
     available,
-    detect_status,
+    detect_season_phase,
+    evaluate_trade_filters,
     find_arbitrage_movers,
     ir_eligible_statuses,
     my_picks,
@@ -62,7 +65,7 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Lineup, Roster, RosterValuation, StandingProjection
+from ff.contracts import Asset, Lineup, Roster, RosterValuation, SeasonPhase, StandingProjection, TeamPicks, TeamWindow
 from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
@@ -174,6 +177,64 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
                    or (((latest or {}).get("settings")) or {}).get("rounds")
                    or 4)
     return seasons, rounds_n
+
+
+_WINDOW_MODES = ("auto", "contend", "rebuild")
+
+
+def _validate_window_mode(mode: Optional[str]) -> Optional[str]:
+    if mode is None:
+        return None
+    clean = mode.lower()
+    if clean not in _WINDOW_MODES:
+        _fail("--mode must be auto, contend, or rebuild.")
+    return clean
+
+
+def _league_windows(
+    sc: SleeperClient,
+    cfg: Config,
+    book: ValueBook,
+    rosters: List[Roster],
+    valuations: List[RosterValuation],
+    *,
+    league: Optional[Dict[str, Any]] = None,
+    players_meta: Optional[Dict[str, Any]] = None,
+    mode_override: Optional[str] = None,
+    target_roster_id: Optional[int] = None,
+    window_mode: Optional[str] = None,
+    ledger: Optional[List[TeamPicks]] = None,
+    season_phase: Optional[SeasonPhase] = None,
+) -> List[TeamWindow]:
+    """Compute competitive windows and duration flags across all league rosters."""
+    league_data = league if league is not None else (sc.league(cfg.league_id) or {})
+    meta = players_meta if players_meta is not None else sc.players()
+    phase = season_phase if season_phase is not None else detect_season_phase(sc.state())
+
+    if ledger is None and cfg.format.is_dynasty and hasattr(sc, "traded_picks") and hasattr(sc, "drafts"):
+        seasons, rounds_n = _pick_window(sc, cfg, league_data)
+        ranks = {v.roster_id: v.power_rank for v in valuations}
+        traded = sc.traded_picks(cfg.league_id)
+        ledger = pick_ledger(rosters, traded, book, ranks, seasons=seasons, rounds=rounds_n)
+
+    resolved_mode = (
+        (cfg.window_mode if target_roster_id is not None else "auto")
+        if window_mode is None
+        else window_mode
+    )
+    return analyze_league_windows(
+        rosters,
+        valuations,
+        book,
+        league_data.get("roster_positions") or [],
+        season_phase=phase,
+        pick_ledger=ledger,
+        players_meta=meta,
+        is_dynasty=cfg.format.is_dynasty,
+        window_mode=resolved_mode,
+        mode_override=mode_override,
+        target_roster_id=target_roster_id,
+    )
 
 
 def _season_sim(cfg: Config, sc: SleeperClient, league: Dict[str, Any],
@@ -296,6 +357,8 @@ class _LazyContext(dict):
             return self._get_pick_window()[0]
         elif key == "rounds":
             return self._get_pick_window()[1]
+        elif key == "state":
+            return self._get_state()
         elif key == "week":
             state = self._get_state()
             return _current_week(state)
@@ -569,8 +632,17 @@ def power() -> None:
     cfg, sc = _load()
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    valuations = value_all_rosters(rosters, book, sc.players())
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
     by_id = {r.roster_id: r for r in rosters}
+    mine = _pick_roster(rosters, None, cfg.user_id)
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        players_meta=players_meta,
+        target_roster_id=mine.roster_id if mine else None,
+        window_mode=cfg.window_mode if mine else "auto",
+    )
+    win_by_id = {w.roster_id: w for w in windows}
 
     league = sc.league(cfg.league_id) or {}
     sim = _season_sim(cfg, sc, league, rosters)
@@ -582,20 +654,112 @@ def power() -> None:
     total_rank = {rid: i for i, rid in enumerate(sorted(total, key=lambda k: -total[k]), 1)}
 
     t = Table(title=f"{cfg.name} - power rankings ({cfg.format.label()})")
-    for c in ("#", "team", "players", "picks", "total", "total #", "record", "pts for"):
-        t.add_column(c, justify="left" if c in ("team", "record") else "right")
+    for c in ("#", "team", "players", "picks", "total", "total #", "record", "pts for", "max pf", "window"):
+        t.add_column(c, justify="left" if c in ("team", "record", "window") else "right")
     for v in valuations:
         r = by_id[v.roster_id]
+        max_pf_cell = f"{r.max_pf:.0f}" if r.max_pf > 0 else "-"
+        w = win_by_id.get(v.roster_id)
+        if w is None:
+            win_cell = "-"
+        else:
+            win_cell = "MIDDLE" if w.effective_target == "middle_trap" else w.effective_target.upper()
+            if w.target_source == "config":
+                win_cell += "*"
         t.add_row(str(v.power_rank), v.team_name, f"{v.total_value:,}",
                   f"{pick_value.get(v.roster_id, 0):,}", f"{total[v.roster_id]:,}",
                   str(total_rank[v.roster_id]),
                   f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
-                  f"{r.points_for:.0f}")
+                  f"{r.points_for:.0f}", max_pf_cell, win_cell)
     console.print(t)
     console.print(f"[dim]# ranks rostered players (who wins now); picks = {seasons[0]}-{seasons[-1][2:]} "
                   "draft capital (`ff picks`); total = both, the long-run asset base. "
                   "Playoff odds: `ff standings`.[/]")
     qa_rep = run_qa("power", valuations=valuations, rosters=rosters)
+    render_qa_footer(qa_rep, console)
+
+
+# --- window --------------------------------------------------------------
+
+@app.command()
+@_guard
+def window(
+    team: Optional[str] = typer.Argument(None, help="Team name; defaults to yours."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="Override target window: auto, contend, or rebuild.",
+    ),
+) -> None:
+    """Diagnose competitive window, Max PF, middle-trap pivot, and RB exposure."""
+    mode_clean = _validate_window_mode(mode)
+    cfg, sc = _load()
+    if team is None and not cfg.user_id:
+        _fail("your team is unknown. Re-run `ff setup <username>` so it records you, "
+              "or pass a team name: ff window \"<team>\".")
+    book = _book(cfg, include_secondary=False)
+    rosters = _league_rosters(cfg, sc)
+    target = _pick_roster(rosters, team, cfg.user_id)
+    if target is None:
+        _fail("could not find that team. Try `ff power` to list teams.")
+
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
+    is_mine = bool(cfg.user_id and target.owner_id == cfg.user_id)
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        players_meta=players_meta,
+        mode_override=mode_clean,
+        target_roster_id=target.roster_id,
+        window_mode=cfg.window_mode if is_mine else "auto",
+    )
+    tw = next(w for w in windows if w.roster_id == target.roster_id)
+
+    diag_display = "MIDDLE TRAP" if tw.diagnosed == "MIDDLE_TRAP" else tw.diagnosed
+    diag_style = {"CONTEND": "green", "MIDDLE TRAP": "yellow", "REBUILD": "cyan"}.get(diag_display, "white")
+    target_style = {"contend": "green", "rebuild": "cyan", "middle_trap": "yellow"}.get(tw.effective_target, "white")
+    max_pf_str = f"{tw.max_pf:.0f}" if tw.max_pf > 0 else "-"
+
+    lines = [
+        f"[bold]{tw.team_name}[/]   "
+        f"Diagnosed: [bold {diag_style}]{diag_display}[/]   "
+        f"Target: [bold {target_style}]{tw.effective_target}[/] ({tw.target_source})",
+    ]
+    if tw.pivot_lean:
+        pivot_line = f"Pivot Lean: [bold]{tw.pivot_lean}[/]"
+        if tw.pivot_reason:
+            pivot_line += f" — {tw.pivot_reason}"
+        lines.append(pivot_line)
+    lines.extend([
+        f"Win-Now Equity: [bold]#{tw.win_now_rank}[/]/{len(windows)} "
+        f"(score {tw.win_now_score:.1f})   Max PF: {max_pf_str}   "
+        f"Starters: {tw.starter_win_now_value:,}",
+        f"Future Equity: [bold]#{tw.future_rank}[/]/{len(windows)} "
+        f"(score {tw.future_score:.1f})   Dynasty Players: {tw.dynasty_player_value:,}   "
+        f"Picks: {tw.pick_value:,}",
+        f"Seasonal Liquidity: [bold]{tw.season_phase.label}[/] — {tw.season_phase.summary}",
+    ])
+    console.print(Panel.fit("\n".join(lines), title="Team Window"))
+
+    if tw.flags:
+        ft = Table(title="Duration & RB Exposure")
+        for c in ("player", "pos", "age", "value", "flag", "reason"):
+            ft.add_column(c, justify="right" if c in ("age", "value") else "left")
+        sev_styles = {"HIGH": "bold red", "MODERATE": "yellow", "INFO": "cyan"}
+        for fl in tw.flags:
+            sev_style = sev_styles.get(fl.severity, "white")
+            ft.add_row(
+                fl.name,
+                fl.position or "-",
+                f"{fl.age:.0f}" if fl.age is not None else "-",
+                f"{fl.value:,}",
+                f"[{sev_style}]{fl.severity}[/] {fl.kind}",
+                fl.reason,
+            )
+        console.print(ft)
+    else:
+        console.print("[green]No duration or RB exposure flags — roster aligns with current target.[/]")
+
+    qa_rep = run_qa("window", windows=windows, rosters=rosters)
     render_qa_footer(qa_rep, console)
 
 
@@ -945,11 +1109,16 @@ def trade(
     get: str = typer.Option(..., "--get", help="What you receive, comma-separated."),
     market: str = typer.Option("both", "--market", "-m",
                                help="Market: fc, ktc, or both (default: both)."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="Override window target for strategy filters: auto, contend, or rebuild.",
+    ),
 ) -> None:
     """Analyze a trade. Players and picks both count (e.g. --get '2027 1st')."""
     market = market.lower()
     if market not in ("fc", "dealer", "ktc", "both"):
         _fail("--market must be fc, ktc, or both.")
+    mode_clean = _validate_window_mode(mode)
 
     cfg, sc = _load()
     include_secondary = market != "fc"
@@ -1071,6 +1240,47 @@ def trade(
         console.print("[dim]offer rule: needs both markets - run without --market to judge it.[/]")
     _print_provenance(book, cfg, include_secondary)
 
+    my_window: Optional[TeamWindow] = None
+    phase: Optional[SeasonPhase] = None
+    if cfg.user_id:
+        rosters = _league_rosters(cfg, sc)
+        mine = _pick_roster(rosters, None, cfg.user_id)
+        if mine is not None:
+            valuations = value_all_rosters(rosters, book, players_meta)
+            windows = _league_windows(
+                sc, cfg, book, rosters, valuations,
+                players_meta=players_meta,
+                mode_override=mode_clean,
+                target_roster_id=mine.roster_id,
+                window_mode=cfg.window_mode,
+            )
+            my_window = next((w for w in windows if w.roster_id == mine.roster_id), None)
+            if my_window is not None:
+                phase = my_window.season_phase
+    if phase is None:
+        phase = detect_season_phase(sc.state())
+    filters = evaluate_trade_filters(evaluation, my_window, phase)
+    signal_styles = {
+        "ALIGNED": "bold green",
+        "TAILWIND": "bold green",
+        "CAUTION": "bold yellow",
+        "HEADWIND": "bold red",
+        "MISMATCH": "bold red",
+        "NEUTRAL": "dim",
+        "N/A": "dim",
+    }
+    ft = Table(title="Strategy Filters")
+    ft.add_column("Filter")
+    ft.add_column("Signal")
+    ft.add_column("Summary")
+    for fl in filters:
+        st = signal_styles.get(fl.signal, "white")
+        summary_cell = fl.summary
+        if fl.details:
+            summary_cell += f"\n[dim]{' | '.join(fl.details)}[/]"
+        ft.add_row(fl.name, f"[{st}]{fl.signal}[/]", summary_cell)
+    console.print(ft)
+
     if market in ("dealer", "ktc") and has_secondary:
         deltas = secondary_position_deltas(evaluation)
     else:
@@ -1091,7 +1301,13 @@ def trade(
             if cands:
                 console.print(f"[dim]  did you mean: "
                               f"{', '.join(c.name for c in cands)}?[/]")
-    qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
+    qa_rep = run_qa(
+        "trade",
+        evaluation=evaluation,
+        give_tokens=give_tokens,
+        get_tokens=get_tokens,
+        filters=filters,
+    )
     render_qa_footer(qa_rep, console)
 
 
@@ -1675,21 +1891,20 @@ def draft(
                                            help="QB/RB/WR/TE; filter the available list."),
     limit: int = typer.Option(30, help="How many available players to list."),
     rookies: bool = typer.Option(False, "--rookies", "-r", help="Available rookies only."),
-    mode: str = typer.Option("auto", "--mode",
-                             help="contend|rebuild|auto (auto reads your power rank)."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="contend|rebuild|auto (auto uses live window diagnosis, ignoring saved config).",
+    ),
     draft_id: Optional[str] = typer.Option(None, "--draft-id",
                                            help="Override the auto-detected draft."),
 ) -> None:
     """Live draft board scored FOR your team: your picks, where you stand, and the
     best available ranked by fit (roster need + win-now/rebuild horizon), not raw
     market value alone."""
+    mode_clean = _validate_window_mode(mode)
     cfg, sc = _load()
     if not cfg.user_id:
         _fail("your team is unknown. Re-run `ff setup <username>` so it records you.")
-
-    mode = mode.lower()
-    if mode not in ("auto", "contend", "rebuild"):
-        _fail("--mode must be auto, contend, or rebuild.")
 
     if not draft_id:
         summary = _active_draft(sc, cfg.league_id)
@@ -1784,9 +1999,24 @@ def draft(
     all_vals = value_all_rosters(rosters, book, players_meta)
     my_rank = next((v.power_rank for v in all_vals if v.roster_id == mine.roster_id), None)
     val.power_rank = my_rank
-    # Status thirds are over the ranked rosters (len(all_vals)), the same
-    # denominator as TeamContext.num_teams, not the draft-settings team count.
-    status = mode if mode in ("contend", "rebuild") else detect_status(my_rank, len(all_vals))
+    windows = _league_windows(
+        sc, cfg, book, rosters, all_vals,
+        league=league,
+        players_meta=players_meta,
+        mode_override=mode_clean,
+        target_roster_id=mine.roster_id,
+        window_mode=cfg.window_mode,
+    )
+    tw = next((w for w in windows if w.roster_id == mine.roster_id), None)
+    target_to_status = {"contend": "contend", "rebuild": "rebuild", "middle_trap": "balanced"}
+    if mode_clean in ("contend", "rebuild"):
+        status = mode_clean
+    elif tw is not None:
+        status = target_to_status.get(tw.effective_target, "balanced")
+    elif mode_clean is None and cfg.window_mode in ("contend", "rebuild"):
+        status = cfg.window_mode
+    else:
+        status = "balanced"
 
     pool = available(book, taken, position=position)
     if rookies:
@@ -1844,6 +2074,45 @@ def draft(
 
 
 _LLM_BACKENDS = SUPPORTED_BACKENDS + ["auto"]
+MAX_ASK_TOOLS = 3
+
+
+def _extract_ask_payload(response: str) -> Optional[Dict[str, Any]]:
+    candidates = [response.strip()]
+    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL):
+        candidates.append(match.group(1).strip())
+    for cand in candidates:
+        if not cand.startswith("{"):
+            continue
+        try:
+            data = json.loads(cand)
+        except Exception:
+            continue
+        if isinstance(data, dict) and ("tools" in data or "tool" in data):
+            return data
+    return None
+
+
+def _parse_ask_calls(response: str) -> List[Tuple[Any, Dict[str, Any]]]:
+    payload = _extract_ask_payload(response)
+    if payload is None:
+        return []
+    if "tools" in payload and isinstance(payload["tools"], list):
+        raw_items = payload["tools"]
+    elif "tool" in payload:
+        raw_items = [payload]
+    else:
+        return []
+    calls: List[Tuple[Any, Dict[str, Any]]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            calls.append((item, {}))
+            continue
+        kwargs = item.get("kwargs") or {}
+        if not isinstance(kwargs, dict):
+            kwargs = {}
+        calls.append((item.get("tool"), kwargs))
+    return calls
 
 
 @app.command()
@@ -1867,9 +2136,11 @@ def ask(
     system_prompt = (
         f"You are an AI assistant for a Sleeper dynasty fantasy football CLI (`ff`).\n"
         f"Available tools: {json.dumps(TOOL_SCHEMAS)}\n"
-        f"If the query requires league data, trade calculations, lineup optimization, waivers, draft fit, or onboarding, "
-        f"respond with ONLY a JSON tool call block in this format:\n"
+        f"If the query requires league data, competitive window diagnosis, trade calculations, lineup optimization, "
+        f"waivers, draft fit, or onboarding, respond with ONLY a JSON tool call block in either format:\n"
         f'{{"tool": "<tool_name>", "kwargs": {{ ... }}}}\n'
+        f'Or for cross-cutting questions requiring up to {MAX_ASK_TOOLS} tools:\n'
+        f'{{"tools": [{{"tool": "<tool_name>", "kwargs": {{ ... }}}}, ...]}}\n'
         f"Do NOT include conversational text when issuing a tool call. If no tool is needed, respond in plain Markdown."
     )
 
@@ -1878,48 +2149,38 @@ def ask(
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
         _fail(f"LLM runner failed ({e}).")
 
-    tool_call = None
-    try:
-        data = json.loads(first_response.strip())
-        if isinstance(data, dict) and "tool" in data:
-            tool_call = data
-    except Exception:
-        match = re.search(r"```(?:json)?\s*(\{\s*\"tool\".*?\})\s*```", first_response, re.DOTALL)
-        if match:
-            try:
-                tool_call = json.loads(match.group(1))
-            except Exception:
-                pass
-
-    if not tool_call:
+    raw_calls = _parse_ask_calls(first_response)
+    if not raw_calls:
         console.print(Markdown(first_response))
         qa_rep = run_qa("ask", tool_name=None, result={}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
-    tool_name = tool_call.get("tool")
-    kwargs = tool_call.get("kwargs") or {}
-    if not isinstance(kwargs, dict):
-        kwargs = {}
-
-    if tool_name not in ALLOWED_TOOLS:
-        console.print(f"[red]Unknown tool '{tool_name}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
-        qa_rep = run_qa("ask", tool_name=str(tool_name), result={"error": f"Unknown tool: {tool_name}"}, query=query)
+    unknown = [name for name, _ in raw_calls if not isinstance(name, str) or name not in ALLOWED_TOOLS]
+    if unknown:
+        bad = unknown[0]
+        console.print(f"[red]Unknown tool '{bad}'.[/] Known tools: {', '.join(sorted(ALLOWED_TOOLS))}.")
+        qa_rep = run_qa("ask", tool_name=str(bad), result={"error": f"Unknown tool: {bad}"}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
-    if tool_name == "setup_league":
-        username = kwargs.get("username")
+    setup_call = next(((n, kw) for n, kw in raw_calls if n == "setup_league"), None)
+    if setup_call is not None:
+        _, setup_kwargs = setup_call
+        username = setup_kwargs.get("username")
         if not username:
             console.print("[yellow]Please provide your Sleeper username to complete onboarding.[/]")
             return
         try:
-            cfg = onboard_user(username=username, league_id=kwargs.get("league_id"))
+            cfg = onboard_user(username=username, league_id=setup_kwargs.get("league_id"))
         except ValueError as e:
             console.print(f"[red]{e}[/]")
             return
-        console.print(f"[bold green]Successfully onboarded Sleeper league[/] [cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!")
-        qa_rep = run_qa("ask", tool_name=tool_name, result={"username": username}, query=query)
+        console.print(
+            f"[bold green]Successfully onboarded Sleeper league[/] "
+            f"[cyan]{cfg.league_name or cfg.league_id}[/] for user [bold]{username}[/]!"
+        )
+        qa_rep = run_qa("ask", tool_name="setup_league", result={"username": username}, query=query)
         render_qa_footer(qa_rep, console)
         return
 
@@ -1927,31 +2188,93 @@ def ask(
         console.print("[yellow]No league configured yet.[/] Please provide your Sleeper username to get started (e.g. `ff ask 'setup league for username'`).")
         return
 
+    calls: List[Tuple[str, Dict[str, Any]]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for name, kwargs in raw_calls:
+        tool_str = str(name)
+        key = (tool_str, json.dumps(kwargs, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        calls.append((tool_str, kwargs))
+        if len(calls) >= MAX_ASK_TOOLS:
+            break
+
     sc = SleeperClient()
     ctx = _analysis_ctx(cfg, sc)
 
-    try:
-        if tool_name == "get_waivers":
-            ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
-        result = dispatch_tool(tool_name, kwargs, ctx)
-    except Exception as e:
-        console.print(f"[red]Error executing tool calculation '{tool_name}':[/] {e}")
-        qa_rep = run_qa("ask", tool_name=tool_name, result={"error": str(e)}, query=query)
+    executed_names: List[str] = []
+    batch_results: List[Dict[str, Any]] = []
+    success_count = 0
+    for tool_name, kwargs in calls:
+        executed_names.append(tool_name)
+        try:
+            if tool_name == "get_waivers":
+                ctx["trending"] = _trending_adds(sc, int(kwargs.get("limit") or 25))
+            res = dispatch_tool(tool_name, kwargs, ctx)
+            batch_results.append({"tool": tool_name, "kwargs": kwargs, "result": res})
+            success_count += 1
+        except Exception as e:
+            batch_results.append({"tool": tool_name, "kwargs": kwargs, "error": str(e)})
+
+    if success_count == 0:
+        if len(calls) == 1:
+            only_name = executed_names[0]
+            only_err = batch_results[0]["error"]
+            console.print(f"[red]Error executing tool calculation '{only_name}':[/] {only_err}")
+            qa_rep = run_qa(
+                "ask",
+                tool_name=only_name,
+                tool_names=executed_names,
+                result={"error": only_err},
+                query=query,
+            )
+        else:
+            details = "; ".join(f"{r['tool']}: {r['error']}" for r in batch_results)
+            console.print(f"[red]Error executing tool calculation:[/] {details}")
+            qa_rep = run_qa(
+                "ask",
+                tool_name=None,
+                tool_names=executed_names,
+                result=batch_results,
+                query=query,
+            )
         render_qa_footer(qa_rep, console)
         return
 
-    synthesis_prompt = (
-        f"User Query: '{query}'\n"
-        f"Executed Tool: '{tool_name}' with args {json.dumps(kwargs)}\n"
-        f"Deterministic Calculation Result:\n{json.dumps(result, indent=2)}\n\n"
-        f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
-    )
+    qa_tool_name: Optional[str]
+    qa_result: Any
+    if len(calls) == 1:
+        single_name, single_kwargs = calls[0]
+        qa_tool_name = single_name
+        qa_result = batch_results[0]["result"]
+        synthesis_prompt = (
+            f"User Query: '{query}'\n"
+            f"Executed Tool: '{single_name}' with args {json.dumps(single_kwargs)}\n"
+            f"Deterministic Calculation Result:\n{json.dumps(qa_result, indent=2)}\n\n"
+            f"Provide a concise, helpful, human-friendly explanation of these results in plain Markdown."
+        )
+    else:
+        qa_tool_name = None
+        qa_result = batch_results
+        synthesis_prompt = (
+            f"User Query: '{query}'\n"
+            f"Executed Tools ({len(batch_results)}):\n{json.dumps(batch_results, indent=2)}\n\n"
+            f"Provide a concise, helpful, human-friendly explanation synthesizing all deterministic results in plain Markdown."
+        )
+
     try:
         final_response = runner_inst.run(prompt=synthesis_prompt)
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, RuntimeError) as e:
         _fail(f"LLM runner failed ({e}).")
     console.print(Markdown(final_response))
-    qa_rep = run_qa("ask", tool_name=tool_name, result=result, query=query)
+    qa_rep = run_qa(
+        "ask",
+        tool_name=qa_tool_name,
+        tool_names=executed_names,
+        result=qa_result,
+        query=query,
+    )
     render_qa_footer(qa_rep, console)
 
 
@@ -1978,6 +2301,26 @@ def set_llm(
     console.print(f"[bold green]Updated LLM backend[/] to [cyan]{backend_clean}[/]"
                   + (f" (model: [cyan]{model}[/])" if model else "")
                   + f"\nconfig: {path}")
+
+
+@config_app.command(name="set-window")
+@_guard
+def set_window(
+    mode: str = typer.Argument(..., help="Target window mode: auto, contend, or rebuild"),
+) -> None:
+    """Configure the competitive window target mode used across commands."""
+    if not config_exists():
+        _fail("No league configured. Run 'ff setup <username>' first.")
+    try:
+        cfg = load_config()
+    except FileNotFoundError:
+        _fail("No league configured. Run 'ff setup <username>' first.")
+    mode_clean = mode.lower()
+    if mode_clean not in _WINDOW_MODES:
+        _fail(f"Invalid window mode '{mode}'. Must be one of: {', '.join(_WINDOW_MODES)}")
+    cfg.window_mode = mode_clean
+    path = save_config(cfg)
+    console.print(f"[bold green]Updated window mode[/] to [cyan]{mode_clean}[/]\nconfig: {path}")
 
 
 @app.command(name="qa")
@@ -2044,6 +2387,17 @@ def qa_cmd(
     # 7. Movers / Arbitrage audit
     arb_movers = find_arbitrage_movers(rosters=rosters, book=book, min_value=1000, limit=20)
     reports.append(run_qa("movers", movers=arb_movers, mode="arbitrage"))
+
+    # 8. Window audit
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        league=league,
+        players_meta=players_meta,
+        target_roster_id=my_roster.roster_id if my_roster else None,
+        window_mode=cfg.window_mode if my_roster else "auto",
+        ledger=ledger,
+    )
+    reports.append(run_qa("window", windows=windows, rosters=rosters))
 
     if verbose:
         for r in reports:

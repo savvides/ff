@@ -1,5 +1,7 @@
 """Unit tests for contract models: depth_chart_order, team, and depth_role."""
 
+from __future__ import annotations
+
 from ff.contracts import Asset, RosterSlot, WaiverTarget
 
 
@@ -62,3 +64,54 @@ def test_asset_fill_from_meta_depth_chart_order():
     assert a.depth_chart_order == 2
     assert a.team == "DET"
     assert a.depth_role == "RB2"
+
+
+def test_window_contracts_and_roster_max_pf_default():
+    from ff.contracts import (
+        AssetDurationFlag,
+        DecisionFilter,
+        Roster,
+        SeasonPhase,
+        TeamWindow,
+    )
+
+    r = Roster(roster_id=1)
+    assert r.max_pf == 0.0
+    sp = SeasonPhase(
+        phase="in_season_peak",
+        label="Peak In-Season (Oct-Nov)",
+        liquidity_bias="points_premium",
+        week=8,
+        season_type="regular",
+        summary="Contenders pay a premium for points.",
+    )
+    flag = AssetDurationFlag(
+        player_id="9221",
+        name="Vet RB",
+        position="RB",
+        age=27.0,
+        value=3000,
+        kind="RB_OFFSEASON_DECAY",
+        severity="HIGH",
+        reason="Aging RB held in offseason.",
+    )
+    flt = DecisionFilter(name="Duration", signal="ALIGNED", summary="Fits contender window.")
+    tw = TeamWindow(
+        roster_id=1,
+        team_name="Warriors",
+        diagnosed="CONTEND",
+        effective_target="contend",
+        target_source="auto",
+        win_now_score=90.0,
+        win_now_rank=1,
+        future_score=60.0,
+        future_rank=5,
+        starter_win_now_value=45000,
+        max_pf=1520.5,
+        dynasty_player_value=50000,
+        pick_value=6000,
+        season_phase=sp,
+        flags=[flag],
+    )
+    assert tw.flags[0].severity == "HIGH"
+    assert flt.signal == "ALIGNED"

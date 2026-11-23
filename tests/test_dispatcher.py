@@ -251,6 +251,175 @@ def test_lineup_cannot_label_current_week_facts_as_another_week():
             "rosters": [Roster(roster_id=1)], "weekly": object(), "week": 3})
 
 
+def test_tool_schemas_includes_get_team_window() -> None:
+    from ff.services.llm.tools import ALLOWED_TOOLS, TOOL_SCHEMAS
+    assert "get_team_window" in ALLOWED_TOOLS
+    assert any(t["name"] == "get_team_window" for t in TOOL_SCHEMAS)
+
+
+def test_dispatch_get_team_window_and_trade_filters() -> None:
+    from ff.contracts import Asset, Format, Roster
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    cfg = Config(league_id="LG1", season=2026, format=Format(), user_id="u1", window_mode="rebuild")
+    r1 = Roster(roster_id=1, owner_id="u1", team_name="Mine", player_ids=["p1"], wins=4, losses=6, max_pf=1100.0)
+    r2 = Roster(roster_id=2, owner_id="u2", team_name="Rival", player_ids=["p2"], wins=8, losses=2, max_pf=1500.0)
+    a1 = Asset(id="p1", name="Vet RB", position="RB", age=27.0, value=3000, redraft_value=3500)
+    a2 = Asset(id="p2", name="Young WR", position="WR", age=22.0, value=6000, redraft_value=5000)
+    book = ValueBook([a1, a2])
+    ctx = {
+        "config": cfg,
+        "rosters": [r1, r2],
+        "value_book": book,
+        "players_meta": {},
+        "roster_positions": ["QB", "RB", "WR", "FLEX"],
+        "state": {"season_type": "regular", "week": 8},
+    }
+    win = dispatch_tool("get_team_window", {}, ctx=ctx)
+    assert win["effective_target"] == "rebuild"
+    assert win["target_source"] == "config"
+
+    rival_win = dispatch_tool("get_team_window", {"team": "Rival"}, ctx=ctx)
+    assert rival_win["team_name"] == "Rival"
+    assert rival_win["target_source"] == "auto"
+
+    override_win = dispatch_tool("get_team_window", {"mode": "contend"}, ctx=ctx)
+    assert override_win["effective_target"] == "contend"
+    assert override_win["target_source"] == "override"
+
+    with pytest.raises(ValueError, match="mode"):
+        dispatch_tool("get_team_window", {"mode": "invalid"}, ctx=ctx)
+
+    trade_res = dispatch_tool("evaluate_trade", {"give": ["Vet RB"], "get": ["Young WR"]}, ctx=ctx)
+    assert "strategy_filters" in trade_res
+    assert [f["name"] for f in trade_res["strategy_filters"]] == ["Duration", "RB Option Risk", "Seasonal Liquidity"]
+
+
+def test_dispatch_get_draft_fit_honors_config_window_mode() -> None:
+    from ff.contracts import Asset, Format, Roster
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    cfg = Config(league_id="LG1", season=2026, format=Format(), user_id="u1", window_mode="rebuild")
+    # r1 has higher value so auto status would be "contend", r2 has lower value so auto would be "rebuild"
+    r1 = Roster(roster_id=1, owner_id="u1", team_name="Mine", player_ids=["p1"])
+    r2 = Roster(roster_id=2, owner_id="u2", team_name="Rival", player_ids=["p2"])
+    r3 = Roster(roster_id=3, owner_id="u3", team_name="Mid", player_ids=["p3"])
+    book = ValueBook([
+        Asset(id="p1", name="Star A", position="WR", value=9000),
+        Asset(id="p2", name="Bench B", position="WR", value=2000),
+        Asset(id="p3", name="Mid C", position="WR", value=5000),
+        Asset(id="p4", name="Rookie D", position="WR", value=4000),
+    ])
+    captured = []
+
+    def fake_rank(candidates, my_val, all_vals, roster_positions, status, limit):
+        captured.append(status)
+        team_ctx = MagicMock()
+        team_ctx.model_dump.return_value = {"status": status}
+        return team_ctx, []
+
+    ctx = {"config": cfg, "rosters": [r1, r2, r3], "value_book": book, "players_meta": {}, "roster_positions": []}
+    with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+        dispatch_tool("get_draft_fit", {}, ctx=ctx)
+        dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=ctx)
+    assert captured == ["rebuild", "rebuild"]
+
+    # When cfg.window_mode="contend", Mine becomes "contend" while Rival remains auto-detected ("rebuild")
+    cfg.window_mode = "contend"
+    captured.clear()
+    with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+        dispatch_tool("get_draft_fit", {}, ctx=ctx)
+        dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=ctx)
+    assert captured == ["contend", "rebuild"]
+
+    # Explicit mode="auto" clears saved cfg.window_mode and uses live window diagnosis; mode="rebuild" overrides
+    cfg.window_mode = "rebuild"
+    captured.clear()
+    with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+        dispatch_tool("get_draft_fit", {"mode": "auto"}, ctx=ctx)
+        dispatch_tool("get_draft_fit", {"team": "Mid", "mode": "contend"}, ctx=ctx)
+    assert captured == ["contend", "contend"]
+
+
+def test_dispatch_window_and_draft_fit_without_user_id_uses_fallback_and_never_leaks_to_rival() -> None:
+    from ff.contracts import Asset, Format, Roster
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+    from ff.values import ValueBook
+
+    # Rank 1 = Rival ("contend" auto), Rank 2 = Mine ("balanced" / middle_trap auto), Rank 3 = Other ("rebuild" auto)
+    r_rival = Roster(roster_id=2, owner_id="u2", team_name="Rival", player_ids=["p2"], wins=8, losses=2, max_pf=1500.0)
+    r_mine = Roster(roster_id=1, owner_id="u1", team_name="Mine", player_ids=["p1"], wins=5, losses=5, max_pf=1200.0)
+    r_other = Roster(roster_id=3, owner_id="u3", team_name="Other", player_ids=["p3"], wins=2, losses=8, max_pf=900.0)
+    book = ValueBook([
+        Asset(id="p2", name="Star WR", position="WR", age=24.0, value=9000, redraft_value=8500),
+        Asset(id="p1", name="Mid RB", position="RB", age=25.0, value=5000, redraft_value=5000),
+        Asset(id="p3", name="Bench TE", position="TE", age=23.0, value=2000, redraft_value=2000),
+        Asset(id="p4", name="Rookie WR", position="WR", age=21.0, value=4000, redraft_value=3000),
+    ])
+
+    captured: list[str] = []
+
+    def fake_rank(candidates, my_val, all_vals, roster_positions, status, limit):
+        captured.append(status)
+        team_ctx = MagicMock()
+        team_ctx.model_dump.return_value = {"status": status}
+        return team_ctx, []
+
+    for cfg in (
+        Config(league_id="LG1", season=2026, format=Format(), user_id=None, user_name="Mine", window_mode="rebuild"),
+        Config(league_id="LG1", season=2026, format=Format(), user_id=None, username="mine", window_mode="rebuild"),
+    ):
+        ctx = {
+            "config": cfg,
+            "rosters": [r_rival, r_mine, r_other],
+            "value_book": book,
+            "players_meta": {},
+            "roster_positions": ["QB", "RB", "WR", "FLEX"],
+            "state": {"season_type": "regular", "week": 8},
+        }
+
+        my_win = dispatch_tool("get_team_window", {}, ctx=ctx)
+        assert my_win["team_name"] == "Mine"
+        assert my_win["effective_target"] == "rebuild"
+        assert my_win["target_source"] == "config"
+
+        my_named_win = dispatch_tool("get_team_window", {"team": "Mine"}, ctx=ctx)
+        assert my_named_win["effective_target"] == "rebuild"
+        assert my_named_win["target_source"] == "config"
+
+        rival_win = dispatch_tool("get_team_window", {"team": "Rival"}, ctx=ctx)
+        assert rival_win["team_name"] == "Rival"
+        assert rival_win["effective_target"] == "contend"
+        assert rival_win["target_source"] == "auto"
+
+        captured.clear()
+        with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+            dispatch_tool("get_draft_fit", {}, ctx=ctx)
+            dispatch_tool("get_draft_fit", {"team": "Mine"}, ctx=ctx)
+            dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=ctx)
+        assert captured == ["rebuild", "rebuild", "contend"]
+
+    # Also verify no identity in config never leaks cfg.window_mode onto a rival
+    anon_cfg = Config(league_id="LG1", season=2026, format=Format(), user_id=None, username=None, user_name=None, window_mode="rebuild")
+    anon_ctx = {
+        "config": anon_cfg,
+        "rosters": [r_rival, r_mine, r_other],
+        "value_book": book,
+        "players_meta": {},
+        "roster_positions": ["QB", "RB", "WR", "FLEX"],
+        "state": {"season_type": "regular", "week": 8},
+    }
+    captured.clear()
+    with patch("ff.analysis.fit.rank_fits", side_effect=fake_rank):
+        dispatch_tool("get_draft_fit", {"team": "Rival"}, ctx=anon_ctx)
+    assert captured == ["contend"]
+
+
 def test_dispatch_standings_and_trade_plan() -> None:
     from ff.contracts import Asset, Roster, StandingProjection
     from ff.services.llm.dispatcher import dispatch_tool

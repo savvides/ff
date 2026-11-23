@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ff.analysis import cleanup, fit, lineup, movers, picks, plan, roster, trade, waivers
+from ff.analysis import cleanup, fit, lineup, movers, picks, plan, roster, trade, waivers, window
 from ff.analysis.draft import available
 from ff.analysis.compare import compare_players
 from ff.analysis.weekly_waivers import weekly_waivers
+from ff.contracts import TradeEvaluation
 from ff.services.llm.tools import ALLOWED_TOOLS
+from ff.values import ValueBook
 
 
 def _find_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str, Any]) -> Any:
@@ -91,6 +93,79 @@ def _require_roster(rosters: List[Any], team_query: Optional[str], ctx: Dict[str
     return r
 
 
+def _optional_pick_ledger(
+    ctx: Dict[str, Any],
+    rosters: List[Any],
+    valuations: List[Any],
+    value_book: Any,
+    is_dynasty: bool,
+) -> Optional[List[Any]]:
+    if not is_dynasty or not rosters or not value_book:
+        return None
+    if "pick_ledger" in ctx and ctx["pick_ledger"] is not None:
+        return list(ctx["pick_ledger"])
+    # Avoid invoking _LazyContext._get_pick_window when a mock SleeperClient lacks drafts/traded_picks.
+    sc = getattr(ctx, "_sc", None)
+    if sc is not None and not (hasattr(sc, "traded_picks") and hasattr(sc, "drafts")):
+        return None
+    traded_picks = ctx.get("traded_picks")
+    if traded_picks is None:
+        return None
+    seasons = ctx.get("seasons")
+    rounds = ctx.get("rounds")
+    if not seasons or not rounds:
+        return None
+    power_ranks = {v.roster_id: v.power_rank for v in valuations}
+    return picks.pick_ledger(
+        rosters,
+        traded_picks,
+        value_book,
+        power_ranks,
+        seasons=seasons,
+        rounds=rounds,
+    )
+
+
+def _compute_league_windows(
+    ctx: Dict[str, Any],
+    *,
+    rosters: List[Any],
+    value_book: Any,
+    players_meta: Any,
+    season_phase: Any,
+    target_roster_id: Optional[int],
+    window_mode: str,
+    mode_override: Optional[str] = None,
+) -> List[Any]:
+    cfg = ctx.get("config")
+    fmt = getattr(cfg, "format", None) if cfg else None
+    is_dynasty = bool(fmt.is_dynasty) if fmt is not None else True
+    valuations = roster.value_all_rosters(rosters, value_book, players_meta) if (rosters and value_book) else []
+    ledger = _optional_pick_ledger(ctx, rosters, valuations, value_book, is_dynasty)
+    return window.analyze_league_windows(
+        rosters,
+        valuations,
+        value_book,
+        ctx.get("roster_positions", []),
+        season_phase=season_phase,
+        pick_ledger=ledger,
+        players_meta=players_meta,
+        is_dynasty=is_dynasty,
+        window_mode=window_mode,
+        mode_override=mode_override,
+        target_roster_id=target_roster_id,
+    )
+
+
+def _parse_mode_override(mode_raw: Any) -> Optional[str]:
+    if mode_raw is None:
+        return None
+    mode_clean = str(mode_raw).strip().lower()
+    if mode_clean not in ("auto", "contend", "rebuild"):
+        raise ValueError("mode must be auto, contend, or rebuild")
+    return mode_clean
+
+
 def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
     if tool_name not in ALLOWED_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -123,7 +198,29 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             book=value_book,
             players_meta=players_meta,
         )
-        return res.model_dump() if hasattr(res, "model_dump") else res
+        out = res.model_dump() if hasattr(res, "model_dump") else res
+        cfg = ctx.get("config")
+        rosters = ctx.get("rosters")
+        if cfg and rosters and isinstance(res, TradeEvaluation) and isinstance(out, dict):
+            season_phase = window.detect_season_phase(ctx.get("state"))
+            my_window = None
+            target_r = _find_roster(rosters, None, ctx)
+            if target_r is not None and value_book is not None:
+                wm = getattr(cfg, "window_mode", "auto")
+                cfg_mode = wm if isinstance(wm, str) else "auto"
+                windows = _compute_league_windows(
+                    ctx,
+                    rosters=rosters,
+                    value_book=value_book,
+                    players_meta=players_meta,
+                    season_phase=season_phase,
+                    target_roster_id=target_r.roster_id,
+                    window_mode=cfg_mode,
+                )
+                my_window = next((w for w in windows if w.roster_id == target_r.roster_id), None)
+            filters = window.evaluate_trade_filters(res, my_window, season_phase)
+            out["strategy_filters"] = [f.model_dump() for f in filters]
+        return out
 
     elif tool_name == "get_weekly_waivers":
         team = kwargs.get("team")
@@ -291,7 +388,38 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         my_val = _find_roster_valuation(all_vals, team, ctx)
         if all_vals and my_val is None:
             raise ValueError("could not find that team")
-        status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
+        cfg = ctx.get("config")
+        wm = getattr(cfg, "window_mode", None) if cfg else None
+        mode_override = _parse_mode_override(kwargs.get("mode"))
+        target_r = _find_roster(rosters, team, ctx) if rosters else None
+        my_roster = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(my_roster is not None and target_r is not None and target_r.roster_id == my_roster.roster_id)
+        if value_book is not None and rosters and all_vals and target_r is not None:
+            season_phase = window.detect_season_phase(ctx.get("state"))
+            windows = _compute_league_windows(
+                ctx,
+                rosters=rosters,
+                value_book=value_book,
+                players_meta=players_meta,
+                season_phase=season_phase,
+                target_roster_id=target_r.roster_id,
+                window_mode=wm if (is_mine and isinstance(wm, str)) else "auto",
+                mode_override=mode_override,
+            )
+            tw = next((w for w in windows if w.roster_id == target_r.roster_id), None)
+            target_to_status = {"contend": "contend", "rebuild": "rebuild", "middle_trap": "balanced"}
+            if mode_override in ("contend", "rebuild"):
+                status = mode_override
+            elif tw is not None:
+                status = target_to_status.get(tw.effective_target, "balanced")
+            else:
+                status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
+        elif mode_override in ("contend", "rebuild"):
+            status = mode_override
+        elif mode_override is None and is_mine and isinstance(wm, str) and wm in ("contend", "rebuild"):
+            status = wm
+        else:
+            status = fit.detect_status(my_val.power_rank if my_val else None, len(all_vals))
         position = kwargs.get("position")
         limit = kwargs.get("limit", 10)
         taken = {
@@ -315,5 +443,32 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         limit = kwargs.get("limit", 50)
         assets = value_book.top(position=position, limit=limit) if value_book else []
         return [a.model_dump() if hasattr(a, "model_dump") else a for a in assets]
+
+    elif tool_name == "get_team_window":
+        rosters = ctx.get("rosters", [])
+        team = kwargs.get("team")
+        target_r = _require_roster(rosters, team, ctx)
+        mode_override = _parse_mode_override(kwargs.get("mode"))
+        cfg = ctx.get("config")
+        value_book = ctx.get("value_book")
+        book = value_book if value_book is not None else ValueBook([])
+        players_meta = ctx.get("players_meta")
+        season_phase = window.detect_season_phase(ctx.get("state"))
+        my_roster = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(my_roster is not None and target_r is not None and target_r.roster_id == my_roster.roster_id)
+        wm = getattr(cfg, "window_mode", "auto") if cfg else "auto"
+        cfg_mode = wm if (is_mine and isinstance(wm, str)) else "auto"
+        windows = _compute_league_windows(
+            ctx,
+            rosters=rosters,
+            value_book=book,
+            players_meta=players_meta,
+            season_phase=season_phase,
+            target_roster_id=target_r.roster_id,
+            window_mode=cfg_mode,
+            mode_override=mode_override,
+        )
+        target_win = next(w for w in windows if w.roster_id == target_r.roster_id)
+        return target_win.model_dump()
 
     raise ValueError(f"Unknown tool: {tool_name}")

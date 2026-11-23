@@ -80,6 +80,7 @@ def test_cli_qa_across_all_commands(fake_clients, league, monkeypatch):
         ["movers", "--buy"],
         ["movers", "--arbitrage"],
         ["draft", "--draft-id", "DR1"],
+        ["window"],
     ]
 
     for cmd in commands:

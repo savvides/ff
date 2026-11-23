@@ -1,6 +1,8 @@
 """Sleeper helpers: format auto-detection and roster building (the part that
 makes values correct for the user's league). Plus one mocked client call."""
 
+from __future__ import annotations
+
 import responses
 
 from ff.sleeper import SleeperClient, build_rosters, detect_format, team_names
@@ -146,4 +148,37 @@ def test_players_fresh_flag(monkeypatch):
     assert called["ttl"] == 24 * 3600
     sc.players(fresh=True)
     assert called["ttl"] == 0
+
+
+def test_build_rosters_parses_max_pf():
+    raw = [
+        {
+            "roster_id": 1,
+            "owner_id": "u1",
+            "players": ["a"],
+            "starters": ["a"],
+            "settings": {
+                "wins": 5,
+                "losses": 3,
+                "fpts": 1100,
+                "fpts_decimal": 50,
+                "ppts": 1620,
+                "ppts_decimal": 35,
+            },
+        },
+        {
+            "roster_id": 2,
+            "owner_id": "u2",
+            "players": ["b"],
+            "starters": ["b"],
+            "settings": {},
+        },
+    ]
+    users = [
+        {"user_id": "u1", "display_name": "a", "metadata": {}},
+        {"user_id": "u2", "display_name": "b", "metadata": {}},
+    ]
+    rosters = build_rosters(raw, users)
+    assert rosters[0].max_pf == 1620.35
+    assert rosters[1].max_pf == 0.0
 

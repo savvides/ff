@@ -5,6 +5,8 @@ suite is deterministic gate tests (see AGENTS.md): roster math and trade math ar
 deterministic-space work, not latent-space work.
 """
 
+from __future__ import annotations
+
 from ff.analysis.cleanup import audit_roster, designation, ir_eligible_statuses, taxi_eligible
 from ff.analysis.depth import (
     depth_chart_multiplier,
@@ -35,6 +37,11 @@ from ff.analysis.trade import (
     secondary_position_deltas,
 )
 from ff.analysis.waivers import waiver_targets
+from ff.analysis.window import (
+    analyze_league_windows,
+    detect_season_phase,
+    evaluate_trade_filters,
+)
 from ff.contracts import ArbitrageMover
 
 __all__ = [
@@ -76,5 +83,8 @@ __all__ = [
     "opportunity_score",
     "precompute_qb2_promotions",
     "precompute_starter_injuries",
+    "detect_season_phase",
+    "analyze_league_windows",
+    "evaluate_trade_filters",
 ]
 

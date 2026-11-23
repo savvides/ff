@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -64,4 +66,17 @@ def test_save_config_atomic_and_utf8(tmp_path: Path) -> None:
     assert list(tmp_path.glob("*.tmp")) == []
     loaded = load_config(path=cfg_file)
     assert loaded.name == "Dîckerson's Téam"
+
+
+def test_window_mode_config_default_round_trip_and_legacy(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg = Config(league_id="123456", season=2026)
+    assert cfg.window_mode == "auto"
+
+    cfg.window_mode = "rebuild"
+    save_config(cfg, path=cfg_file)
+    assert load_config(path=cfg_file).window_mode == "rebuild"
+
+    cfg_file.write_text('{"league_id": "123456", "season": 2026}', encoding="utf-8")
+    assert load_config(path=cfg_file).window_mode == "auto"
 

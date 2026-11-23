@@ -198,3 +198,109 @@ def test_config_set_llm_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     res = runner.invoke(app, ["config", "set-llm", "claude"])
     assert res.exit_code != 0
     assert "No league configured" in res.output
+
+
+def test_ask_multi_tool_batch_shares_context(fake_clients, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ff.cli as cli
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    sc = cli.SleeperClient()
+    state_calls = []
+    orig_state = sc.state
+    monkeypatch.setattr(sc, "state", lambda *a, **k: state_calls.append(1) or orig_state(*a, **k))
+    monkeypatch.setattr(cli, "SleeperClient", lambda *a, **k: sc)
+
+    vc = cli.ValuesClient()
+    fetch_calls = []
+    orig_fetch = vc.fetch
+    monkeypatch.setattr(vc, "fetch", lambda *a, **k: fetch_calls.append(1) or orig_fetch(*a, **k))
+    monkeypatch.setattr(cli, "ValuesClient", lambda *a, **k: vc)
+
+    batch = '{"tools": [{"tool": "get_team_window", "kwargs": {}}, {"tool": "get_movers", "kwargs": {"buy": true, "limit": 5}}]}'
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.side_effect = [batch, "Combined strategy answer."]
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "Should I buy low or pivot?"])
+    assert res.exit_code == 0, res.output
+    assert "Combined strategy answer" in res.output
+    synth = mock_inst.run.call_args_list[1].kwargs["prompt"]
+    assert "get_team_window" in synth and "get_movers" in synth
+    assert len(state_calls) == 1
+    assert len(fetch_calls) == 1
+
+
+def test_ask_multi_tool_dedup_cap_and_partial_failure(fake_clients, monkeypatch: pytest.MonkeyPatch) -> None:
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    monkeypatch.setenv("FF_QA", "strict")
+    # 5 calls with duplicate and 1 unknown-team failure; deduplicates and caps at 3
+    batch = (
+        '{"tools": ['
+        '{"tool": "get_team_window", "kwargs": {}},'
+        '{"tool": "get_team_window", "kwargs": {}},'
+        '{"tool": "get_roster", "kwargs": {"team": "nonexistent"}},'
+        '{"tool": "get_movers", "kwargs": {"limit": 3}},'
+        '{"tool": "get_picks", "kwargs": {}}'
+        ']}'
+    )
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.side_effect = [batch, "Partial synthesis."]
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "Analyze everything"])
+    assert res.exit_code == 0, res.output
+    synth = mock_inst.run.call_args_list[1].kwargs["prompt"]
+    assert "get_team_window" in synth
+    assert "get_movers" in synth
+    assert "get_picks" not in synth  # capped at 3 unique calls
+    assert "could not find that team" in synth
+
+    # Batch containing an unknown tool rejects immediately before synthesis
+    monkeypatch.delenv("FF_QA", raising=False)
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.return_value = '{"tools": [{"tool": "get_team_window", "kwargs": {}}, {"tool": "os_system", "kwargs": {}}]}'
+        MockRunner.return_value = mock_inst
+        bad_res = runner.invoke(app, ["ask", "Bad batch"])
+    assert "Unknown tool" in bad_res.output
+    assert mock_inst.run.call_count == 1
+
+    # Batch where every tool fails prints error cleanly without calling synthesis
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.return_value = '{"tools": [{"tool": "get_roster", "kwargs": {"team": "nope1"}}, {"tool": "get_roster", "kwargs": {"team": "nope2"}}]}'
+        MockRunner.return_value = mock_inst
+        fail_res = runner.invoke(app, ["ask", "Both fail"])
+    assert fail_res.exit_code == 0, fail_res.output
+    assert "Error executing tool calculation" in fail_res.output
+    assert mock_inst.run.call_count == 1
+
+
+def test_ask_setup_league_not_batched(fake_clients, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ff.cli as cli
+    monkeypatch.setattr("ff.sleeper.client.SleeperClient", cli.SleeperClient)
+    batch = '{"tools": [{"tool": "setup_league", "kwargs": {"username": "alice"}}, {"tool": "get_team_window", "kwargs": {}}]}'
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.return_value = batch
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "setup alice and check window"])
+    assert res.exit_code == 0, res.output
+    assert "Successfully onboarded Sleeper league" in res.output
+    assert mock_inst.run.call_count == 1
+
+
+def test_ask_fenced_multi_tool_json_parsed(fake_clients) -> None:
+    save_config(Config(league_id="LG1", season=2026, format=Format(), user_id="userA"))
+    batch = (
+        "```json\n"
+        '{"tools": [{"tool": "get_team_window", "kwargs": {}}, {"tool": "get_picks", "kwargs": {}}]}\n'
+        "```"
+    )
+    with patch("ff.cli.TerminalRunner") as MockRunner:
+        mock_inst = MagicMock()
+        mock_inst.run.side_effect = [batch, "Fenced synthesis."]
+        MockRunner.return_value = mock_inst
+        res = runner.invoke(app, ["ask", "Check window and picks"])
+    assert res.exit_code == 0, res.output
+    assert "Fenced synthesis" in res.output
+    assert mock_inst.run.call_count == 2
