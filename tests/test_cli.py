@@ -608,3 +608,166 @@ def test_load_refreshes_league_format_from_sleeper(fake_clients, monkeypatch):
     # verify config was updated on disk
     assert load_config().format.superflex is True
 
+
+def test_window_command_defaults_to_my_team_and_flags_middle_trap(fake_clients, league):
+    _write_config(league)
+    result = runner.invoke(app, ["window"])
+    assert result.exit_code == 0, result.output
+    assert "Dynasty Warriors" in result.output
+    assert "MIDDLE TRAP" in result.output
+    assert "PIVOT_" in result.output
+    assert "Seasonal Liquidity" in result.output
+    assert ("Duration & RB Exposure" in result.output or "align" in result.output.lower())
+
+
+def test_window_scouting_rival_ignores_my_config_mode(fake_clients, league):
+    save_config(Config(
+        league_id="LG1", season=2026, name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id="userA",
+        window_mode="rebuild",
+    ))
+    scout = runner.invoke(app, ["window", "Gridiron Kings"])
+    assert scout.exit_code == 0, scout.output
+    assert "Gridiron Kings" in scout.output
+    assert "CONTEND" in scout.output
+    assert "contend" in scout.output
+    assert "auto" in scout.output
+    assert "config" not in scout.output
+
+    override = runner.invoke(app, ["window", "Gridiron Kings", "--mode", "rebuild"])
+    assert override.exit_code == 0, override.output
+    assert "Gridiron Kings" in override.output
+    assert "CONTEND" in override.output
+    assert "rebuild" in override.output
+    assert "override" in override.output
+
+
+def test_window_invalid_mode_and_unknown_team_fail(fake_clients, league):
+    _write_config(league)
+    bad_mode = runner.invoke(app, ["window", "--mode", "invalid"])
+    assert bad_mode.exit_code == 1
+    assert "--mode must be" in bad_mode.output
+
+    bad_team = runner.invoke(app, ["window", "nonexistent"])
+    assert bad_team.exit_code == 1
+    assert "could not find that team" in bad_team.output
+
+
+def test_config_set_window_command(fake_clients, league):
+    from ff.core.config import load_config
+
+    _write_config(league)
+    res = runner.invoke(app, ["config", "set-window", "rebuild"])
+    assert res.exit_code == 0, res.output
+    assert load_config().window_mode == "rebuild"
+
+    bad = runner.invoke(app, ["config", "set-window", "bogus"])
+    assert bad.exit_code != 0
+
+
+def test_power_shows_max_pf_and_window_preserving_player_totals(fake_clients, league, rosters_raw):
+    _write_config(league)
+    result = runner.invoke(app, ["power"])
+    assert result.exit_code == 0, result.output
+    assert "22,000" in result.output
+    assert "max pf" in result.output
+    assert "window" in result.output
+    assert "CONTEND" in result.output
+    assert "MIDDLE" in result.output
+    assert "REBUILD" in result.output
+    assert "-" in result.output
+
+    # Non-zero Max PF displays numeric value and config override marks *
+    rosters_raw[0]["settings"]["ppts"] = 1620
+    save_config(Config(
+        league_id="LG1", season=2026, name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id="userA",
+        window_mode="rebuild",
+    ))
+    result2 = runner.invoke(app, ["power"])
+    assert result2.exit_code == 0, result2.output
+    assert "1620" in result2.output
+    assert "REBUILD*" in result2.output
+
+
+def test_trade_shows_strategy_filters_and_honors_mode(fake_clients, league):
+    _write_config(league)
+    res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st"])
+    assert res.exit_code == 0, res.output
+    assert "Strategy Filters" in res.output
+    assert "Duration" in res.output
+    assert "RB Option Risk" in res.output
+    assert "Seasonal Liquidity" in res.output
+
+    # --market fc must never leak Dealer or KTC strings in Strategy Filters
+    res_fc = runner.invoke(
+        app,
+        ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson,2027 1st", "--market", "fc"],
+    )
+    assert res_fc.exit_code == 0, res_fc.output
+    assert "Strategy Filters" in res_fc.output
+    assert "Dealer" not in res_fc.output and "KTC" not in res_fc.output
+
+    # --mode changes Duration evaluation deterministically
+    res_contend = runner.invoke(
+        app,
+        ["trade", "--give", "Ja'Marr Chase", "--get", "Rome Odunze,2027 1st", "--mode", "contend"],
+    )
+    assert res_contend.exit_code == 0, res_contend.output
+    assert "MISMATCH" in res_contend.output
+
+    res_rebuild = runner.invoke(
+        app,
+        ["trade", "--give", "Ja'Marr Chase", "--get", "Rome Odunze,2027 1st", "--mode", "rebuild"],
+    )
+    assert res_rebuild.exit_code == 0, res_rebuild.output
+    assert "ALIGNED" in res_rebuild.output
+
+
+def test_trade_without_user_id_degrades_duration_to_na(fake_clients, league):
+    save_config(Config(
+        league_id="LG1", season=2026, name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id=None,
+    ))
+    res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson"])
+    assert res.exit_code == 0, res.output
+    assert "Strategy Filters" in res.output
+    assert "Duration" in res.output
+    assert "N/A" in res.output
+    assert "offer rule:" in res.output
+
+
+def test_draft_honors_config_window_mode(fake_clients, league):
+    save_config(Config(
+        league_id="LG1", season=2026, name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id="userA",
+        window_mode="rebuild",
+    ))
+    res = runner.invoke(app, ["draft", "--draft-id", "DR1"])
+    assert res.exit_code == 0, res.output
+    assert "REBUILD" in res.output
+
+    res_ovr = runner.invoke(app, ["draft", "--draft-id", "DR1", "--mode", "contend"])
+    assert res_ovr.exit_code == 0, res_ovr.output
+    assert "CONTEND" in res_ovr.output
+
+
+def test_window_renders_duration_and_rb_exposure_table(fake_clients, league, book, monkeypatch):
+    import ff.cli as cli
+
+    _write_config(league)
+    sc = cli.SleeperClient()
+    sc.state = lambda *a, **k: {"season_type": "pre"}
+    monkeypatch.setattr(cli, "SleeperClient", lambda *a, **k: sc)
+    for asset in book.assets:
+        if asset.id == "9221":
+            asset.age = 28.0
+    result = runner.invoke(app, ["window"])
+    assert result.exit_code == 0, result.output
+    assert "Duration & RB Exposure" in result.output
+    assert "Jahmyr Gibbs" in result.output
+    assert "RB_OFFSEASON_DECAY" in result.output
+    assert "HIGH" in result.output
+
+
+

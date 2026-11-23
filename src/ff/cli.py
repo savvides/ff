@@ -9,6 +9,7 @@
     ff waivers              trending free agents worth grabbing, by value
     ff cleanup [team]       roster capacity: who to drop / move to IR / stash on taxi for room
     ff draft [-p QB] [-r]   live draft board: your picks + best available by value
+    ff window [team]        competitive window, Max PF, middle-trap pivot, and RB risk
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from ff.analysis import (
     available,
     detect_season_phase,
     detect_status,
+    evaluate_trade_filters,
     find_arbitrage_movers,
     ir_eligible_statuses,
     my_picks,
@@ -56,7 +58,7 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Lineup, Roster
+from ff.contracts import Asset, Lineup, Roster, RosterValuation, SeasonPhase, TeamPicks, TeamWindow
 from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
 from ff.projections import ProjectionsClient
@@ -168,6 +170,64 @@ def _pick_window(sc: SleeperClient, cfg: Config, league: Dict[str, Any],
                    or (((latest or {}).get("settings")) or {}).get("rounds")
                    or 4)
     return seasons, rounds_n
+
+
+_WINDOW_MODES = ("auto", "contend", "rebuild")
+
+
+def _validate_window_mode(mode: Optional[str]) -> Optional[str]:
+    if mode is None:
+        return None
+    clean = mode.lower()
+    if clean not in _WINDOW_MODES:
+        _fail("--mode must be auto, contend, or rebuild.")
+    return clean
+
+
+def _league_windows(
+    sc: SleeperClient,
+    cfg: Config,
+    book: ValueBook,
+    rosters: List[Roster],
+    valuations: List[RosterValuation],
+    *,
+    league: Optional[Dict[str, Any]] = None,
+    players_meta: Optional[Dict[str, Any]] = None,
+    mode_override: Optional[str] = None,
+    target_roster_id: Optional[int] = None,
+    window_mode: Optional[str] = None,
+    ledger: Optional[List[TeamPicks]] = None,
+    season_phase: Optional[SeasonPhase] = None,
+) -> List[TeamWindow]:
+    """Compute competitive windows and duration flags across all league rosters."""
+    league_data = league if league is not None else (sc.league(cfg.league_id) or {})
+    meta = players_meta if players_meta is not None else sc.players()
+    phase = season_phase if season_phase is not None else detect_season_phase(sc.state())
+
+    if ledger is None and cfg.format.is_dynasty and hasattr(sc, "traded_picks") and hasattr(sc, "drafts"):
+        seasons, rounds_n = _pick_window(sc, cfg, league_data)
+        ranks = {v.roster_id: v.power_rank for v in valuations}
+        traded = sc.traded_picks(cfg.league_id)
+        ledger = pick_ledger(rosters, traded, book, ranks, seasons=seasons, rounds=rounds_n)
+
+    resolved_mode = (
+        (cfg.window_mode if target_roster_id is not None else "auto")
+        if window_mode is None
+        else window_mode
+    )
+    return analyze_league_windows(
+        rosters,
+        valuations,
+        book,
+        league_data.get("roster_positions") or [],
+        season_phase=phase,
+        pick_ledger=ledger,
+        players_meta=meta,
+        is_dynasty=cfg.format.is_dynasty,
+        window_mode=resolved_mode,
+        mode_override=mode_override,
+        target_roster_id=target_roster_id,
+    )
 
 
 def _current_week(state: Dict[str, Any]) -> int:
@@ -522,21 +582,122 @@ def power() -> None:
     cfg, sc = _load()
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    valuations = value_all_rosters(rosters, book, sc.players())
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
     by_id = {r.roster_id: r for r in rosters}
+    mine = _pick_roster(rosters, None, cfg.user_id)
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        players_meta=players_meta,
+        target_roster_id=mine.roster_id if mine else None,
+        window_mode=cfg.window_mode if mine else "auto",
+    )
+    win_by_id = {w.roster_id: w for w in windows}
 
     t = Table(title=f"{cfg.name} - power rankings ({cfg.format.label()})")
-    for c in ("#", "team", "dynasty value", "record", "pts for"):
-        t.add_column(c, justify="right" if c in ("dynasty value", "pts for", "#") else "left")
+    for c in ("#", "team", "dynasty value", "record", "pts for", "max pf", "window"):
+        t.add_column(c, justify="right" if c in ("dynasty value", "pts for", "max pf", "#") else "left")
     for v in valuations:
         r = by_id[v.roster_id]
+        max_pf_cell = f"{r.max_pf:.0f}" if r.max_pf > 0 else "-"
+        w = win_by_id.get(v.roster_id)
+        if w is None:
+            win_cell = "-"
+        else:
+            win_cell = "MIDDLE" if w.effective_target == "middle_trap" else w.effective_target.upper()
+            if w.target_source == "config":
+                win_cell += "*"
         t.add_row(str(v.power_rank), v.team_name, f"{v.total_value:,}",
                   f"{r.wins}-{r.losses}" + (f"-{r.ties}" if r.ties else ""),
-                  f"{r.points_for:.0f}")
+                  f"{r.points_for:.0f}", max_pf_cell, win_cell)
     console.print(t)
     console.print("[dim]value = rostered players only; draft picks are not counted, "
                   "so pick-rich rebuilders rank low here. Value picks in `ff trade`.[/]")
     qa_rep = run_qa("power", valuations=valuations, rosters=rosters)
+    render_qa_footer(qa_rep, console)
+
+
+# --- window --------------------------------------------------------------
+
+@app.command()
+@_guard
+def window(
+    team: Optional[str] = typer.Argument(None, help="Team name; defaults to yours."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="Override target window: auto, contend, or rebuild.",
+    ),
+) -> None:
+    """Diagnose competitive window, Max PF, middle-trap pivot, and RB exposure."""
+    mode_clean = _validate_window_mode(mode)
+    cfg, sc = _load()
+    if team is None and not cfg.user_id:
+        _fail("your team is unknown. Re-run `ff setup <username>` so it records you, "
+              "or pass a team name: ff window \"<team>\".")
+    book = _book(cfg, include_secondary=False)
+    rosters = _league_rosters(cfg, sc)
+    target = _pick_roster(rosters, team, cfg.user_id)
+    if target is None:
+        _fail("could not find that team. Try `ff power` to list teams.")
+
+    players_meta = sc.players()
+    valuations = value_all_rosters(rosters, book, players_meta)
+    is_mine = bool(cfg.user_id and target.owner_id == cfg.user_id)
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        players_meta=players_meta,
+        mode_override=mode_clean,
+        target_roster_id=target.roster_id,
+        window_mode=cfg.window_mode if is_mine else "auto",
+    )
+    tw = next(w for w in windows if w.roster_id == target.roster_id)
+
+    diag_display = "MIDDLE TRAP" if tw.diagnosed == "MIDDLE_TRAP" else tw.diagnosed
+    diag_style = {"CONTEND": "green", "MIDDLE TRAP": "yellow", "REBUILD": "cyan"}.get(diag_display, "white")
+    target_style = {"contend": "green", "rebuild": "cyan", "middle_trap": "yellow"}.get(tw.effective_target, "white")
+    max_pf_str = f"{tw.max_pf:.0f}" if tw.max_pf > 0 else "-"
+
+    lines = [
+        f"[bold]{tw.team_name}[/]   "
+        f"Diagnosed: [bold {diag_style}]{diag_display}[/]   "
+        f"Target: [bold {target_style}]{tw.effective_target}[/] ({tw.target_source})",
+    ]
+    if tw.pivot_lean:
+        pivot_line = f"Pivot Lean: [bold]{tw.pivot_lean}[/]"
+        if tw.pivot_reason:
+            pivot_line += f" — {tw.pivot_reason}"
+        lines.append(pivot_line)
+    lines.extend([
+        f"Win-Now Equity: [bold]#{tw.win_now_rank}[/]/{len(windows)} "
+        f"(score {tw.win_now_score:.1f})   Max PF: {max_pf_str}   "
+        f"Starters: {tw.starter_win_now_value:,}",
+        f"Future Equity: [bold]#{tw.future_rank}[/]/{len(windows)} "
+        f"(score {tw.future_score:.1f})   Dynasty Players: {tw.dynasty_player_value:,}   "
+        f"Picks: {tw.pick_value:,}",
+        f"Seasonal Liquidity: [bold]{tw.season_phase.label}[/] — {tw.season_phase.summary}",
+    ])
+    console.print(Panel.fit("\n".join(lines), title="Team Window"))
+
+    if tw.flags:
+        ft = Table(title="Duration & RB Exposure")
+        for c in ("player", "pos", "age", "value", "flag", "reason"):
+            ft.add_column(c, justify="right" if c in ("age", "value") else "left")
+        sev_styles = {"HIGH": "bold red", "MODERATE": "yellow", "INFO": "cyan"}
+        for fl in tw.flags:
+            sev_style = sev_styles.get(fl.severity, "white")
+            ft.add_row(
+                fl.name,
+                fl.position or "-",
+                f"{fl.age:.0f}" if fl.age is not None else "-",
+                f"{fl.value:,}",
+                f"[{sev_style}]{fl.severity}[/] {fl.kind}",
+                fl.reason,
+            )
+        console.print(ft)
+    else:
+        console.print("[green]No duration or RB exposure flags — roster aligns with current target.[/]")
+
+    qa_rep = run_qa("window", windows=windows, rosters=rosters)
     render_qa_footer(qa_rep, console)
 
 
@@ -687,11 +848,16 @@ def trade(
     get: str = typer.Option(..., "--get", help="What you receive, comma-separated."),
     market: str = typer.Option("both", "--market", "-m",
                                help="Market: fc, ktc, or both (default: both)."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode",
+        help="Override window target for strategy filters: auto, contend, or rebuild.",
+    ),
 ) -> None:
     """Analyze a trade. Players and picks both count (e.g. --get '2027 1st')."""
     market = market.lower()
     if market not in ("fc", "dealer", "ktc", "both"):
         _fail("--market must be fc, ktc, or both.")
+    mode_clean = _validate_window_mode(mode)
 
     cfg, sc = _load()
     include_secondary = market != "fc"
@@ -813,6 +979,44 @@ def trade(
         console.print("[dim]offer rule: needs both markets - run without --market to judge it.[/]")
     _print_provenance(book, cfg, include_secondary)
 
+    my_window: Optional[TeamWindow] = None
+    phase: Optional[SeasonPhase] = None
+    if cfg.user_id:
+        rosters = _league_rosters(cfg, sc)
+        mine = _pick_roster(rosters, None, cfg.user_id)
+        if mine is not None:
+            valuations = value_all_rosters(rosters, book, players_meta)
+            windows = _league_windows(
+                sc, cfg, book, rosters, valuations,
+                players_meta=players_meta,
+                mode_override=mode_clean,
+                target_roster_id=mine.roster_id,
+                window_mode=cfg.window_mode,
+            )
+            my_window = next((w for w in windows if w.roster_id == mine.roster_id), None)
+            if my_window is not None:
+                phase = my_window.season_phase
+    if phase is None:
+        phase = detect_season_phase(sc.state())
+    filters = evaluate_trade_filters(evaluation, my_window, phase)
+    signal_styles = {
+        "ALIGNED": "bold green",
+        "TAILWIND": "bold green",
+        "CAUTION": "bold yellow",
+        "HEADWIND": "bold red",
+        "MISMATCH": "bold red",
+        "NEUTRAL": "dim",
+        "N/A": "dim",
+    }
+    ft = Table(title="Strategy Filters")
+    ft.add_column("Filter")
+    ft.add_column("Signal")
+    ft.add_column("Summary")
+    for fl in filters:
+        st = signal_styles.get(fl.signal, "white")
+        ft.add_row(fl.name, f"[{st}]{fl.signal}[/]", fl.summary)
+    console.print(ft)
+
     if market in ("dealer", "ktc") and has_secondary:
         deltas = secondary_position_deltas(evaluation)
     else:
@@ -832,7 +1036,13 @@ def trade(
             if cands:
                 console.print(f"[dim]  did you mean: "
                               f"{', '.join(c.name for c in cands)}?[/]")
-    qa_rep = run_qa("trade", evaluation=evaluation, give_tokens=give_tokens, get_tokens=get_tokens)
+    qa_rep = run_qa(
+        "trade",
+        evaluation=evaluation,
+        give_tokens=give_tokens,
+        get_tokens=get_tokens,
+        filters=filters,
+    )
     render_qa_footer(qa_rep, console)
 
 
@@ -1469,7 +1679,12 @@ def draft(
     val.power_rank = my_rank
     # Status thirds are over the ranked rosters (len(all_vals)), the same
     # denominator as TeamContext.num_teams, not the draft-settings team count.
-    status = mode if mode in ("contend", "rebuild") else detect_status(my_rank, len(all_vals))
+    if mode in ("contend", "rebuild"):
+        status = mode
+    elif cfg.window_mode in ("contend", "rebuild"):
+        status = cfg.window_mode
+    else:
+        status = detect_status(my_rank, len(all_vals))
 
     pool = available(book, taken, position=position)
     if rookies:
@@ -1663,6 +1878,26 @@ def set_llm(
                   + f"\nconfig: {path}")
 
 
+@config_app.command(name="set-window")
+@_guard
+def set_window(
+    mode: str = typer.Argument(..., help="Target window mode: auto, contend, or rebuild"),
+) -> None:
+    """Configure the competitive window target mode used across commands."""
+    if not config_exists():
+        _fail("No league configured. Run 'ff setup <username>' first.")
+    try:
+        cfg = load_config()
+    except FileNotFoundError:
+        _fail("No league configured. Run 'ff setup <username>' first.")
+    mode_clean = mode.lower()
+    if mode_clean not in _WINDOW_MODES:
+        _fail(f"Invalid window mode '{mode}'. Must be one of: {', '.join(_WINDOW_MODES)}")
+    cfg.window_mode = mode_clean
+    path = save_config(cfg)
+    console.print(f"[bold green]Updated window mode[/] to [cyan]{mode_clean}[/]\nconfig: {path}")
+
+
 @app.command(name="qa")
 @_guard
 def qa_cmd(
@@ -1729,18 +1964,13 @@ def qa_cmd(
     reports.append(run_qa("movers", movers=arb_movers, mode="arbitrage"))
 
     # 8. Window audit
-    season_phase = detect_season_phase(sc.state())
-    windows = analyze_league_windows(
-        rosters,
-        valuations,
-        book,
-        league.get("roster_positions") or [],
-        season_phase=season_phase,
-        pick_ledger=ledger,
+    windows = _league_windows(
+        sc, cfg, book, rosters, valuations,
+        league=league,
         players_meta=players_meta,
-        is_dynasty=cfg.format.is_dynasty,
-        window_mode=cfg.window_mode,
         target_roster_id=my_roster.roster_id if my_roster else None,
+        window_mode=cfg.window_mode if my_roster else "auto",
+        ledger=ledger,
     )
     reports.append(run_qa("window", windows=windows, rosters=rosters))
 
