@@ -392,8 +392,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         wm = getattr(cfg, "window_mode", None) if cfg else None
         mode_override = _parse_mode_override(kwargs.get("mode"))
         target_r = _find_roster(rosters, team, ctx) if rosters else None
-        mine = _find_roster(rosters, None, ctx) if cfg else None
-        is_mine = bool(mine is not None and target_r is not None and target_r.roster_id == mine.roster_id)
+        my_roster = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(my_roster is not None and target_r is not None and target_r.roster_id == my_roster.roster_id)
         if value_book is not None and rosters and all_vals and target_r is not None:
             season_phase = window.detect_season_phase(ctx.get("state"))
             windows = _compute_league_windows(
@@ -454,8 +454,8 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         book = value_book if value_book is not None else ValueBook([])
         players_meta = ctx.get("players_meta")
         season_phase = window.detect_season_phase(ctx.get("state"))
-        mine = _find_roster(rosters, None, ctx) if cfg else None
-        is_mine = bool(mine is not None and target_r is not None and target_r.roster_id == mine.roster_id)
+        my_roster = _find_roster(rosters, None, ctx) if cfg else None
+        is_mine = bool(my_roster is not None and target_r is not None and target_r.roster_id == my_roster.roster_id)
         wm = getattr(cfg, "window_mode", "auto") if cfg else "auto"
         cfg_mode = wm if (is_mine and isinstance(wm, str)) else "auto"
         windows = _compute_league_windows(
