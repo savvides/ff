@@ -902,6 +902,7 @@ class NewsFlag(BaseModel):
     reason: str
     headline: str
     published_date: str
+    keywords: List[str] = Field(default_factory=list)
 
 
 class FeedStatus(BaseModel):

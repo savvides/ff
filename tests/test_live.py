@@ -240,8 +240,12 @@ def test_live_news_client_fetches_all_sources():
     )
     review = review_players([pid], players, "lookup", news_client=NewsClient())
     assert len(review.briefs) == 1
-    assert len(review.briefs[0].feeds) == 3
-    assert any(f.ok for f in review.briefs[0].feeds)
+    brief = review.briefs[0]
+    assert len(brief.feeds) == 3
+    espn_feed = next(f for f in brief.feeds if f.provider == "espn")
+    assert espn_feed.ok
+    espn_items = [i for i in brief.items if i.provider == "espn"]
+    assert all("allen" in f"{i.title} {i.description}".lower() for i in espn_items)
 
 
 def test_te_premium_reaches_both_markets_live():

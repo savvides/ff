@@ -131,3 +131,36 @@ def test_start_and_drop_warnings_cite_triggering_headline_not_recent():
     drop_rev = build_news_review("drop", [drop_brief], as_of)
     assert any("Backup named starter for Week 12" in w for w in drop_rev.warnings)
     assert not any("Benign media availability quote" in w for w in drop_rev.warnings)
+
+
+def test_dedupe_news_does_not_merge_prefix_substring_words():
+    as_of = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+    items = [
+        NewsItem(provider="espn", source="ESPN", title="Jefferson out", published=_ts(as_of, 4)),
+        NewsItem(provider="rss", source="PFT", title="Jefferson outlook improves after bye", published=_ts(as_of, 6)),
+    ]
+    deduped = dedupe_news(items)
+    assert len(deduped) == 2
+
+
+def test_multi_keyword_flags_across_items_and_tiers_preserve_start_and_drop_warnings():
+    as_of = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+    feeds = [FeedStatus(provider="sleeper", ok=True, item_count=2)]
+
+    # Newer "named starter" must NOT hide older "benched" for start decision
+    start_items = [
+        NewsItem(provider="sleeper", source="RotoWire", title="Player named starter earlier", published=_ts(as_of, 30)),
+        NewsItem(provider="sleeper", source="RotoWire", title="Player benched for disciplinary reasons", published=_ts(as_of, 50)),
+    ]
+    start_brief = build_player_brief("p1", {"full_name": "Split QB"}, start_items, feeds, as_of)
+    start_rev = build_news_review("start", [start_brief], as_of)
+    assert any("benched" in w.lower() for w in start_rev.warnings)
+
+    # High-tier "benched" must NOT hide medium-tier "elevated" for drop decision
+    drop_items = [
+        NewsItem(provider="sleeper", source="RotoWire", title="Player benched in Week 11", published=_ts(as_of, 30)),
+        NewsItem(provider="sleeper", source="RotoWire", title="Player elevated to active roster", published=_ts(as_of, 50)),
+    ]
+    drop_brief = build_player_brief("p2", {"full_name": "Stash WR"}, drop_items, feeds, as_of)
+    drop_rev = build_news_review("drop", [drop_brief], as_of)
+    assert any("elevated" in w.lower() for w in drop_rev.warnings)

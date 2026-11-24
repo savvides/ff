@@ -57,6 +57,39 @@ def test_render_news_review_shows_banner_warnings_and_quiet_fallback():
     assert "Active Player named starter" in out
 
 
+def test_render_news_review_escapes_brackets_and_strips_raw_markup_tags():
+    review = NewsReview(
+        decision="start",
+        as_of=datetime(2026, 11, 24, tzinfo=timezone.utc),
+        briefs=[
+            PlayerNewsBrief(
+                player_id="1",
+                player_name="Bracket Player",
+                items=[
+                    NewsItem(
+                        provider="espn",
+                        source="ESPN [NFL]",
+                        title="Player update [/video] today",
+                        description="Details [red]here[/red]",
+                        published=int(datetime(2026, 11, 24, 6, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                    )
+                ],
+                flags=[],
+                feeds=[FeedStatus(provider="espn", ok=True, item_count=1)],
+                warnings=[],
+            )
+        ],
+        degraded_feeds=[],
+        warnings=["Start check — Bracket Player (BREAKING): Player update [/video] today"],
+    )
+    c = Console(record=True, width=120)
+    render_news_review(review, c, show_details=True)
+    out = c.export_text()
+    assert "[/video]" in out
+    assert "[yellow]" not in out
+    assert "[dim]" not in out
+
+
 @responses.activate
 def test_cli_trade_and_news_player_run_mandatory_news_review(
     monkeypatch, book, league, rosters_raw, users_raw, players_meta
@@ -75,22 +108,25 @@ def test_cli_trade_and_news_player_run_mandatory_news_review(
     )
 
     class _StubSleeper:
-        def league(self, lid):
+        def league(self, lid, **kwargs):
             return league
 
-        def rosters(self, lid):
+        def rosters(self, lid, **kwargs):
             return rosters_raw
 
-        def users(self, lid):
+        def users(self, lid, **kwargs):
             return users_raw
 
-        def league_users(self, lid):
+        def user(self, uid, **kwargs):
+            return {"username": uid}
+
+        def league_users(self, lid, **kwargs):
             return users_raw
 
         def players(self, fresh=False):
             return players_meta
 
-        def state(self):
+        def state(self, **kwargs):
             return {"season": "2026", "week": 12, "season_type": "regular"}
 
         def drafts(self, lid):
@@ -316,3 +352,134 @@ def test_all_remaining_decision_tools_and_picks_only_trade_run_news_review(
 
     ww_res = dispatch_tool("get_weekly_waivers", {"team": "Dynasty Warriors", "limit": 5}, ctx)
     assert ww_res["news_review"]["decision"] == "waiver"
+
+
+def test_all_remaining_cli_decision_commands_invoke_news_review(
+    monkeypatch, book, league, rosters_raw, users_raw, players_meta
+):
+    from ff.contracts.models import WeeklyContext, WeeklyPlayer
+    from ff.news import review_players as real_review_players
+
+    calls = []
+
+    def _spy_review(player_ids, meta, decision, **kwargs):
+        calls.append((decision, list(player_ids)))
+        return NewsReview(
+            decision=decision,
+            as_of=datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc),
+            briefs=[],
+            degraded_feeds=[],
+            warnings=[],
+        )
+
+    assert real_review_players is not None
+    monkeypatch.setattr("ff.cli.review_players", _spy_review)
+    monkeypatch.setattr("ff.offers.review_players", _spy_review)
+
+    cfg = Config(
+        league_id=league["league_id"],
+        user_id="userA",
+        user_name="alice",
+        season="2026",
+        format=Format(superflex=True, ppr=1.0, teams=12, is_dynasty=True),
+    )
+    save_config(cfg)
+
+    class _StubSleeper:
+        def league(self, lid, **kwargs):
+            return league
+
+        def rosters(self, lid, **kwargs):
+            return rosters_raw
+
+        def users(self, lid, **kwargs):
+            return users_raw
+
+        def user(self, uid, **kwargs):
+            return {"username": uid}
+
+        def league_users(self, lid, **kwargs):
+            return users_raw
+
+        def players(self, fresh=False):
+            return players_meta
+
+        def state(self, **kwargs):
+            return {"season": "2026", "week": 12, "season_type": "regular"}
+
+        def drafts(self, lid):
+            return []
+
+        def traded_picks(self, lid):
+            return []
+
+        def trending(self, kind="add", lookback_hours=24, limit=50):
+            return [{"player_id": "4984", "count": 50}]
+
+        def matchups(self, lid, week, **kwargs):
+            return [{"roster_id": 1, "starters": ["7564", "9221"], "players_points": {}}]
+
+    weekly = WeeklyContext(
+        as_of=datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc),
+        players={
+            pid: WeeklyPlayer(game_status="scheduled", kickoff=datetime(2026, 11, 29, 18, 0, tzinfo=timezone.utc))
+            for pid in ("4984", "5555", "7564", "9221", "9999")
+        },
+    )
+    projections = {
+        pid: {"pts_ppr": 15.0, "rec": 5.0, "rec_yd": 60.0, "pass_yd": 250.0}
+        for pid in ("4984", "5555", "7564", "9221", "9999")
+    }
+
+    monkeypatch.setattr("ff.cli._load", lambda: (cfg, _StubSleeper()))
+    monkeypatch.setattr("ff.cli._book", lambda *a, **k: book)
+    monkeypatch.setattr(
+        "ff.cli.load_weekly",
+        lambda *a, **k: (weekly, players_meta),
+    )
+    monkeypatch.setattr(
+        "ff.cli.ProjectionsClient.week",
+        lambda *a, **k: projections,
+    )
+    monkeypatch.setattr(
+        "ff.cli.ProjectionsClient.snapshot",
+        lambda *a, **k: (projections, {pid: players_meta[pid] for pid in ("5555",)}),
+    )
+    monkeypatch.setattr(
+        "ff.cli.sell_candidates",
+        lambda assets, stance: [(assets[0], "test sell")] if assets else [],
+    )
+
+    runner = CliRunner()
+    for args, expected_decision in (
+        (["compare", "7564", "9221"], "start"),
+        (["lineup"], "start"),
+        (["plan"], "trade"),
+        (["cleanup"], "drop"),
+        (["waivers"], "waiver"),
+        (["waivers", "--weekly"], "waiver"),
+    ):
+        calls.clear()
+        res = runner.invoke(app, args)
+        assert res.exit_code == 0, f"{args}: {res.stdout}"
+        assert calls, f"no calls for {args}: {res.output}"
+        assert calls[-1][0] == expected_decision
+        assert len(calls[-1][1]) >= 1
+
+    # Also verify ff.offers.main invokes review_players("trade", ...)
+    import ff.offers as offers_mod
+    from ff.values import ValueBook
+
+    ktc_book = ValueBook(
+        [a.model_copy(update={"secondary_value": a.value}) for a in book.assets],
+        secondary_top=10000,
+    )
+    monkeypatch.setattr(offers_mod, "load_config", lambda: cfg)
+    monkeypatch.setattr(offers_mod, "SleeperClient", lambda: _StubSleeper())
+    monkeypatch.setattr(offers_mod, "ValuesClient", lambda: type("_VC", (), {"fetch": lambda self, *a, **k: ktc_book})())
+    monkeypatch.setattr(offers_mod, "check_calculators", lambda *a, **k: [])
+    calls.clear()
+    rc = offers_mod.main(["--sell", "Ja'Marr Chase"])
+    assert rc == 0
+    assert calls and calls[-1][0] == "trade"
+    assert "7564" in calls[-1][1]

@@ -85,11 +85,13 @@ def get_json(
     ttl: Optional[float] = 3600.0,
     timeout: int = DEFAULT_TIMEOUT,
     use_cache: bool = True,
+    retries: bool = True,
 ) -> Any:
     """GET `url` and return parsed JSON, served from disk cache when fresh.
 
     ttl: seconds the cached copy stays valid. None = never expires until cleared.
          Pass ttl=0 / use_cache=False to force a live fetch.
+    retries: set False for latency-bounded calls (e.g. news) to skip the 4-retry backoff.
     """
     cache_path = _cache_file(url, params)
     # Delegate freshness entirely to _fresh: it returns True for ttl=None
@@ -103,7 +105,15 @@ def get_json(
             # (it would be misreported as a bad config). Ignore it and refetch.
             pass
 
-    resp = _session().get(url, params=params, timeout=timeout)
+    if retries:
+        resp = _session().get(url, params=params, timeout=timeout)
+    else:
+        resp = requests.get(
+            url,
+            params=params,
+            headers={"User-Agent": "ff/0.1 (+https://github.com/savvides/ff)"},
+            timeout=timeout,
+        )
     resp.raise_for_status()
     data = resp.json()
 

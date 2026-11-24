@@ -1409,8 +1409,10 @@ def render_news_review(
     if review.degraded_feeds:
         console.print(
             Panel(
-                f"[bold yellow]News feed(s) degraded or unreachable:[/] {', '.join(review.degraded_feeds)}. "
-                "Showing available sources.",
+                Text(
+                    f"News feed(s) degraded or unreachable: {', '.join(review.degraded_feeds)}. "
+                    "Showing available sources."
+                ),
                 title="News Verification Warning",
                 border_style="yellow",
             )
@@ -1418,7 +1420,7 @@ def render_news_review(
     for w in review.warnings:
         if review.degraded_feeds and w.startswith("News feed(s) degraded"):
             continue
-        console.print(f"[yellow]! {w}[/]", markup=False)
+        console.print(f"! {w}", style="yellow", markup=False)
 
     if not review.briefs:
         return
@@ -1431,7 +1433,13 @@ def render_news_review(
         flag_str = ", ".join(f"[{f.code}]" for f in brief.flags) if brief.flags else "-"
         items = brief.items[:max_items_per_player]
         if not items:
-            t.add_row(brief.player_name, flag_str, "-", "-", "No recent news (14d)")
+            t.add_row(
+                Text(brief.player_name),
+                Text(flag_str),
+                Text("-"),
+                Text("-"),
+                Text("No recent news (14d)"),
+            )
         else:
             for idx, item in enumerate(items):
                 headline = item.title
@@ -1443,17 +1451,17 @@ def render_news_review(
                         parts.append(item.url)
                     headline = "\n".join(parts)
                 t.add_row(
-                    brief.player_name if idx == 0 else "",
-                    flag_str if idx == 0 else "",
-                    item.published_date,
-                    f"{item.source} ({item.provider})",
-                    headline,
+                    Text(brief.player_name if idx == 0 else ""),
+                    Text(flag_str if idx == 0 else ""),
+                    Text(item.published_date),
+                    Text(f"{item.source} ({item.provider})"),
+                    Text(headline),
                 )
         if show_details and brief.feeds:
             feed_summary = ", ".join(
                 f"{f.provider}:{'ok' if f.ok else 'FAILED'}" for f in brief.feeds
             )
-            console.print(f"[dim]Feeds ({brief.player_name}): {feed_summary}[/]", markup=False)
+            console.print(f"Feeds ({brief.player_name}): {feed_summary}", style="dim", markup=False)
     console.print(t)
 
 

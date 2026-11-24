@@ -158,7 +158,7 @@ def _titles_similar(a: NewsItem, b: NewsItem) -> bool:
     norm_b, set_b = _norm_tokens(b.title)
     if not norm_a or not norm_b:
         return False
-    if norm_a in norm_b or norm_b in norm_a:
+    if (len(set_a) >= 2 and set_a.issubset(set_b)) or (len(set_b) >= 2 and set_b.issubset(set_a)):
         return True
     union = set_a | set_b
     if not union:
@@ -245,26 +245,36 @@ def extract_flags(items: Sequence[NewsItem], as_of: datetime) -> List[NewsFlag]:
                 )
             )
 
-    seen_codes: Set[str] = set()
+    by_code: Dict[
+        Literal["INJURY", "DISCIPLINE", "TRANSACTION", "ROLE_CHANGE"],
+        Tuple[Literal["high", "medium"], str, NewsItem, List[str]],
+    ] = {}
     for code, severity, label, patterns in _COMPILED_RULES:
-        if code in seen_codes:
-            continue
         for item, _ in recent_items:
             text = f"{item.title} {item.description}".strip()
             matched = [kw for kw, rx in patterns if rx.search(text)]
-            if matched:
-                seen_codes.add(code)
-                flags.append(
-                    NewsFlag(
-                        code=code,
-                        severity=severity,
-                        label=label,
-                        reason=f"Matched keyword(s): {', '.join(matched)}",
-                        headline=item.title,
-                        published_date=item.published_date,
-                    )
-                )
-                break
+            if not matched:
+                continue
+            if code not in by_code:
+                by_code[code] = (severity, label, item, list(matched))
+            else:
+                _, _, _, existing_kws = by_code[code]
+                for kw in matched:
+                    if kw not in existing_kws:
+                        existing_kws.append(kw)
+
+    for code, (severity, label, item, kws) in by_code.items():
+        flags.append(
+            NewsFlag(
+                code=code,
+                severity=severity,
+                label=label,
+                reason=f"Matched keyword(s): {', '.join(kws)}",
+                headline=item.title,
+                published_date=item.published_date,
+                keywords=kws,
+            )
+        )
 
     return flags
 
@@ -304,10 +314,20 @@ def build_player_brief(
 
 
 def _flag_keywords(flag: NewsFlag) -> Set[str]:
+    if flag.keywords:
+        return {kw.lower() for kw in flag.keywords}
     prefix = "Matched keyword(s): "
     if flag.reason.startswith(prefix):
         return {part.strip().lower() for part in flag.reason[len(prefix) :].split(",")}
     return set()
+
+
+def _headline_for_keywords(brief: PlayerNewsBrief, target_kws: Set[str], fallback: str) -> str:
+    for item in brief.items:
+        text = f"{item.title} {item.description}".lower()
+        if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in target_kws):
+            return item.title
+    return fallback
 
 
 def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief) -> List[str]:
@@ -316,11 +336,14 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
 
     if decision == "start":
         role = codes.get("ROLE_CHANGE")
-        neg_role = role is not None and bool(_flag_keywords(role) & _NEGATIVE_ROLE_KWS)
+        neg_role_kws = _flag_keywords(role) & _NEGATIVE_ROLE_KWS if role is not None else set()
+        neg_role = bool(neg_role_kws)
         if any(c in codes for c in ("BREAKING", "INJURY", "DISCIPLINE")) or neg_role:
             reasons = [f.code for f in brief.flags if f.code in {"BREAKING", "INJURY", "DISCIPLINE"} or (f.code == "ROLE_CHANGE" and neg_role)]
             reason_set = set(reasons)
             headline = next((f.headline for f in brief.flags if f.code in reason_set), "")
+            if neg_role and role is not None and not any(c in codes for c in ("BREAKING", "INJURY", "DISCIPLINE")):
+                headline = _headline_for_keywords(brief, neg_role_kws, headline)
             out.append(f"Start check — {brief.player_name} ({', '.join(reasons)}): {headline}")
 
     elif decision == "trade":
@@ -334,12 +357,16 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
     elif decision == "drop":
         role = codes.get("ROLE_CHANGE")
         tx = codes.get("TRANSACTION")
-        pos_role = role is not None and bool(_flag_keywords(role) & _POSITIVE_ROLE_KWS)
-        pos_tx = tx is not None and bool(_flag_keywords(tx) & _POSITIVE_TX_KWS)
+        pos_role_kws = _flag_keywords(role) & _POSITIVE_ROLE_KWS if role is not None else set()
+        pos_tx_kws = _flag_keywords(tx) & _POSITIVE_TX_KWS if tx is not None else set()
+        pos_role = bool(pos_role_kws)
+        pos_tx = bool(pos_tx_kws)
         if "BREAKING" in codes or pos_role or pos_tx:
             drop_reasons = [c for c in ("BREAKING", "ROLE_CHANGE", "TRANSACTION") if (c == "BREAKING" and c in codes) or (c == "ROLE_CHANGE" and pos_role) or (c == "TRANSACTION" and pos_tx)]
             drop_set = set(drop_reasons)
             headline = next((f.headline for f in brief.flags if f.code in drop_set), "")
+            if (pos_role or pos_tx) and "BREAKING" not in codes:
+                headline = _headline_for_keywords(brief, pos_role_kws | pos_tx_kws, headline)
             out.append(
                 f"Drop check — {brief.player_name} ({', '.join(drop_reasons)}): review before dropping — {headline}"
             )

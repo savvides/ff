@@ -19,6 +19,7 @@ NEWS_TIMEOUT = 10
 MAX_WORKERS = 6
 
 SLEEPER_PLAYER_NEWS_URL = "https://api.sleeper.com/players/nfl/{pid}/news"
+ESPN_PLAYER_NEWS_URL = "https://site.api.espn.com/apis/fantasy/v2/games/ffl/news/players"
 ESPN_NFL_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news"
 RSS_FEEDS: Tuple[Tuple[str, str], ...] = (
     ("espn_rss", "https://www.espn.com/espn/rss/nfl/news"),
@@ -147,7 +148,7 @@ class NewsClient:
     def fetch_sleeper(self, pid: str) -> Tuple[List[NewsItem], FeedStatus]:
         url = SLEEPER_PLAYER_NEWS_URL.format(pid=pid)
         try:
-            payload = get_json(url, ttl=NEWS_TTL, timeout=NEWS_TIMEOUT) or []
+            payload = get_json(url, ttl=NEWS_TTL, timeout=NEWS_TIMEOUT, retries=False) or []
             if not isinstance(payload, list):
                 raise ValueError("Unexpected Sleeper news payload shape")
             items = [
@@ -170,16 +171,17 @@ class NewsClient:
         if espn_id:
             try:
                 data = get_json(
-                    ESPN_NFL_NEWS_URL,
-                    params={"athlete": str(espn_id), "limit": 10},
+                    ESPN_PLAYER_NEWS_URL,
+                    params={"playerId": str(espn_id), "limit": 10},
                     ttl=NEWS_TTL,
                     timeout=NEWS_TIMEOUT,
+                    retries=False,
                 )
                 if not isinstance(data, dict):
                     raise ValueError("Unexpected ESPN news payload shape")
-                articles = data.get("articles") or []
+                articles = data.get("feed") or []
                 if not isinstance(articles, list):
-                    raise ValueError("Unexpected ESPN articles payload shape")
+                    raise ValueError("Unexpected ESPN feed payload shape")
                 items = [_espn_article_to_item(a) for a in articles if isinstance(a, dict)]
                 return items, FeedStatus(provider="espn", ok=True, item_count=len(items))
             except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
@@ -211,6 +213,7 @@ class NewsClient:
                 params={"limit": 50},
                 ttl=NEWS_TTL,
                 timeout=NEWS_TIMEOUT,
+                retries=False,
             )
             if not isinstance(data, dict):
                 return [], "Unexpected ESPN news payload shape"

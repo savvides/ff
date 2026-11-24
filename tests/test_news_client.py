@@ -42,9 +42,9 @@ def test_news_client_merges_sleeper_espn_and_rss_and_disambiguates():
     )
     responses.add(
         responses.GET,
-        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        "https://site.api.espn.com/apis/fantasy/v2/games/ffl/news/players",
         json={
-            "articles": [
+            "feed": [
                 {
                     "headline": "A.J. Brown ready for Sunday",
                     "published": "2026-11-23T15:00:00Z",
@@ -181,9 +181,25 @@ def test_news_client_handles_html_possessives_suffixes_saints_and_malformed_json
 def test_news_client_degrades_on_espn_non_dict_json():
     players_meta = {"100": {"full_name": "CeeDee Lamb", "position": "WR", "team": "DAL", "espn_id": "4241389"}}
     responses.add(responses.GET, "https://api.sleeper.com/players/nfl/100/news", json=[])
-    responses.add(responses.GET, "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news", json=["not-a-dict"])
+    responses.add(responses.GET, "https://site.api.espn.com/apis/fantasy/v2/games/ffl/news/players", json=["not-a-dict"])
     responses.add(responses.GET, "https://www.espn.com/espn/rss/nfl/news", body="<rss><channel></channel></rss>")
     responses.add(responses.GET, "https://www.nbcsports.com/nfl/profootballtalk.rss", body="<rss><channel></channel></rss>")
 
     review = review_players(["100"], players_meta, "start", news_client=NewsClient())
     assert "espn" in review.degraded_feeds
+
+
+@responses.activate
+def test_news_client_uses_no_retry_http_session(monkeypatch):
+    def _fail_session():
+        raise AssertionError("NewsClient must not use retrying _SESSION")
+
+    monkeypatch.setattr("ff.core.http._session", _fail_session)
+    players_meta = {"100": {"full_name": "Josh Allen", "position": "QB", "team": "BUF", "espn_id": "3918298"}}
+    responses.add(responses.GET, "https://api.sleeper.com/players/nfl/100/news", json=[])
+    responses.add(responses.GET, "https://site.api.espn.com/apis/fantasy/v2/games/ffl/news/players", json={"feed": []})
+    responses.add(responses.GET, "https://www.espn.com/espn/rss/nfl/news", body="<rss><channel></channel></rss>")
+    responses.add(responses.GET, "https://www.nbcsports.com/nfl/profootballtalk.rss", body="<rss><channel></channel></rss>")
+
+    review = review_players(["100"], players_meta, "start", news_client=NewsClient())
+    assert review.degraded_feeds == []
