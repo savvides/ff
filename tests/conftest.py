@@ -31,6 +31,33 @@ def verified_calculators(monkeypatch):
     monkeypatch.setattr("ff.cli.check_calculators", lambda *a, **k: [])
 
 
+@pytest.fixture(autouse=True)
+def offline_news_review(monkeypatch):
+    """Keep existing offline CLI/dispatcher tests network-free; news integration tests
+    explicitly restore `review_players` and mock HTTP with `responses`."""
+    from datetime import datetime, timezone
+    from ff.contracts import NewsReview
+
+    def _stub_review(player_ids, players_meta, decision, **kwargs):
+        return NewsReview(
+            decision=decision,
+            as_of=datetime(2026, 11, 24, tzinfo=timezone.utc),
+            briefs=[],
+            degraded_feeds=[],
+            warnings=[],
+        )
+
+    for target in (
+        "ff.cli.review_players",
+        "ff.offers.review_players",
+        "ff.services.llm.dispatcher.review_players",
+    ):
+        try:
+            monkeypatch.setattr(target, _stub_review, raising=False)
+        except Exception:
+            pass
+
+
 @pytest.fixture
 def fc_entries():
     return load("fantasycalc_sf")

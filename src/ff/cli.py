@@ -65,9 +65,10 @@ from ff.analysis import (
     value_roster,
     waiver_targets,
 )
-from ff.contracts import Asset, Lineup, Roster, RosterValuation, SeasonPhase, StandingProjection, TeamPicks, TeamWindow
+from ff.contracts import Asset, Lineup, NewsReview, Roster, RosterValuation, SeasonPhase, StandingProjection, TeamPicks, TeamWindow
 from ff.contracts.models import PlayerComparison, WeeklyWaivers
 from ff.core.config import Config, config_exists, load_config, save_config
+from ff.news import review_players
 from ff.projections import ProjectionsClient
 from ff.qa import render_qa_footer, render_qa_full_report, run_qa
 from ff.services.llm.dispatcher import dispatch_tool
@@ -894,6 +895,11 @@ def plan() -> None:
         console.print(t)
     if not sells and not buys:
         console.print("  [dim]nothing on your roster or the market stands out for your stance.[/]")
+    plan_pids = [a.id for a, _ in sells if not a.is_pick] + [a.id for a, _ in buys if not a.is_pick]
+    if plan_pids:
+        news_rev = review_players(plan_pids, meta, "trade")
+        render_news_review(news_rev, console)
+        run_qa("news_review", review=news_rev)
     console.print("[dim]value = FantasyCalc dynasty value; win-now = its redraft value on the same scale. "
                   "Price any deal with `ff trade`. Stance uses `ff standings` odds once games exist, "
                   "else roster rank. ff is read-only.[/]")
@@ -1301,6 +1307,13 @@ def trade(
             if cands:
                 console.print(f"[dim]  did you mean: "
                               f"{', '.join(c.name for c in cands)}?[/]")
+    trade_pids = [
+        a.id for a in (evaluation.side_a.assets + evaluation.side_b.assets) if not a.is_pick
+    ]
+    if trade_pids:
+        news_rev = review_players(trade_pids, sc.players() or {}, "trade")
+        render_news_review(news_rev, console)
+        run_qa("news_review", review=news_rev)
     qa_rep = run_qa(
         "trade",
         evaluation=evaluation,
@@ -1383,6 +1396,67 @@ def _render_table(console: Console, title: str, columns: Sequence[str], rows: It
         console.print(f"{title}: no results.", markup=False)
 
 
+def render_news_review(
+    review: NewsReview,
+    console: Console,
+    max_items_per_player: int = 2,
+    *,
+    show_details: bool = False,
+) -> None:
+    """Render degraded feed banner, decision warnings, and Latest News Review table."""
+    if not review.briefs and not review.degraded_feeds and not review.warnings:
+        return
+    if review.degraded_feeds:
+        console.print(
+            Panel(
+                f"[bold yellow]News feed(s) degraded or unreachable:[/] {', '.join(review.degraded_feeds)}. "
+                "Showing available sources.",
+                title="News Verification Warning",
+                border_style="yellow",
+            )
+        )
+    for w in review.warnings:
+        if review.degraded_feeds and w.startswith("News feed(s) degraded"):
+            continue
+        console.print(f"[yellow]! {w}[/]", markup=False)
+
+    if not review.briefs:
+        return
+
+    t = Table(title="Latest News Review")
+    for col in ("player", "flags", "date", "source", "headline"):
+        t.add_column(col, justify="left")
+
+    for brief in review.briefs:
+        flag_str = ", ".join(f"[{f.code}]" for f in brief.flags) if brief.flags else "-"
+        items = brief.items[:max_items_per_player]
+        if not items:
+            t.add_row(brief.player_name, flag_str, "-", "-", "No recent news (14d)")
+        else:
+            for idx, item in enumerate(items):
+                headline = item.title
+                if show_details:
+                    parts = [headline]
+                    if item.description:
+                        parts.append(item.description)
+                    if item.url:
+                        parts.append(item.url)
+                    headline = "\n".join(parts)
+                t.add_row(
+                    brief.player_name if idx == 0 else "",
+                    flag_str if idx == 0 else "",
+                    item.published_date,
+                    f"{item.source} ({item.provider})",
+                    headline,
+                )
+        if show_details and brief.feeds:
+            feed_summary = ", ".join(
+                f"{f.provider}:{'ok' if f.ok else 'FAILED'}" for f in brief.feeds
+            )
+            console.print(f"[dim]Feeds ({brief.player_name}): {feed_summary}[/]", markup=False)
+    console.print(t)
+
+
 def render_weekly_notes(lineup: Lineup, console: Console) -> None:
     if lineup.as_of:
         console.print(f"Availability and schedule checked {lineup.as_of.isoformat()} (UTC).")
@@ -1399,6 +1473,13 @@ def render_comparison(result: PlayerComparison, target: Any, ctx: dict, console:
         (o.name, f"{o.projected_points:.2f}", o.availability,
          f"{o.lineup.total:.2f}" if o.lineup else "-", o.reason or "other player sits") for o in result.options))
     render_weekly_notes(result.baseline, console)
+    news_rev = review_players(
+        [o.player_id for o in result.options],
+        ctx["players_meta"],
+        "start",
+    )
+    render_news_review(news_rev, console)
+    run_qa("news_review", review=news_rev)
     report = run_qa("compare", result=result, target_roster=target, weekly=ctx["weekly"])
     render_qa_footer(report, console)
 
@@ -1417,6 +1498,13 @@ def render_weekly_waivers(result: WeeklyWaivers, target: Any, ctx: dict, console
     render_weekly_notes(result.baseline, console)
     for warning in result.warnings:
         console.print(warning, markup=False)
+    news_rev = review_players(
+        [t.player_id for t in result.targets],
+        ctx["players_meta"],
+        "waiver",
+    )
+    render_news_review(news_rev, console)
+    run_qa("news_review", review=news_rev)
     render_qa_footer(run_qa("weekly_waivers", result=result, target_roster=target, rosters=ctx["rosters"],
                             weekly=ctx["weekly"], roster_positions=ctx["roster_positions"]), console)
 
@@ -1473,6 +1561,9 @@ def waivers(
         t.add_row(a.name, a.position or "-", tgt.depth_role, f"{a.value:,}", f"{tgt.add_count:,}" if tgt.add_count else "-", status)
     console.print(t)
     console.print("Unrostered does not establish waiver claim status or immediate pickup eligibility; check Sleeper. Adds: '-' means outside the trending sample. Rankings use dynasty opportunity, not weekly projected points.")
+    news_rev = review_players([t.asset.id for t in targets], players_meta, "waiver")
+    render_news_review(news_rev, console)
+    run_qa("news_review", review=news_rev)
     qa_rep = run_qa("waivers", targets=targets, rosters=rosters, roster_positions=roster_positions)
     render_qa_footer(qa_rep, console)
 
@@ -1484,12 +1575,20 @@ def waivers(
 def news(
     team: Optional[str] = typer.Argument(None, help="Team name; omit for the whole league."),
     limit: int = typer.Option(15, help="How many trending adds/drops to display."),
+    player: Optional[str] = typer.Option(None, "--player", "-p", help="Show full merged news briefing for one player."),
 ) -> None:
     """Player health, depth chart roles, injuries, and trending news across Sleeper."""
     cfg, sc = _load()
+    players_meta = sc.players()
+    if player:
+        pid = resolve_player(player, players_meta or {})
+        news_rev = review_players([pid], players_meta or {}, "lookup")
+        render_news_review(news_rev, console, max_items_per_player=5, show_details=True)
+        qa_rep = run_qa("news_review", review=news_rev)
+        render_qa_footer(qa_rep, console)
+        return
     book = _book(cfg, include_secondary=False)
     rosters = _league_rosters(cfg, sc)
-    players_meta = sc.players()
     valuations = value_all_rosters(rosters, book, players_meta)
 
     if team:
@@ -1660,6 +1759,14 @@ def cleanup(
     console.print("[dim]Dropping a taxi/IR player frees a taxi/IR slot, not an active one; "
                   "only a bench drop, a taxi stash, or an IR move opens room for a waiver add. "
                   "ff is read-only - make the moves in Sleeper.[/]")
+    cleanup_pids = [
+        s.player_id
+        for s in (audit.drop_candidates + audit.ir_candidates + audit.taxi_candidates)
+    ]
+    if cleanup_pids:
+        news_rev = review_players(cleanup_pids, players_meta, "drop")
+        render_news_review(news_rev, console)
+        run_qa("news_review", review=news_rev)
     qa_rep = run_qa("cleanup", audit=audit)
     render_qa_footer(qa_rep, console)
 
@@ -1845,6 +1952,14 @@ def lineup(
     if lu.bench:
         top_bench = ", ".join(f"{b.name} ({b.points:g})" for b in lu.bench[:5])
         console.print(f"[dim]bench: {top_bench}[/]")
+    active_pids = [
+        pid for pid in target.player_ids
+        if pid not in set(target.reserve) and pid not in set(target.taxi)
+    ]
+    if active_pids:
+        news_rev = review_players(active_pids, players_meta, "start")
+        render_news_review(news_rev, console)
+        run_qa("news_review", review=news_rev)
     qa_rep = run_qa("lineup", lineup=lu, target_roster=target, scoring=scoring, weekly=weekly)
     render_qa_footer(qa_rep, console)
 
