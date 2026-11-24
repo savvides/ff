@@ -169,6 +169,17 @@ TOOL_SCHEMAS = [
                 }
             }
         }
+    },
+    {
+        "name": "get_player_news",
+        "description": "Get merged multi-source news, deterministic flags, and feed health for one player.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string", "description": "Player name or Sleeper ID"}
+            },
+            "required": ["player"]
+        }
     }
 ]
 

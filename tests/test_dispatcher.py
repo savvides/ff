@@ -53,15 +53,20 @@ def test_dispatch_get_lineup() -> None:
     mock_roster = _named_roster("Team A")
     with patch("ff.analysis.lineup.optimal_lineup", return_value=mock_lineup):
         res = dispatch_tool("get_lineup", {"team": "Team A", "week": 1}, ctx={"rosters": [mock_roster]})
-        assert res == {"slots": [], "bench": []}
+        assert res["slots"] == []
+        assert res["bench"] == []
+        assert "news_review" in res
 
 def test_dispatch_get_waivers() -> None:
     from ff.services.llm.dispatcher import dispatch_tool
     mock_target = MagicMock()
+    mock_target.asset.is_pick = False
+    mock_target.asset.id = "p1"
     mock_target.model_dump.return_value = {"asset": {"name": "Player A"}, "add_count": 10}
     with patch("ff.analysis.waivers.waiver_targets", return_value=[mock_target]) as calculate:
         res = dispatch_tool("get_waivers", {"position": "RB", "limit": 5}, ctx={})
-        assert res == [{"asset": {"name": "Player A"}, "add_count": 10}]
+        assert res["targets"] == [{"asset": {"name": "Player A"}, "add_count": 10}]
+        assert "news_review" in res
     assert calculate.call_args.kwargs["position"] == "RB"
     assert calculate.call_args.kwargs["limit"] == 5
 
@@ -79,7 +84,7 @@ def test_waivers_filter_before_limit_and_use_league_format():
     ctx = {"value_book": book, "trending": [{"player_id": p, "count": 1} for p in ("wr", "rb")],
            "config": Config(league_id="x", season=2026, format=Format(superflex=False))}
     result = dispatch_tool("get_waivers", {"position": "RB", "limit": 1}, ctx)
-    assert [t["asset"]["id"] for t in result] == ["rb"]
+    assert [t["asset"]["id"] for t in result["targets"]] == ["rb"]
     with patch("ff.analysis.waivers.waiver_targets", return_value=[]) as calculate:
         dispatch_tool("get_waivers", {}, ctx)
     assert calculate.call_args.kwargs["is_superflex"] is False
@@ -131,7 +136,8 @@ def test_dispatch_get_roster_cleanup() -> None:
     cfg = MagicMock(user_id="u1", user_name="")
     with patch("ff.analysis.cleanup.audit_roster", return_value=mock_audit):
         res = dispatch_tool("get_roster_cleanup", {}, ctx={"rosters": [roster], "config": cfg})
-        assert res == {"drop_candidates": []}
+        assert res["drop_candidates"] == []
+        assert "news_review" in res
 
 def test_dispatch_get_movers() -> None:
     from ff.services.llm.dispatcher import dispatch_tool
