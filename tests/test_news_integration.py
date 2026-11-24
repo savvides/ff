@@ -234,3 +234,85 @@ def test_dispatcher_attaches_news_review_and_supports_get_player_news(
     waivers_res = dispatch_tool("get_waivers", {"limit": 5}, ctx)
     assert "news_review" in waivers_res
     assert "targets" in waivers_res
+
+
+@responses.activate
+def test_all_remaining_decision_tools_and_picks_only_trade_run_news_review(
+    monkeypatch, book, league, players_meta
+):
+    import ff.news
+    from ff.contracts import Format, Roster
+    from ff.contracts.models import WeeklyContext, WeeklyPlayer
+    from ff.core.config import Config
+    from ff.services.llm.dispatcher import dispatch_tool
+
+    monkeypatch.setattr("ff.services.llm.dispatcher.review_players", ff.news.review_players)
+    for pid in ("4984", "7564", "9221", "9999"):
+        responses.add(responses.GET, f"https://api.sleeper.com/players/nfl/{pid}/news", json=[])
+    responses.add(
+        responses.GET,
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        json={"articles": []},
+    )
+    responses.add(
+        responses.GET,
+        "https://www.espn.com/espn/rss/nfl/news",
+        body="<rss><channel></channel></rss>",
+    )
+    responses.add(
+        responses.GET,
+        "https://www.nbcsports.com/nfl/profootballtalk.rss",
+        body="<rss><channel></channel></rss>",
+    )
+
+    cfg = Config(
+        league_id=league["league_id"],
+        user_id="userA",
+        user_name="alice",
+        season="2026",
+        format=Format(superflex=True, ppr=1.0, teams=12, is_dynasty=True),
+    )
+    r1 = Roster(roster_id=1, owner_id="userA", team_name="Dynasty Warriors", player_ids=["7564", "9221"])
+    r2 = Roster(roster_id=2, owner_id="userB", team_name="Gridiron Kings", player_ids=["9999"])
+    weekly = WeeklyContext(
+        as_of=datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc),
+        players={
+            pid: WeeklyPlayer(game_status="scheduled", kickoff=datetime(2026, 11, 29, 18, 0, tzinfo=timezone.utc))
+            for pid in ("4984", "7564", "9221", "9999")
+        },
+    )
+    projections = {
+        pid: {"pts_ppr": 15.0, "rec": 5.0, "rec_yd": 60.0, "pass_yd": 250.0}
+        for pid in ("4984", "7564", "9221", "9999")
+    }
+    ctx = {
+        "config": cfg,
+        "rosters": [r1, r2],
+        "value_book": book,
+        "players_meta": players_meta,
+        "roster_positions": league["roster_positions"],
+        "scoring": league["scoring_settings"],
+        "projections": projections,
+        "weekly": weekly,
+        "season": "2026",
+        "week": 12,
+        "trending": [{"player_id": "4984", "count": 25}],
+    }
+
+    picks_trade = dispatch_tool("evaluate_trade", {"give": ["2027 1st"], "get": ["2027 2nd"]}, ctx)
+    assert picks_trade["news_review"]["briefs"] == []
+
+    player_trade = dispatch_tool("evaluate_trade", {"give": ["Josh Allen"], "get": ["Ja'Marr Chase"]}, ctx)
+    assert {b["player_id"] for b in player_trade["news_review"]["briefs"]} == {"4984", "7564"}
+
+    lu_res = dispatch_tool("get_lineup", {"team": "Dynasty Warriors"}, ctx)
+    assert lu_res["news_review"]["decision"] == "start"
+
+    cmp_res = dispatch_tool("get_player_comparison", {"team": "Dynasty Warriors", "player_ids": ["7564", "9221"]}, ctx)
+    assert cmp_res["news_review"]["decision"] == "start"
+
+    plan_res = dispatch_tool("get_trade_plan", {"team": "Dynasty Warriors"}, ctx)
+    assert plan_res["news_review"]["decision"] == "trade"
+
+    ww_res = dispatch_tool("get_weekly_waivers", {"team": "Dynasty Warriors", "limit": 5}, ctx)
+    assert ww_res["news_review"]["decision"] == "waiver"

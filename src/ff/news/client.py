@@ -26,9 +26,30 @@ RSS_FEEDS: Tuple[Tuple[str, str], ...] = (
 )
 
 
+_SUFFIX_RX = re.compile(r"\b(?:jr|sr|ii|iii|iv)\b$")
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"<[^>]+>", " ", value)
+
+
 def _norm_text(value: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9\s]", "", value.lower())
+    stripped = _strip_html(value)
+    no_poss = re.sub(r"['’]s\b", "", stripped.lower())
+    no_dots = re.sub(r"[.'’]", "", no_poss)
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", no_dots)
     return " ".join(cleaned.split())
+
+
+def _name_variants(name: str) -> List[str]:
+    norm = _norm_text(name)
+    if not norm:
+        return []
+    variants = [norm]
+    no_suffix = _SUFFIX_RX.sub("", norm).strip()
+    if no_suffix and no_suffix != norm:
+        variants.append(no_suffix)
+    return variants
 
 
 def _player_full_name(meta: Dict[str, Any], pid: str) -> str:
@@ -66,9 +87,12 @@ def _parse_rfc822_ms(raw: Optional[str]) -> Optional[int]:
 
 
 def _espn_article_to_item(article: Dict[str, Any]) -> NewsItem:
-    links = article.get("links") or {}
-    web = links.get("web") or {}
-    url = (web.get("href") or article.get("link") or "").strip() or None
+    raw_links = article.get("links")
+    links = raw_links if isinstance(raw_links, dict) else {}
+    raw_web = links.get("web")
+    web = raw_web if isinstance(raw_web, dict) else {}
+    url = (web.get("href") or article.get("link") or "")
+    url_str = url.strip() or None if isinstance(url, str) else None
     title = (article.get("headline") or article.get("title") or "").strip() or "(untitled)"
     description = (article.get("description") or "").strip()
     published = _parse_iso_ms(article.get("published") or article.get("lastModified"))
@@ -79,26 +103,29 @@ def _espn_article_to_item(article: Dict[str, Any]) -> NewsItem:
         source=source,
         title=title,
         description=description,
-        url=url,
+        url=url_str,
     )
 
 
 def _matches_player(
     text_norm: str,
+    raw_text: str,
     meta: Dict[str, Any],
     pid: str,
     ambiguous_names: set[str],
 ) -> bool:
-    name_norm = _norm_text(_player_full_name(meta, pid))
-    if not name_norm or len(name_norm) < 4:
+    variants = [v for v in _name_variants(_player_full_name(meta, pid)) if len(v) >= 4]
+    if not variants:
         return False
-    if not re.search(rf"\b{re.escape(name_norm)}\b", text_norm):
+    if not any(re.search(rf"\b{re.escape(v)}\b", text_norm) for v in variants):
         return False
-    if name_norm in ambiguous_names:
-        team = (meta.get("team") or "").lower()
-        pos = (meta.get("position") or "").lower()
-        team_hit = bool(team and re.search(rf"\b{re.escape(team)}\b", text_norm))
-        pos_hit = bool(pos and re.search(rf"\b{re.escape(pos)}\b", text_norm))
+    base_norm = variants[0]
+    if base_norm in ambiguous_names or variants[-1] in ambiguous_names:
+        clean_raw = _strip_html(raw_text)
+        team = (meta.get("team") or "").upper()
+        pos = (meta.get("position") or "").upper()
+        team_hit = bool(team and re.search(rf"\b{re.escape(team)}\b", clean_raw))
+        pos_hit = bool(pos and re.search(rf"\b{re.escape(pos)}\b", clean_raw))
         return team_hit or pos_hit
     return True
 
@@ -129,7 +156,7 @@ class NewsClient:
                 if isinstance(row, dict)
             ]
             return items, FeedStatus(provider="sleeper", ok=True, item_count=len(items))
-        except (requests.RequestException, ValueError, TypeError) as exc:
+        except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
             return [], FeedStatus(provider="sleeper", ok=False, error=str(exc))
 
     def fetch_espn(
@@ -148,10 +175,14 @@ class NewsClient:
                     ttl=NEWS_TTL,
                     timeout=NEWS_TIMEOUT,
                 )
-                articles = (data or {}).get("articles") or []
+                if not isinstance(data, dict):
+                    raise ValueError("Unexpected ESPN news payload shape")
+                articles = data.get("articles") or []
+                if not isinstance(articles, list):
+                    raise ValueError("Unexpected ESPN articles payload shape")
                 items = [_espn_article_to_item(a) for a in articles if isinstance(a, dict)]
                 return items, FeedStatus(provider="espn", ok=True, item_count=len(items))
-            except (requests.RequestException, ValueError, TypeError) as exc:
+            except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
                 return [], FeedStatus(provider="espn", ok=False, error=str(exc))
 
         if league_espn is None:
@@ -162,15 +193,16 @@ class NewsClient:
             return [], FeedStatus(provider="espn", ok=False, error=err)
 
         ambiguous = ambiguous_names or set()
-        items: List[NewsItem] = []
+        matched_items: List[NewsItem] = []
         for article in articles:
             if not isinstance(article, dict):
                 continue
             item = _espn_article_to_item(article)
-            text_norm = _norm_text(f"{item.title} {item.description}")
-            if _matches_player(text_norm, meta, pid, ambiguous):
-                items.append(item)
-        return items, FeedStatus(provider="espn", ok=True, item_count=len(items))
+            raw_text = f"{item.title} {item.description}"
+            text_norm = _norm_text(raw_text)
+            if _matches_player(text_norm, raw_text, meta, pid, ambiguous):
+                matched_items.append(item)
+        return matched_items, FeedStatus(provider="espn", ok=True, item_count=len(matched_items))
 
     def _fetch_espn_league_feed(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         try:
@@ -180,16 +212,18 @@ class NewsClient:
                 ttl=NEWS_TTL,
                 timeout=NEWS_TIMEOUT,
             )
-            articles = (data or {}).get("articles") or []
+            if not isinstance(data, dict):
+                return [], "Unexpected ESPN news payload shape"
+            articles = data.get("articles") or []
             if not isinstance(articles, list):
                 return [], "Unexpected ESPN news payload shape"
             return articles, None
-        except (requests.RequestException, ValueError, TypeError) as exc:
+        except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
             return [], str(exc)
 
-    def fetch_rss(self) -> Tuple[List[Tuple[NewsItem, str]], FeedStatus]:
-        """Fetch configured NFL RSS feeds and return (NewsItem, normalized_text) pairs."""
-        parsed_items: List[Tuple[NewsItem, str]] = []
+    def fetch_rss(self) -> Tuple[List[Tuple[NewsItem, str, str]], FeedStatus]:
+        """Fetch configured NFL RSS feeds and return (NewsItem, normalized_text, raw_text) tuples."""
+        parsed_items: List[Tuple[NewsItem, str, str]] = []
         errors: List[str] = []
 
         for source_name, url in RSS_FEEDS:
@@ -210,7 +244,8 @@ class NewsClient:
                         description=desc,
                         url=link,
                     )
-                    parsed_items.append((item, _norm_text(f"{title} {desc}")))
+                    raw_text = f"{title} {desc}"
+                    parsed_items.append((item, _norm_text(raw_text), raw_text))
             except (requests.RequestException, ET.ParseError, ValueError) as exc:
                 errors.append(f"{source_name}: {exc}")
 
@@ -250,8 +285,8 @@ class NewsClient:
             )
             matched_rss = [
                 item
-                for item, text_norm in rss_items
-                if _matches_player(text_norm, meta, pid, ambiguous)
+                for item, text_norm, raw_text in rss_items
+                if _matches_player(text_norm, raw_text, meta, pid, ambiguous)
             ]
             player_rss_status = FeedStatus(
                 provider="rss",

@@ -873,7 +873,8 @@ class NewsItem(BaseModel):
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "NewsItem":
-        meta = payload.get("metadata") or {}
+        raw_meta = payload.get("metadata")
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
         return cls(
             provider=payload.get("provider") or "sleeper",
             published=payload.get("published"),

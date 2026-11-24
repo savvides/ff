@@ -319,7 +319,8 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
         neg_role = role is not None and bool(_flag_keywords(role) & _NEGATIVE_ROLE_KWS)
         if any(c in codes for c in ("BREAKING", "INJURY", "DISCIPLINE")) or neg_role:
             reasons = [f.code for f in brief.flags if f.code in {"BREAKING", "INJURY", "DISCIPLINE"} or (f.code == "ROLE_CHANGE" and neg_role)]
-            headline = brief.flags[0].headline if brief.flags else ""
+            reason_set = set(reasons)
+            headline = next((f.headline for f in brief.flags if f.code in reason_set), "")
             out.append(f"Start check — {brief.player_name} ({', '.join(reasons)}): {headline}")
 
     elif decision == "trade":
@@ -336,10 +337,11 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
         pos_role = role is not None and bool(_flag_keywords(role) & _POSITIVE_ROLE_KWS)
         pos_tx = tx is not None and bool(_flag_keywords(tx) & _POSITIVE_TX_KWS)
         if "BREAKING" in codes or pos_role or pos_tx:
-            reasons = [c for c in ("BREAKING", "ROLE_CHANGE", "TRANSACTION") if (c == "BREAKING" and c in codes) or (c == "ROLE_CHANGE" and pos_role) or (c == "TRANSACTION" and pos_tx)]
-            headline = brief.flags[0].headline if brief.flags else ""
+            drop_reasons = [c for c in ("BREAKING", "ROLE_CHANGE", "TRANSACTION") if (c == "BREAKING" and c in codes) or (c == "ROLE_CHANGE" and pos_role) or (c == "TRANSACTION" and pos_tx)]
+            drop_set = set(drop_reasons)
+            headline = next((f.headline for f in brief.flags if f.code in drop_set), "")
             out.append(
-                f"Drop check — {brief.player_name} ({', '.join(reasons)}): review before dropping — {headline}"
+                f"Drop check — {brief.player_name} ({', '.join(drop_reasons)}): review before dropping — {headline}"
             )
 
     elif decision == "waiver":

@@ -106,3 +106,28 @@ def test_build_news_review_contextual_warnings_and_loud_degradation():
     assert set(review.degraded_feeds) == {"sleeper", "espn", "rss"}
     assert any("review before dropping" in w.lower() for w in review.warnings)
     assert any("could not be verified" in w.lower() for w in review.warnings)
+
+
+def test_start_and_drop_warnings_cite_triggering_headline_not_recent():
+    as_of = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+    items = [
+        NewsItem(provider="espn", source="ESPN", title="Benign media availability quote", published=_ts(as_of, 30)),
+        NewsItem(provider="sleeper", source="RotoWire", title="Player ruled out with ankle injury", published=_ts(as_of, 48)),
+    ]
+    feeds = [FeedStatus(provider="espn", ok=True, item_count=2)]
+    brief = build_player_brief("p1", {"full_name": "Star WR"}, items, feeds, as_of)
+    assert brief.flags[0].code == "RECENT"
+    assert brief.flags[1].code == "INJURY"
+
+    start_rev = build_news_review("start", [brief], as_of)
+    assert any("Player ruled out with ankle injury" in w for w in start_rev.warnings)
+    assert not any("Benign media availability quote" in w for w in start_rev.warnings)
+
+    drop_items = [
+        NewsItem(provider="espn", source="ESPN", title="Benign media availability quote", published=_ts(as_of, 30)),
+        NewsItem(provider="sleeper", source="RotoWire", title="Backup named starter for Week 12", published=_ts(as_of, 48)),
+    ]
+    drop_brief = build_player_brief("p2", {"full_name": "Backup RB"}, drop_items, feeds, as_of)
+    drop_rev = build_news_review("drop", [drop_brief], as_of)
+    assert any("Backup named starter for Week 12" in w for w in drop_rev.warnings)
+    assert not any("Benign media availability quote" in w for w in drop_rev.warnings)
