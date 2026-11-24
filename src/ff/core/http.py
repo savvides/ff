@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -72,7 +73,7 @@ def _fresh(path: Path, ttl: Optional[float]) -> bool:
 def _atomic_write(path: Path, text: str) -> None:
     """Write via a temp file + os.replace so a crash mid-write never leaves a
     truncated/corrupt cache entry behind."""
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
 
@@ -84,11 +85,13 @@ def get_json(
     ttl: Optional[float] = 3600.0,
     timeout: int = DEFAULT_TIMEOUT,
     use_cache: bool = True,
+    retries: bool = True,
 ) -> Any:
     """GET `url` and return parsed JSON, served from disk cache when fresh.
 
     ttl: seconds the cached copy stays valid. None = never expires until cleared.
          Pass ttl=0 / use_cache=False to force a live fetch.
+    retries: set False for latency-bounded calls (e.g. news) to skip the 4-retry backoff.
     """
     cache_path = _cache_file(url, params)
     # Delegate freshness entirely to _fresh: it returns True for ttl=None
@@ -102,7 +105,15 @@ def get_json(
             # (it would be misreported as a bad config). Ignore it and refetch.
             pass
 
-    resp = _session().get(url, params=params, timeout=timeout)
+    if retries:
+        resp = _session().get(url, params=params, timeout=timeout)
+    else:
+        resp = requests.get(
+            url,
+            params=params,
+            headers={"User-Agent": "ff/0.1 (+https://github.com/savvides/ff)"},
+            timeout=timeout,
+        )
     resp.raise_for_status()
     data = resp.json()
 

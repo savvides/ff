@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional
 
 from ff.analysis import cleanup, fit, lineup, movers, picks, plan, roster, trade, waivers, window
 from ff.analysis.draft import available
-from ff.analysis.compare import compare_players
+from ff.analysis.compare import compare_players, resolve_player
 from ff.analysis.weekly_waivers import weekly_waivers
-from ff.contracts import TradeEvaluation
+from ff.contracts import NewsReview, TradeEvaluation
+from ff.news import review_players
 from ff.services.llm.tools import ALLOWED_TOOLS
 from ff.values import ValueBook
 
@@ -166,6 +167,32 @@ def _parse_mode_override(mode_raw: Any) -> Optional[str]:
     return mode_clean
 
 
+def _compact_news_review(review: NewsReview, *, max_items: int = 2) -> Dict[str, Any]:
+    return {
+        "decision": review.decision,
+        "degraded_feeds": list(review.degraded_feeds),
+        "warnings": list(review.warnings),
+        "briefs": [
+            {
+                "player_id": b.player_id,
+                "player_name": b.player_name,
+                "flags": [f.model_dump() for f in b.flags],
+                "items": [
+                    {
+                        "provider": i.provider,
+                        "source": i.source,
+                        "published_date": i.published_date,
+                        "title": i.title,
+                        "url": i.url,
+                    }
+                    for i in b.items[:max_items]
+                ],
+            }
+            for b in review.briefs
+        ],
+    }
+
+
 def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
     if tool_name not in ALLOWED_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -220,6 +247,15 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
                 my_window = next((w for w in windows if w.roster_id == target_r.roster_id), None)
             filters = window.evaluate_trade_filters(res, my_window, season_phase)
             out["strategy_filters"] = [f.model_dump() for f in filters]
+        if isinstance(res, TradeEvaluation) and isinstance(out, dict):
+            pids = [
+                a.id
+                for a in (res.side_a.assets + res.side_b.assets)
+                if not a.is_pick
+            ]
+            out["news_review"] = _compact_news_review(
+                review_players(pids, players_meta or {}, "trade")
+            )
         return out
 
     elif tool_name == "get_weekly_waivers":
@@ -234,7 +270,11 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
                              ctx.get("roster_positions", []), ctx.get("players_meta", {}), ctx["weekly"],
                              ctx.get("season", ""), ctx.get("week", 0), position=kwargs.get("position"),
                              limit=kwargs.get("limit", 20), trending_ids=trending_ids)
-        return res.model_dump()
+        out = res.model_dump()
+        out["news_review"] = _compact_news_review(
+            review_players([t.player_id for t in res.targets], ctx.get("players_meta") or {}, "waiver")
+        )
+        return out
 
     elif tool_name == "get_player_comparison":
         team = kwargs.get("team")
@@ -245,7 +285,11 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         res = compare_players(kwargs.get("player_ids", []), r, ctx.get("projections", {}), ctx.get("scoring", {}),
                               ctx.get("roster_positions", []), ctx.get("players_meta", {}), ctx["weekly"],
                               ctx.get("season", ""), ctx.get("week", 0))
-        return res.model_dump()
+        out = res.model_dump()
+        out["news_review"] = _compact_news_review(
+            review_players([o.player_id for o in res.options], ctx.get("players_meta") or {}, "start")
+        )
+        return out
 
     elif tool_name == "get_lineup":
         rosters = ctx.get("rosters", [])
@@ -264,7 +308,17 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         season = ctx.get("season", "")
         week = kwargs.get("week") or ctx.get("week", 0)
         res = lineup.optimal_lineup(r, projections, scoring, roster_positions, players_meta, season=season, week=week, weekly=ctx.get("weekly"))
-        return res.model_dump() if hasattr(res, "model_dump") else res
+        out = res.model_dump() if hasattr(res, "model_dump") else res
+        if isinstance(out, dict):
+            active_pids = [
+                pid for pid in (getattr(r, "player_ids", None) or [])
+                if pid not in set(getattr(r, "reserve", None) or [])
+                and pid not in set(getattr(r, "taxi", None) or [])
+            ]
+            out["news_review"] = _compact_news_review(
+                review_players(active_pids, players_meta or {}, "start")
+            )
+        return out
 
     elif tool_name == "get_waivers":
         trending = ctx.get("trending", [])
@@ -286,7 +340,13 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             roster_positions=ctx.get("roster_positions"),
             trending_only=bool(kwargs.get("trending_only", False)),
         )
-        return [t.model_dump() if hasattr(t, "model_dump") else t for t in targets]
+        pids = [t.asset.id for t in targets if hasattr(t, "asset") and not t.asset.is_pick]
+        return {
+            "targets": [t.model_dump() if hasattr(t, "model_dump") else t for t in targets],
+            "news_review": _compact_news_review(
+                review_players(pids, players_meta or {}, "waiver")
+            ),
+        }
 
     elif tool_name == "get_roster":
         rosters = ctx.get("rosters", [])
@@ -320,10 +380,16 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             return [{"player": a.name, "position": a.position, "age": a.age, "value": a.value,
                      "win_now_value": a.redraft_value, "why": why} for a, why in found]
 
+        sells = plan.sell_candidates(mine.assets, stance)
+        buys = plan.buy_candidates(value_book, set(target_r.player_ids), stance)
+        pids = [a.id for a, _ in sells if not a.is_pick] + [a.id for a, _ in buys if not a.is_pick]
         return {"team": target_r.team_name, "stance": stance,
                 "playoff_odds": odds.get(target_r.roster_id),
-                "shop": rows(plan.sell_candidates(mine.assets, stance)),
-                "target": rows(plan.buy_candidates(value_book, set(target_r.player_ids), stance))}
+                "shop": rows(sells),
+                "target": rows(buys),
+                "news_review": _compact_news_review(
+                    review_players(pids, ctx.get("players_meta") or {}, "trade")
+                )}
 
     elif tool_name == "get_picks":
         rosters = ctx.get("rosters", [])
@@ -365,7 +431,20 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
             drop_limit=kwargs.get("limit", 8),
             ir_statuses=ctx.get("ir_statuses", frozenset()),
         )
-        return res.model_dump() if hasattr(res, "model_dump") else res
+        out = res.model_dump() if hasattr(res, "model_dump") else res
+        if isinstance(out, dict):
+            pids = [
+                s.player_id
+                for s in (
+                    getattr(res, "drop_candidates", [])
+                    + getattr(res, "ir_candidates", [])
+                    + getattr(res, "taxi_candidates", [])
+                )
+            ]
+            out["news_review"] = _compact_news_review(
+                review_players(pids, players_meta or {}, "drop")
+            )
+        return out
 
     elif tool_name == "get_movers":
         value_book = ctx.get("value_book")
@@ -470,5 +549,16 @@ def dispatch_tool(tool_name: str, kwargs: Dict[str, Any], ctx: Dict[str, Any]) -
         )
         target_win = next(w for w in windows if w.roster_id == target_r.roster_id)
         return target_win.model_dump()
+
+    elif tool_name == "get_player_news":
+        players_meta = ctx.get("players_meta") or {}
+        player_query = str(kwargs.get("player") or "").strip()
+        if not player_query:
+            raise ValueError("player is required")
+        pid = resolve_player(player_query, players_meta)
+        return _compact_news_review(
+            review_players([pid], players_meta, "lookup"),
+            max_items=5,
+        )
 
     raise ValueError(f"Unknown tool: {tool_name}")

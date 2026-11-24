@@ -230,6 +230,24 @@ def test_trade_numbers_match_the_sites_on_live_data():
         assert ev.secondary_is_fair() == s["ktc"]["fair"]
 
 
+def test_live_news_client_fetches_all_sources():
+    from ff.news import NewsClient, review_players
+
+    players = SleeperClient().players()
+    pid = next(
+        p for p, m in players.items()
+        if isinstance(m, dict) and m.get("full_name") == "Josh Allen" and m.get("position") == "QB"
+    )
+    review = review_players([pid], players, "lookup", news_client=NewsClient())
+    assert len(review.briefs) == 1
+    brief = review.briefs[0]
+    assert len(brief.feeds) == 3
+    espn_feed = next(f for f in brief.feeds if f.provider == "espn")
+    assert espn_feed.ok
+    espn_items = [i for i in brief.items if i.provider == "espn"]
+    assert all("allen" in f"{i.title} {i.description}".lower() for i in espn_items)
+
+
 def test_te_premium_reaches_both_markets_live():
     plain = ValuesClient().fetch(Format(is_dynasty=True, superflex=True, num_qbs=2, num_teams=12, ppr=0.5))
     tep = ValuesClient().fetch(LEAGUE_FMT, fresh=True)

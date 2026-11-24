@@ -31,10 +31,13 @@ from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Set, T
 
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.analysis.fit import positional_standing, startable_value, starting_assets
-from ff.cli import _finish_ranks, _pick_window, _season_sim
+from ff.cli import _finish_ranks, _pick_window, _season_sim, render_news_review
 from ff.contracts import Asset, FuturePick, OfferVerdict, TradeEvaluation, TradeSide
 from ff.core.config import load_config
+from ff.news import review_players
+from ff.qa import run_qa
 from ff.sleeper import SleeperClient, build_rosters, detect_format
+from rich.console import Console
 from ff.values import ValueBook, ValuesClient
 from ff.values.calculators_live import check_calculators
 
@@ -244,6 +247,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     balancers = list({a.id: a for a in balancers}.values())
 
     my_players = [a for a in my_assets if not a.is_pick]
+    offer_player_ids: List[str] = [a.id for a in sale if not a.is_pick]
     print(f"values live: FantasyCalc + KTC (top {book.secondary_top:,}); calculators verified; "
           f"rule: under 10% in both markets and KTC says Fair; your needs: "
           f"{', '.join(sorted(needs)) or 'none below the league median'}")
@@ -270,6 +274,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       dropped=dropped)
         print(f"\n{username}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
         for r in rows:
+            for a in r["assets"]:
+                if not a.is_pick:
+                    offer_player_ids.append(a.id)
             fc_give, fc_get = r["fc_totals"]
             k_give, k_get = r["ktc_totals"]
             k_str = f"{k_give:,} vs {k_get:,}" if k_give is not None and k_get is not None else "-- vs --"
@@ -288,6 +295,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             picks += [f"{n} = {their_origins[n]}" for n in r["get"] if n in their_origins]
             if picks:
                 print("      picks: " + "; ".join(picks) + " (tier from the original team's projected finish)")
+    if offer_player_ids:
+        news_rev = review_players(offer_player_ids, meta, "trade")
+        render_news_review(news_rev, Console())
+        run_qa("news_review", review=news_rev)
     return 0
 
 

@@ -8,10 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-
 from ff.analysis.cleanup import designation, ir_eligible_statuses
-from ff.contracts import Roster, NewsItem
+from ff.contracts import Roster
 from ff.contracts.models import WeeklyContext, WeeklyPlayer
 from ff.core.http import get_json
 from ff.sleeper import SleeperClient
@@ -136,18 +134,4 @@ def load_weekly(sc: SleeperClient, league_id: str, roster: Roster, season: str,
                            league.get("roster_positions") or [], datetime.now(timezone.utc))
     for pid in set(candidate_meta or {}) - set(roster.player_ids):
         context.players[pid].source = f"https://api.sleeper.com/projections/nfl/{season}/{week}?season_type=regular"
-    for pid in roster.player_ids:
-        if (context.players[pid].injury_status or "").lower() not in {"questionable", "doubtful"}:
-            continue
-        name = " ".join(filter(None, [fresh[pid].get("first_name"), fresh[pid].get("last_name")])) or pid
-        try:
-            reports = [NewsItem.from_payload(item) for item in sc.player_news(pid)]
-            dated = sorted((r for r in reports if r.published and r.url), key=lambda r: r.published or 0, reverse=True)
-            if dated:
-                item = dated[0]
-                context.warnings.append(f"Reporting context for {name} ({item.published_date}, {item.source}): {item.title} {item.url}")
-            else:
-                context.warnings.append(f"{name}: no dated reporting available; availability uses Sleeper's current designation.")
-        except (requests.RequestException, ValueError, TypeError):
-            context.warnings.append(f"{name}: news unavailable; availability uses Sleeper's current designation.")
     return context, fresh

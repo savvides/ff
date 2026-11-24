@@ -12,6 +12,7 @@ from ff.contracts import (
     DraftPickInfo,
     Lineup,
     NewsItem,
+    NewsReview,
     Roster,
     RosterAudit,
     RosterSlot,
@@ -697,10 +698,58 @@ def validate_cleanup(audit: RosterAudit) -> List[QACheck]:
     return checks
 
 
+def validate_news_review(review: NewsReview) -> List[QACheck]:
+    """Validate multi-source NewsReview invariants and loud degradation consistency."""
+    checks: List[QACheck] = []
+
+    items_valid = all(
+        bool(n.title) and bool(n.source) and bool(n.provider)
+        for brief in review.briefs
+        for n in brief.items
+    )
+    checks.append(QACheck(
+        name="News Items Integrity",
+        passed=items_valid,
+        message="" if items_valid else "News item missing title, source, or provider",
+    ))
+
+    flags_valid = True
+    for brief in review.briefs:
+        titles = {n.title for n in brief.items}
+        if any(f.headline not in titles for f in brief.flags):
+            flags_valid = False
+            break
+    checks.append(QACheck(
+        name="News Flags Citations",
+        passed=flags_valid,
+        message="" if flags_valid else "News flag references a headline not present in brief items",
+    ))
+
+    failed_providers = {
+        feed.provider
+        for brief in review.briefs
+        for feed in brief.feeds
+        if not feed.ok
+    }
+    degraded_set = set(review.degraded_feeds)
+    warnings_text = " ".join(review.warnings).lower()
+    degradation_consistent = failed_providers.issubset(degraded_set) and all(
+        p.lower() in warnings_text for p in failed_providers
+    )
+    checks.append(QACheck(
+        name="News Degradation Consistency",
+        passed=degradation_consistent,
+        message="" if degradation_consistent else "Failed news feed missing from degraded_feeds or warnings",
+    ))
+
+    return checks
+
+
 def validate_news(
     player_news: Optional[List[NewsItem]] = None,
     injured_assets: Optional[List[Tuple[str, Asset]]] = None,
     trending: Optional[List[dict]] = None,
+    news_review: Optional[NewsReview] = None,
 ) -> List[QACheck]:
     """Validate news and injury tracking invariants."""
     checks: List[QACheck] = []
@@ -728,6 +777,9 @@ def validate_news(
             passed=trend_valid,
             message="" if trend_valid else "Trending item missing player_id or negative count",
         ))
+
+    if news_review is not None:
+        checks.extend(validate_news_review(news_review))
 
     return checks
 
