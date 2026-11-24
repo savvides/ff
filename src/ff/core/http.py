@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -72,7 +73,7 @@ def _fresh(path: Path, ttl: Optional[float]) -> bool:
 def _atomic_write(path: Path, text: str) -> None:
     """Write via a temp file + os.replace so a crash mid-write never leaves a
     truncated/corrupt cache entry behind."""
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
 

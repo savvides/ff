@@ -863,6 +863,7 @@ class NewsItem(BaseModel):
     the title/description pair is optional and parsing never raises.
     """
 
+    provider: str = "sleeper"
     published: Optional[int] = None  # epoch MILLISECONDS, as Sleeper sends it
     source: str = "?"
     title: str = "(untitled)"
@@ -874,6 +875,7 @@ class NewsItem(BaseModel):
     def from_payload(cls, payload: Dict[str, Any]) -> "NewsItem":
         meta = payload.get("metadata") or {}
         return cls(
+            provider=payload.get("provider") or "sleeper",
             published=payload.get("published"),
             source=payload.get("source") or "?",
             title=(meta.get("title") or "").strip() or "(untitled)",
@@ -888,6 +890,50 @@ class NewsItem(BaseModel):
         if not self.published:
             return "-"
         return datetime.fromtimestamp(self.published / 1000).strftime("%Y-%m-%d")
+
+
+class NewsFlag(BaseModel):
+    """Deterministic signal derived from a player's recent news."""
+
+    code: Literal["BREAKING", "RECENT", "INJURY", "ROLE_CHANGE", "TRANSACTION", "DISCIPLINE"]
+    severity: Literal["high", "medium", "info"]
+    label: str
+    reason: str
+    headline: str
+    published_date: str
+
+
+class FeedStatus(BaseModel):
+    """Health and item count for a single news provider."""
+
+    provider: str
+    ok: bool
+    item_count: int = 0
+    error: Optional[str] = None
+
+
+class PlayerNewsBrief(BaseModel):
+    """Merged, deduplicated news briefing and flags for one player."""
+
+    player_id: str
+    player_name: str
+    position: Optional[str] = None
+    team: Optional[str] = None
+    injury_status: Optional[str] = None
+    items: List[NewsItem] = Field(default_factory=list)
+    flags: List[NewsFlag] = Field(default_factory=list)
+    feeds: List[FeedStatus] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class NewsReview(BaseModel):
+    """Complete multi-source news review attached to a player decision."""
+
+    decision: Literal["start", "trade", "drop", "waiver", "lookup"]
+    as_of: datetime
+    briefs: List[PlayerNewsBrief] = Field(default_factory=list)
+    degraded_feeds: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class SeasonPhase(BaseModel):
