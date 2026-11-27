@@ -70,11 +70,11 @@ def find_arbitrage_movers(
     limit: int = 20,
     market: Optional[str] = None,
 ) -> List[ArbitrageMover]:
-    """Scan and rank assets with market valuation discrepancies between FC and secondary market (Dynasty Dealer).
+    """Scan and rank assets with market valuation discrepancies between FC and secondary market.
 
     If rosters is supplied, attaches owning team info to each arbitrage opportunity.
-    market can be 'dealer' (assets where Dealer > FC) or 'fc' (assets where FC > Dealer).
-    Accepts 'ktc' as a legacy alias for 'dealer'.
+    market can be 'dp', 'ktc', or 'dealer' (assets where secondary > FC), or 'fc'
+    (assets where FC > secondary).
     """
     actual_book: Optional[ValueBook] = None
     actual_rosters: Optional[List[Roster]] = None
@@ -101,6 +101,7 @@ def find_arbitrage_movers(
 
     scored: List[ArbitrageMover] = []
     norm_market = market.lower() if market else None
+    sec_bias = "DP" if actual_book.secondary_source == "dp" else "KTC"
 
     priced = [(a, a.secondary_value) for a in actual_book.assets if a.secondary_value is not None]
     for (a, sec_val), scaled in zip(priced, _on_fc_scale(priced)):
@@ -111,7 +112,7 @@ def find_arbitrage_movers(
 
         diff = scaled - fc_val
 
-        if norm_market in ("dealer", "ktc") and diff <= 0:
+        if norm_market in ("dp", "dealer", "ktc") and diff <= 0:
             continue
         if norm_market == "fc" and diff >= 0:
             continue
@@ -133,7 +134,7 @@ def find_arbitrage_movers(
             diff_pct=diff_pct,
             roster_id=roster_id,
             team_name=team_name,
-            market_bias="KTC" if diff > 0 else ("FC" if diff < 0 else "EVEN"),
+            market_bias=sec_bias if diff > 0 else ("FC" if diff < 0 else "EVEN"),
         )
         scored.append(mover)
 

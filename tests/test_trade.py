@@ -1,11 +1,13 @@
 from ff.analysis import (
     analyze_trade,
+    apply_site_adjustments,
     evaluate_trade,
     ktc_position_deltas,
+    offer_verdict,
     position_deltas,
     secondary_position_deltas,
 )
-from ff.contracts import Asset
+from ff.contracts import Asset, TradeEvaluation, TradeSide
 from ff.analysis.calculators import ktc_adjustment
 from ff.values import ValueBook
 
@@ -226,3 +228,93 @@ def test_a_generic_pick_resolved_to_fantasycalcs_mid_tier_cannot_be_judged():
     assert verdict.status == "CANNOT_JUDGE"
     assert "name the tier for 2027 1st (Mid)" in verdict.reasons[0]
     assert not book.resolve("2027 1st (Mid)").secondary_approx  # a named Mid is still judged
+
+
+def test_offer_verdict_dp_raw_sums_pass_and_fail():
+    a = Asset(id="1", name="Player A", position="WR", value=2000, secondary_value=1000)
+    b = Asset(id="2", name="Player B", position="WR", value=2050, secondary_value=1050)
+    ev = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[b]),
+                         secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev)
+    assert ev.side_a.secondary_adjustment == 0 and ev.side_b.secondary_adjustment == 0
+    v = offer_verdict(ev)
+    assert v.passes and v.secondary_source == "dp" and v.secondary_label == "DynastyProcess"
+    assert v.secondary_pct is not None and v.secondary_pct < 10.0
+    assert v.ktc_site_pct is None and v.ktc_site_fair is None
+
+    c = Asset(id="3", name="Player C", position="WR", value=2000, secondary_value=1400)
+    ev_fail = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[c]),
+                              secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev_fail)
+    v_fail = offer_verdict(ev_fail)
+    assert v_fail.status == "FAIL" and v_fail.secondary_pct is not None and v_fail.secondary_pct > 10.0
+
+
+def test_offer_verdict_dp_unpriced_2029_pick_cannot_judge():
+    a = Asset(id="1", name="Michael Pittman Jr.", position="WR", value=1158, secondary_value=461)
+    p29 = Asset(id="2029 2", name="2029 2nd (Mid)", kind="pick", position="PICK", value=1308, secondary_value=None)
+    ev = TradeEvaluation(side_a=TradeSide(assets=[p29]), side_b=TradeSide(assets=[a]),
+                         secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev)
+    assert ev.side_a.secondary_adjustment is None and ev.side_b.secondary_adjustment is None
+    v = offer_verdict(ev)
+    assert v.status == "CANNOT_JUDGE"
+    assert any("DynastyProcess has no value for 2029 2nd (Mid)" in r for r in v.reasons)
+
+
+def test_offer_verdict_unavailable_secondary_gives_fc_only_hint():
+    a = Asset(id="1", name="A", position="WR", value=2000, secondary_value=None)
+    b = Asset(id="2", name="B", position="WR", value=2050, secondary_value=None)
+    ev = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[b]),
+                         secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev)
+    v = offer_verdict(ev)
+    assert v.status == "CANNOT_JUDGE"
+    assert any("--fc-only" in r for r in v.reasons)
+
+
+def test_offer_verdict_fc_only_ignores_secondary_but_enforces_fc_drift():
+    a = Asset(id="1", name="A", position="WR", value=2000, secondary_value=None)
+    b = Asset(id="2", name="B", position="WR", value=2050, secondary_value=None)
+    ev = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[b]),
+                         secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev)
+    v_ok = offer_verdict(ev, fc_only=True)
+    assert v_ok.passes and v_ok.fc_only is True
+    v_ktc_drift = offer_verdict(ev, calculator_problems=["KTC calcAdjustPackageNew() changed"], fc_only=True)
+    assert v_ktc_drift.passes
+    v_drift = offer_verdict(ev, calculator_problems=["FantasyCalc getValueAdjustment() changed"], fc_only=True)
+    assert v_drift.status == "CANNOT_JUDGE"
+
+    d = Asset(id="4", name="D", position="WR", value=3000, secondary_value=None)
+    ev_fail = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[d]),
+                              secondary_source="dp", secondary_label="DynastyProcess")
+    apply_site_adjustments(ev_fail)
+    v_fail = offer_verdict(ev_fail, fc_only=True)
+    assert v_fail.status == "FAIL" and v_fail.fc_only is True
+
+
+def test_effective_secondary_source_backward_compat_and_analyze_trade_dp():
+    a = Asset(id="1", name="Player A", position="WR", value=2000, secondary_value=1000)
+    b = Asset(id="2", name="Player B", position="WR", value=2050, secondary_value=1050)
+    legacy_ktc = TradeEvaluation(side_a=TradeSide(assets=[a]), side_b=TradeSide(assets=[b]),
+                                 secondary_top=9999)
+    assert legacy_ktc.effective_secondary_source() == "ktc"
+
+    dp_book = ValueBook([a, b], secondary_source="dp", secondary_label="DynastyProcess")
+    ev_dp, _ = analyze_trade(["Player A"], ["Player B"], dp_book)
+    assert ev_dp.secondary_source == "dp"
+    assert ev_dp.secondary_label == "DynastyProcess"
+    assert ev_dp.side_a.secondary_adjustment == 0
+    assert ev_dp.side_b.secondary_adjustment == 0
+    verdict = offer_verdict(ev_dp, calculator_problems=["KTC calcAdjustPackageNew() changed"])
+    assert verdict.passes and verdict.secondary_source == "dp"
+
+    none_book = ValueBook([a.model_copy(update={"secondary_value": None}),
+                           b.model_copy(update={"secondary_value": None})],
+                          secondary_source="none", secondary_label="None")
+    ev_none, _ = analyze_trade(["Player A"], ["Player B"], none_book)
+    assert ev_none.secondary_source == "none"
+    assert ev_none.side_a.secondary_adjustment is None
+    assert offer_verdict(ev_none).status == "CANNOT_JUDGE"
+    assert offer_verdict(ev_none, fc_only=True).passes
