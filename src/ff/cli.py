@@ -3,6 +3,7 @@
     ff setup <username>     pick your league, auto-detect its format, save it
     ff plan                 your team on one page: stance, this week's to-dos, who to shop/target
     ff standings            playoff odds and projected draft slot, simulated
+    ff window [team]        competitive window, Max PF, middle-trap pivot, and RB risk
     ff fab                  waiver budgets left and what this league pays for claims
     ff offers --sell        packages for your asset that pass the offer rule
     ff roster [team]        price out a roster, with power rank + positions
@@ -10,10 +11,17 @@
     ff picks [team]         future draft capital by team, tier-valued
     ff values [-p WR]       dynasty rankings for your league format
     ff trade --give --get   analyze a trade (players + picks), with a fairness call
-    ff waivers              trending free agents worth grabbing, by value
+    ff movers               buy-low / sell-high and cross-market arbitrage
+    ff waivers              unrostered players by dynasty opportunity or weekly lineup gain
+    ff news [team]          player health, depth roles, trending movement, or --player briefing
     ff cleanup [team]       roster capacity: who to drop / move to IR / stash on taxi for room
-    ff draft [-p QB] [-r]   live draft board: your picks + best available by value
-    ff window [team]        competitive window, Max PF, middle-trap pivot, and RB risk
+    ff lineup [team]        optimal start/sit for a week, scored by league rules
+    ff compare A B          head-to-head start/sit comparison with game locks
+    ff draft [-p QB] [-r]   live draft board: your picks + best available by fit
+    ff ask "<query>"        natural-language Q&A via local terminal LLM runner
+    ff qa                   full-system diagnostic invariant audits across domains
+    ff config               manage LLM backend and window mode settings
+    ff version              print the installed ff version
 """
 
 from __future__ import annotations

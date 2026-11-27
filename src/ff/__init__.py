@@ -1,9 +1,11 @@
 """ff - manage a Sleeper dynasty league with free data.
 
-Built on two free, auth-free sources:
-  * Sleeper API      - your league, rosters, matchups, transactions, trending.
-  * FantasyCalc API  - dynasty trade values (players + draft picks), keyed by
-                       sleeper_id so they join straight onto your roster.
+Built on free, auth-free, read-only sources:
+  * Sleeper API         - your league, rosters, matchups, transactions, trending.
+  * FantasyCalc API     - primary dynasty trade values (players + draft picks),
+                          keyed by sleeperId so they join onto your roster.
+  * DynastyProcess      - default secondary-market dynasty values (opt-in KTC).
+  * ESPN & NFL RSS      - kickoff times, game status, and 14-day player news.
 
 The package is split into directory-per-concern modules that share one
 contract (`ff.contracts`). See AGENTS.md for why this is in-process modules

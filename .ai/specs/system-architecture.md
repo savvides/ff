@@ -1,6 +1,6 @@
 # System architecture
 
-Repository-derived baseline inspected on 2026-10-05 against the `main` source snapshot at commit `5bd80cd397d516969c800849544e91751479ee50`. This describes the source being integrated on main, rather than a proposed architecture. Application source takes precedence when older prose differs. Provider behavior was inspected in source and fixtures; no live provider requests were made for this baseline.
+Repository-derived baseline inspected on 2026-11-27 against the `v0.1.0` release baseline on `main`. This describes the source being integrated on main, rather than a proposed architecture. Application source takes precedence when older prose differs. Provider behavior was inspected in source and fixtures; no live provider requests were made for this baseline.
 
 ## Package and runtime inventory
 
@@ -26,8 +26,9 @@ There is no application database or database provider. State is local files plus
 
 | Store | Contract and lifecycle |
 | --- | --- |
-| `FF_HOME/config.json` | Pydantic `Config`: league ID, season, detected `Format`, user identity, names and LLM settings. Written by setup/onboarding and `config set-llm`; ordinary reads validate JSON. Config writes use `Path.write_text`, not the cache's atomic writer. |
-| `FF_HOME/cache/` | URL-and-parameters SHA-256 cache keys truncated to 24 hex characters. JSON responses are cached as JSON; KTC stores raw HTML/text using the same cache-file mechanism. Entries are written through a temporary file and `os.replace`. |
+| `FF_HOME/config.json` | Pydantic `Config`: league ID, season, detected `Format`, user identity, names, LLM settings, and `window_mode`. Written atomically (PID temp file + `os.replace`, UTF-8) by setup/onboarding, `config set-llm`, and `config set-window`; ordinary reads validate JSON. |
+| `FF_HOME/cache/` | URL-and-parameters SHA-256 cache keys truncated to 24 hex characters. JSON responses are cached as JSON; KTC/DP/RSS/calculator checks store raw HTML/text using the same cache-file mechanism. Entries are written through a temporary file and `os.replace`. |
+| `FF_HOME/ktc_pool.json` | Optional local KeepTradeCut fallback pool (explicit `--ktc-file` or `$FF_HOME/ktc_pool.json` when live KTC fetch is empty). |
 | Memory | `ValueBook` indexes, lazy per-command context and QA's last report. No background service or persistent job queue. |
 | `samples/` | Gitignored real-league inspection snapshots from `scripts/record_fixtures.py`; not the deterministic test fixtures or a production database. |
 
@@ -39,13 +40,13 @@ There is no sign-in/session system or user-auth provider. Sleeper user IDs selec
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
-| Boundary/orchestration | `src/ff/cli.py` | Typer arguments, config loading, client calls, lazy analysis context, team selection, Rich tables, QA invocation and expected-error handling. Includes `compare`, weekly waivers and the hidden `doctor` alias. |
-| Shared contracts | `src/ff/contracts/models.py` | Pydantic domain models for assets, rosters, trades, picks, cleanup, draft fit, weekly context, lineups, comparisons, waivers, offer verdicts and news. `Config` and QA report models live in their corresponding modules. |
+| Boundary/orchestration | `src/ff/cli.py`, `src/ff/offers.py` | Typer arguments, config loading, client calls, lazy analysis context, team selection, Rich tables, offer search, QA invocation and expected-error handling. Includes `window`, `standings`, `plan`, `fab`, `offers`, `compare`, weekly waivers, `config set-window`, and the hidden `doctor` alias. |
+| Shared contracts | `src/ff/contracts/models.py` | Pydantic domain models for assets, rosters, trades, picks, cleanup, draft fit, weekly context, lineups, comparisons, waivers, offer verdicts, window/duration/strategy filters, standings/FAB, and multi-source news. `Config` and QA report models live in their corresponding modules. |
 | Infrastructure | `src/ff/core/config.py`, `http.py` | Local state paths/config, cached retrying JSON GETs and browser-User-Agent text GETs with TLS-only curl fallback; no football calculations. |
-| Data clients | `sleeper/client.py`, `values/client.py`, `values/ktc.py`, `projections/client.py` | Fetch and normalize provider data. `values/normalize.py` shares player/pick normalization. `values/dealer.py` is a backward-compatibility adapter to KTC, not another active provider. `values/calculators_live.py` checks provider calculator bundle identities/formula fingerprints before trusting the direct trade offer rule. |
+| Data clients | `sleeper/client.py`, `values/`, `projections/client.py`, `news/` | Fetch and normalize provider data. `values/dp.py` (`DynastyProcessClient`) is the default secondary market; `values/ktc.py` (`KtcClient`) is opt-in (`--market ktc`, `--ktc-file`, or `$FF_HOME/ktc_pool.json`). `values/normalize.py` shares player/pick normalization. `values/dealer.py` is a backward-compatibility adapter to KTC, not another active provider. `values/calculators_live.py` checks provider calculator bundle identities/formula fingerprints before trusting the direct trade offer rule. `news/` (`client.py`, `review.py`) fetches Sleeper, ESPN, and NFL RSS feeds. |
 | Weekly orchestration | `src/ff/services/weekly.py` | Cross-provider schedule validation, fresh per-player availability, matchup joins and UTC observation time. Builds `WeeklyContext`; recommendation calculations stay in analysis. |
-| Analysis | `src/ff/analysis/` | Deterministic calculations over contracts, metadata and `ValueBook`: roster valuation, trades, picks, opportunity, draft fit, lineup assignment, comparisons, weekly waivers and cleanup (including IR moves). `analysis/calculators.py` ports site trade adjustments and holds pure source-fingerprint helpers; it performs no network I/O. Existing imports of Sleeper's pure name helper and `ValueBook` do not introduce network calls here. |
-| Optional interpretation | `src/ff/services/llm/` | Local terminal runner, allowlisted tool dispatch and output rendering. |
+| Analysis | `src/ff/analysis/` | Deterministic calculations over contracts, metadata and `ValueBook`: roster valuation, trades, picks, opportunity, draft fit, lineup assignment, comparisons, weekly waivers, cleanup (including IR moves), competitive window diagnosis (`window.py`), Monte Carlo standings (`standings.py`), team plan (`plan.py`), FAB history (`fab.py`), and 14-day news review (`news.py`). `analysis/calculators.py` ports site trade adjustments and holds pure source-fingerprint helpers; it performs no network I/O. |
+| Optional interpretation | `src/ff/services/llm/` | Local terminal runner, allowlisted tool dispatch (up to 3 tools per query across 17 tools) and output rendering. |
 | Validation | `src/ff/qa/` | Domain invariants and reports. QA is a mathematical/structural check, not proof of feed freshness, model accuracy or recommendation quality. |
 
 ## Data flow
@@ -81,8 +82,9 @@ flowchart TD
 | Sleeper public v1 | `https://api.sleeper.app/v1` | State/user/leagues, rosters/users/matchups, traded picks, drafts, player catalog and trending. League data 30 minutes; catalog 24 hours; trending/state typically one hour; draft and matchup reads TTL 0. Fresh state/league/roster flags use TTL 0. |
 | Sleeper player/projection/schedule feeds | `https://api.sleeper.com` | Per-player status TTL 0, news five minutes; projections three hours normally and TTL 0 for fresh decisions; schedule TTL 0. Raw projected stat lines are scored with league rules, not provider precomputed PPR points. |
 | FantasyCalc | `https://api.fantasycalc.com/values/current` | Six-hour values normally; direct trade uses fresh values. Parameters are `isDynasty`, `numQbs`, `numTeams`, `ppr`, plus optional `tep=te+`/`te++`. |
-| KeepTradeCut | `https://keeptradecut.com/trade-calculator` | Embedded JSON in `script#ktc-players` (legacy `playersArray` and raw JSON also supported), six-hour text cache, superflex/1QB plus nested TE+/TE++ values. Optional and allowed to degrade; direct trade fetches fresh. |
-| ESPN | `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` | TTL 0; season/year/week and opponent-pair verification against Sleeper schedule before trusting kickoff/status. |
+| DynastyProcess | `https://raw.githubusercontent.com/dynastyprocess/data/master/files/` | Default secondary market (`values.csv` 6h TTL, `db_playerids.csv` 24h TTL); direct trade/offers fetch fresh. Does not adjust for TE premium. |
+| KeepTradeCut | `https://keeptradecut.com/trade-calculator` | Opt-in secondary market (`--market ktc`, `--ktc-file`, or `$FF_HOME/ktc_pool.json`). Embedded JSON in `script#ktc-players`, six-hour text cache, superflex/1QB plus nested TE+/TE++ values. |
+| ESPN & NFL RSS | `site.api.espn.com`, ESPN RSS, ProFootballTalk RSS | Scoreboard (TTL 0) for kickoff/status; player/NFL news and RSS (5m TTL, `retries=False`) for 14-day news review. |
 
 
 ## Valuation, cleanup and auxiliary flows

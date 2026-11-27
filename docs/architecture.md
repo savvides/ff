@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-How `ff` is put together, from the outside in. These diagrams were derived from the source at commit `ba6e5b8`. Node labels use real module and function names, so you can grep them, and a rename should update this file. For the prose version and design decisions, see [`AGENTS.md`](../AGENTS.md) and [`.ai/specs/system-architecture.md`](../.ai/specs/system-architecture.md).
+How `ff` is put together, from the outside in. These diagrams were derived from the source at the `v0.1.0` release baseline. Node labels use real module and function names, so you can grep them, and a rename should update this file. For the prose version and design decisions, see [`AGENTS.md`](../AGENTS.md) and [`.ai/specs/system-architecture.md`](../.ai/specs/system-architecture.md).
 
 1. [System context](#1-system-context): what `ff` talks to and what it stores
 2. [Module dependencies](#2-module-dependencies): the import graph between packages
@@ -19,42 +19,49 @@ flowchart LR
   env[/"environment<br/>FF_HOME, FF_QA"/] --> ff
 
   subgraph home["FF_HOME (default ./.ff)"]
-    cfg[("config.json<br/>league, season, Format, user, LLM backend")]
+    cfg[("config.json<br/>league, season, Format, user,<br/>LLM backend, window_mode")]
     cache[("cache/<br/>responses keyed by URL hash, per-endpoint TTL")]
+    ktcpool[("ktc_pool.json (optional)<br/>local KTC fallback pool")]
   end
 
   subgraph free["Free, public, no auth"]
-    sapp["api.sleeper.app/v1<br/>state, users, leagues, rosters, matchups,<br/>drafts, draft picks, traded picks,<br/>players file, trending"]
+    sapp["api.sleeper.app/v1<br/>state, users, leagues, rosters, matchups,<br/>transactions, drafts, draft picks, traded picks,<br/>players file, trending"]
     scom["api.sleeper.com<br/>projections, schedule,<br/>per-player status and news"]
     fcapi["api.fantasycalc.com<br/>dynasty and redraft values"]
-    ktc["keeptradecut.com<br/>trade-calculator HTML (values),<br/>site.min.js when its version changes (trade drift check)"]
+    dp["raw.githubusercontent.com/dynastyprocess/data<br/>values.csv + db_playerids.csv (default secondary)"]
+    ktc["keeptradecut.com<br/>trade-calculator HTML (opt-in values),<br/>site.min.js when its version changes (trade drift check)"]
     fcsite["fantasycalc.com<br/>trade-calculator page,<br/>JS bundles when their names change (trade drift check)"]
-    espn["site.api.espn.com<br/>NFL scoreboard"]
+    espn["site.api.espn.com<br/>NFL scoreboard + player/NFL news"]
+    rss["NFL RSS feeds<br/>ESPN RSS + ProFootballTalk RSS"]
   end
 
   subgraph opt["Optional, for ff ask only"]
     local["LLM CLI via subprocess<br/>agy / gemini / claude call hosted models;<br/>ollama runs locally"]
   end
 
-  ff -->|"read / write: setup, config set-llm,<br/>ask setup_league"| cfg
+  ff -->|"read / write: setup, config set-llm,<br/>config set-window, ask setup_league"| cfg
   ff -->|read / write| cache
+  ff -.->|fallback read| ktcpool
   ff --> sapp
   ff --> scom
   ff --> fcapi
+  ff --> dp
   ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| ktc
   ff -->|"HTML via get_text,<br/>curl fallback on TLS errors"| fcsite
-  ff -->|"weekly: kickoff times, game status,<br/>schedule cross-check"| espn
-  ff -->|"ask: question + tool schemas,<br/>then the tool result JSON"| local
+  ff -->|"weekly + news: kickoff times,<br/>game status, player news"| espn
+  ff -->|"news: 14-day review"| rss
+  ff -->|"ask: question + tool schemas,<br/>then tool result JSON"| local
 ```
 
 ## 2. Module dependencies
 
 Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: every edge drawn has a backing import, and every import is drawn. The intended layering is boundary → services → data clients → pure analysis, with `qa` as a checker beside analysis and everything resting on contracts and core. Dashed edges are couplings that cut across that layering:
 
-- analysis reaches back into `sleeper` (`player_name`) and `values` (`ValueBook`) for convenience
+- `analysis` reaches back into `sleeper` (`player_name`) and `values` (`ValueBook`) for convenience
 - `services.weekly` is a data loader, yet it reuses two rules from `analysis.cleanup`: `designation` and `ir_eligible_statuses`
-- `qa` re-runs `analysis.trade.apply_site_adjustments`, reuses lineup and waiver rules (`SLOT_ELIGIBILITY`, `game_locked`, `unavailable`, `waiver_positions`), and reads the `services.llm.tools` allowlist
-- `ff/offers.py` imports `ff.cli._pick_window`, `_season_sim` and `_finish_ranks`
+- `news` fetches RSS/JSON feeds and calls `analysis.news.build_news_review`
+- `qa` re-runs `analysis.trade.apply_site_adjustments`, reuses lineup, window, and waiver rules (`SLOT_ELIGIBILITY`, `game_locked`, `unavailable`, `waiver_positions`), and reads the `services.llm.tools` allowlist
+- `ff/offers.py` imports `cli` helpers (`_pick_window`, `_season_sim`, `_finish_ranks`, `render_news_review`, and `cli.console`)
 
 `values/dealer.py` is a backward-compatibility shim that no command imports.
 
@@ -63,7 +70,8 @@ Package-level `import` edges under `src/ff/` and `scripts/`, read from the AST: 
 flowchart TD
   subgraph boundary["Boundary"]
     cli["cli.py<br/>Typer commands, Rich tables"]
-    scripts["scripts/<br/>record_fixtures<br/>(calculator_oracle.mjs is Node, no ff imports)"]
+    offers["offers.py<br/>ff offers search & CLI"]
+    scripts["scripts/record_fixtures.py<br/>(calculator_oracle.mjs is Node)"]
   end
   subgraph services["Services"]
     weekly["services/weekly.py<br/>load_weekly"]
@@ -71,102 +79,101 @@ flowchart TD
   end
   subgraph clients["Data clients"]
     sleeper["sleeper/client.py<br/>SleeperClient, detect_format,<br/>build_rosters"]
-    values["values/<br/>ValuesClient, ValueBook,<br/>KtcClient, normalize"]
+    values["values/<br/>ValuesClient, ValueBook, DynastyProcessClient,<br/>KtcClient, SecondarySnapshot, normalize"]
     calclive["values/calculators_live.py<br/>check_calculators"]
     projections["projections/client.py<br/>ProjectionsClient"]
+    news["news/<br/>NewsClient, review_players"]
   end
   subgraph pure["Pure analysis, no I/O"]
-    analysis["analysis/<br/>roster, trade, picks, draft, fit,<br/>lineup, waivers, weekly_waivers,<br/>cleanup, depth, movers, compare"]
+    analysis["analysis/<br/>roster, trade, picks, draft, fit, lineup,<br/>waivers, weekly_waivers, cleanup, depth,<br/>movers, compare, window, standings, plan, fab, news"]
     calcs["analysis/calculators.py<br/>FC and KTC calculator ports"]
   end
   qa["qa/<br/>engine, validators, models"]
 
-  cli --> weekly
-  cli --> llm
-  cli --> sleeper
-  cli --> values
-  cli --> calclive
-  cli --> projections
-  cli --> analysis
-  cli --> qa
-
-  scripts -.->|_pick_window| cli
-  scripts --> llm
+  cli --> weekly & llm & sleeper & values & calclive & projections & news & offers & analysis & qa
+  offers -.-> cli
+  offers --> sleeper & values & calclive & news & analysis & qa
   scripts --> sleeper
-  scripts --> values
-  scripts --> calclive
-  scripts --> analysis
 
   weekly -.->|designation, ir_eligible_statuses| analysis
   weekly --> sleeper
 
-  llm --> analysis
-  llm --> sleeper
-  llm -.->|run_qa| qa
-
+  llm --> analysis & sleeper & values & news
+  news -.->|build_news_review| analysis
   calclive --> calcs
 
   analysis --> calcs
   analysis -.->|player_name| sleeper
   analysis -.->|ValueBook| values
 
-  qa -.->|apply_site_adjustments, lineup and waiver rules| analysis
+  qa -.->|apply_site_adjustments, lineup, window and waiver rules| analysis
   qa -.->|ALLOWED_TOOLS| llm
 ```
 
-Nearly every package also imports the two shared ones. They are drawn separately so the graph above stays readable:
+Nearly every package also imports `contracts` and `core`. They are drawn separately so the graph above stays readable:
 
 ```mermaid
 flowchart LR
   contracts["contracts/models.py<br/>pydantic schema"]
   core["core/<br/>http.get_json, get_text, config"]
   cli["cli.py"]
-  scripts["scripts/"]
+  offers["offers.py"]
   weekly["services/weekly.py"]
   llm["services/llm/"]
   sleeper["sleeper/"]
   values["values/"]
   calclive["values/calculators_live.py"]
   projections["projections/"]
+  news["news/"]
   analysis["analysis/"]
   qa["qa/"]
-  cli & scripts & weekly & llm & sleeper & values & analysis & qa & core --> contracts
-  cli & scripts & weekly & llm & calclive & sleeper & values & projections & qa --> core
+  cli & offers & weekly & llm & sleeper & values & news & analysis & qa & core --> contracts
+  cli & offers & weekly & llm & calclive & sleeper & values & projections & news & qa --> core
 ```
 <!-- edges:end -->
 
 ## 3. Command map
 
-Which analysis each command calls directly. Dotted edges inside the analysis box are imports between analysis modules, so `waivers` also runs `depth` and `fit` also runs `lineup`. `ask` reaches all of it through the dispatcher (section 6), but with cached values and without `trade`'s drift check or offer rule.
+Which analysis each command calls directly. Dotted edges inside the analysis box are imports between analysis modules, so `waivers` also runs `depth`, `fit` also runs `lineup` and `movers`, and `plan`/`window` share `lineup`/`movers`. `ask` reaches all of it through the dispatcher (section 6), using cached values without `trade`'s drift check or offer rule.
 
 ```mermaid
 flowchart TD
   subgraph cmds["ff commands"]
     setup["setup"]
-    cfgcmd["config set-llm<br/>version"]
-    rpn["roster<br/>power<br/>news"]
+    cfgcmd["config set-llm / set-window<br/>version"]
+    rpn["roster / power / window"]
+    standings_c["standings"]
+    plan_c["plan"]
+    fab_c["fab"]
     picks_c["picks"]
     values_c["values"]
     trade_c["trade"]
+    offers_c["offers"]
     movers_c["movers"]
     waivers_c["waivers"]
+    news_c["news"]
     cleanup_c["cleanup"]
     draft_c["draft"]
     lineup_c["lineup"]
     compare_c["compare"]
     waiversw["waivers --weekly"]
     ask["ask"]
-    qa_c["qa<br/>doctor (hidden alias)"]
+    qa_c["qa / doctor (hidden alias)"]
   end
 
   cfgnote(["config.json only"])
   detect["sleeper.detect_format"]
   top["ValueBook.top"]
   weekly["services.weekly<br/>load_weekly"]
+  news_rev["news.review_players"]
   dispatch["services.llm.dispatcher<br/>dispatch_tool"]
 
   subgraph an["analysis/"]
     a_roster["roster"]
+    a_window["window"]
+    a_standings["standings"]
+    a_plan["plan"]
+    a_fab["fab"]
     a_picks["picks"]
     a_trade["trade"]
     a_calcs["calculators"]
@@ -179,73 +186,73 @@ flowchart TD
     a_compare["compare"]
     a_draft["draft"]
     a_fit["fit"]
+    a_news["news"]
   end
 
   cfgcmd -.-> cfgnote
   setup --> detect
   values_c --> top
-  rpn --> a_roster
-  picks_c --> a_roster
-  picks_c --> a_picks
-  trade_c --> a_trade
+  rpn --> a_roster & a_window & a_picks & a_standings
+  standings_c --> a_standings
+  plan_c --> a_plan & a_roster & a_standings & a_picks & a_cleanup & weekly & a_lineup & news_rev
+  fab_c --> a_fab
+  picks_c --> a_roster & a_picks & a_standings
+  trade_c --> a_trade & a_window & news_rev
+  offers_c --> a_trade & a_picks & a_fit & news_rev
   movers_c --> a_movers
-  waivers_c --> a_waivers
-  cleanup_c --> a_cleanup
-  draft_c --> a_draft
-  draft_c --> a_fit
-  draft_c --> a_roster
-  lineup_c --> weekly
-  lineup_c --> a_lineup
-  compare_c --> weekly
-  compare_c --> a_compare
-  waiversw --> weekly
-  waiversw --> a_ww
+  waivers_c --> a_waivers & news_rev
+  news_c --> a_roster & news_rev
+  cleanup_c --> a_cleanup & news_rev
+  draft_c --> a_draft & a_fit & a_roster & a_window
+  lineup_c --> weekly & a_lineup & news_rev
+  compare_c --> weekly & a_compare & news_rev
+  waiversw --> weekly & a_ww & news_rev
   ask --> dispatch
-  qa_c --> a_roster
-  qa_c --> a_picks
-  qa_c --> a_cleanup
-  qa_c --> a_waivers
-  qa_c --> a_movers
-  qa_c --> top
+  qa_c --> a_roster & a_picks & a_cleanup & a_waivers & a_movers & a_window & top
 
   weekly -.-> a_cleanup
+  news_rev -.-> a_news
   a_trade -.-> a_calcs
-  a_waivers -.-> a_depth
-  a_waivers -.-> a_lineup
-  a_ww -.-> a_waivers
-  a_ww -.-> a_lineup
+  a_waivers -.-> a_depth & a_lineup
+  a_ww -.-> a_waivers & a_lineup
   a_cleanup -.-> a_depth
   a_compare -.-> a_lineup
-  a_fit -.-> a_lineup
-  a_fit -.-> a_movers
+  a_fit -.-> a_lineup & a_movers
+  a_plan -.-> a_fit & a_movers
+  a_window -.-> a_lineup & a_movers
 ```
 
 What each command reads. `●` always; `◐` only in the noted case; blank means never. Every command except `setup` and `version` loads `config.json` first; `ask` loads it only if it exists. The last column is the `qa.engine.VALIDATOR_MAP` key that checks the result.
 
-| Command | api.sleeper.app | api.sleeper.com | FantasyCalc | KTC | ESPN | QA check |
+| Command | api.sleeper.app | api.sleeper.com | FantasyCalc | Secondary (DP / KTC) | ESPN & RSS | QA check |
 |---|---|---|---|---|---|---|
 | `setup` | ● state, user, leagues, league | | | | | `setup` |
-| `config set-llm`, `version` | | | | | | none |
-| `roster`, `power` | ● rosters, users, players | | ● | | | `roster` / `power` |
-| `picks` | ● rosters, users, league, drafts, traded picks, players | | ● | | | `picks` |
-| `values` | | | ● | ◐ unless `--market fc` (default `both`) | | `values` |
-| `trade` | ● players | | ● fresh | ◐ fresh, unless `--market fc` | | `trade` |
-| `movers` | ◐ rosters, users with `--arbitrage` | | ● | ◐ `--arbitrage` | | `movers` |
-| `waivers` | ● league, rosters, users, players, trending | | ● | | | `waivers` |
-| `waivers --weekly` | ● fresh state, league, rosters; users, players, matchups; ◐ trending with `--trending` | ● projections snapshot, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | `weekly_waivers` |
-| `news` | ● rosters, users, players, trending adds and drops | | ● | | | `news` |
-| `cleanup` | ● league, rosters, users, players | | ● | | | `cleanup` |
-| `lineup` | ● fresh state, league, rosters; users, players; ◐ matchups, current week only | ● projections; ◐ schedule, rostered players' status and news, current week only | | | ◐ current week only | `lineup` |
-| `compare` | ● fresh state, league, rosters; users, players, matchups | ● projections, schedule, rostered players' status; ◐ news for questionable/doubtful | | | ● | `compare` |
-| `draft` | ● draft, draft picks, draft traded picks, rosters, users, players, league; ◐ drafts list unless `--draft-id` | | ● | | | `draft` |
-| `ask` (local runner) | ◐ per tool | ◐ weekly tools | ◐ value tools | ◐ value tools | ◐ weekly tools | `ask` |
-| `qa`, `doctor` | ● rosters, users, players, league, drafts, traded picks, trending | | ● | ● | | up to 8 (`roster`, `cleanup` need your roster) |
+| `config`, `version` | | | | | | none |
+| `roster` | ● rosters, users, players | | ● | | | `roster` |
+| `power`, `window` | ● rosters, users, players, league, drafts, traded picks, state | | ● | | | `power` / `window` |
+| `standings` | ● league, rosters, users, matchups | | | | | none |
+| `plan` | ● state, league, rosters, users, players, matchups, traded picks, drafts | ● projections, schedule, status, news | ● | | ● ESPN scoreboard + news, RSS | `news_review` (+ weekly) |
+| `fab` | ● state, league, rosters, users, players, transactions | | | | | none |
+| `picks` | ● rosters, users, league, drafts, traded picks, matchups, players | | ● | | | `picks` |
+| `values` | | | ● | ◐ DP default (`both`), KTC opt-in | | `values` |
+| `trade` | ● players, league, rosters, users, state, drafts, traded picks | ◐ player news | ● fresh | ◐ DP or KTC fresh (unless `fc` / `--fc-only`) | ◐ news review | `trade`, `news_review` |
+| `offers` | ● league, rosters, users, players, drafts, traded picks, matchups, trending | ◐ player news | ● fresh | ◐ DP or KTC fresh (unless `--fc-only`) | ◐ news review | `news_review` |
+| `movers` | ◐ rosters, users with `--arbitrage` | | ● | ◐ with `--arbitrage` | | `movers` |
+| `waivers` | ● league, rosters, users, players, trending | ◐ player news | ● | | ◐ news review | `waivers`, `news_review` |
+| `waivers --weekly` | ● fresh state, league, rosters; users, players, matchups | ● projections snapshot, schedule, status, news | | | ● scoreboard, news, RSS | `weekly_waivers`, `news_review` |
+| `news` | ● rosters, users, players, trending; ◐ `--player` skips league reads | ◐ `--player` news | ● (unless `--player`) | | ◐ `--player` ESPN + RSS | `news` / `news_review` |
+| `cleanup` | ● league, rosters, users, players | ◐ player news | ● | | ◐ news review | `cleanup`, `news_review` |
+| `lineup` | ● fresh state, league, rosters; users, players; ◐ matchups | ● projections; ◐ schedule, status, news | | | ◐ scoreboard, news, RSS | `lineup`, `news_review` |
+| `compare` | ● fresh state, league, rosters; users, players, matchups | ● projections, schedule, status, news | | | ● scoreboard, news, RSS | `compare`, `news_review` |
+| `draft` | ● draft, draft picks, draft traded picks, rosters, users, players, league, state | | ● | | | `draft` |
+| `ask` (local runner) | ◐ per tool | ◐ weekly / news tools | ◐ value tools | ◐ DP default | ◐ weekly / news tools | `ask` |
+| `qa`, `doctor` | ● rosters, users, players, league, drafts, traded picks, matchups, trending, state | | ● | ● DP | | up to 9 domains |
 
-`trade` with `--market both` also runs the calculator drift check: it fetches the `fantasycalc.com` trade-calculator page every run (plus its JS bundles when their names change), reuses the KTC page it already has, and downloads `keeptradecut.com/js/site.min.js` only when that version changes. The local `ask` runner's own network traffic belongs to the external binary and is invisible to `ff`.
+`trade` and `offers` run the calculator drift check (`check_calculators`): FantasyCalc's trade-calculator page and JS bundles are always checked when judging offers, while KeepTradeCut's `site.min.js` is checked only when KTC is the active secondary market. The local `ask` runner's own network traffic belongs to the external binary and is invisible to `ff`.
 
 ## 4. `ff trade`
 
-The one command that bypasses the cache for values (`fresh=True`): FantasyCalc always, KTC unless `--market fc`. It applies each site's own package adjustment before judging an offer. If the KTC fetch fails, the book simply has no KTC values; the error is swallowed, not raised.
+`ff trade` bypasses the value cache (`fresh=True`): FantasyCalc always, and the active secondary market (DynastyProcess by default, or KeepTradeCut with `--market ktc` / `--ktc-file`) unless `--market fc` or `--fc-only`. It applies each site's own package adjustment before judging an offer, evaluates Strategy Filters against your competitive window and season phase, and runs a 14-day Latest News Review for all players in the trade.
 
 ```mermaid
 sequenceDiagram
@@ -257,36 +264,33 @@ sequenceDiagram
   participant TR as analysis.trade
   participant CA as analysis.calculators
   participant CL as values.calculators_live
+  participant NW as news.review_players
   participant QA as qa.run_qa
 
   U->>CLI: ff trade --give ... --get ...
-  CLI->>VC: fetch(format, include_secondary, fresh=True)
-  VC-->>CLI: ValueBook (FC values, KTC values + page HTML if fetched)
-  CLI->>CLI: ValueBook.resolve each token
+  CLI->>VC: fetch(format, include_secondary, fresh=True, secondary=dp|ktc|none)
+  VC-->>CLI: ValueBook (FC values + SecondarySnapshot)
   CLI->>SC: players()
-  CLI->>TR: analyze_trade(get, give, book), side_a = what you receive
+  CLI->>TR: analyze_trade(get, give, book)
   TR->>TR: apply_site_adjustments(evaluation)
   TR->>CA: fc_adjustment (dynasty only)
-  TR->>CA: ktc_adjustment (only if every asset has a KTC value)
-  TR-->>CLI: TradeEvaluation (raw and site-adjusted totals) + unresolved
+  TR->>CA: ktc_adjustment (when KTC active & all assets priced)
+  TR-->>CLI: TradeEvaluation + unresolved
   CLI->>CLI: render sides, totals, verdict panel
-  alt --market both (default)
-    CLI->>CL: check_calculators(book.secondary_html)
-    CL-->>CLI: drift problems, if site code changed
-    CLI->>TR: offer_verdict(evaluation, problems)
-    TR-->>CLI: OfferVerdict PASS / FAIL / CANNOT_JUDGE
-  else --market fc / ktc / dealer
-    CLI-->>U: "offer rule: needs both markets"
-  end
-  CLI->>CLI: provenance, positional swing, unmatched tokens
-  CLI->>QA: run_qa("trade", evaluation)
-  Note over QA: validate_trade re-runs apply_site_adjustments on a copy
-  QA-->>U: footer per FF_QA (off prints only failures, strict raises)
+  CLI->>CL: check_calculators(book.secondary_html, check_ktc=...)
+  CL-->>CLI: drift problems, if site code changed
+  CLI->>TR: offer_verdict(evaluation, problems, fc_only=...)
+  TR-->>CLI: OfferVerdict PASS / FAIL / CANNOT_JUDGE
+  CLI->>CLI: Strategy Filters (window, duration, RB, seasonal)
+  CLI->>NW: review_players(trade_pids, players_meta, "trade")
+  NW-->>CLI: NewsReview (Sleeper + ESPN + RSS)
+  CLI->>QA: run_qa("news_review") & run_qa("trade")
+  QA-->>U: footer per FF_QA
 ```
 
 ## 5. Weekly decisions
 
-Current-week advice is built from fresh reads (league users stay on their 30-minute cache), cross-checked and fail-closed. `ff compare`, `ff waivers --weekly` and every weekly `ask` route (lineup included) go through `cli._prepare_weekly`. The `ff lineup` command does its own fresh reads and calls `load_weekly` only for the current season and week. Any other week is a projection-only scenario with no injury or game-lock handling.
+Current-week advice is built from fresh reads (league users stay on their 30-minute cache), cross-checked and fail-closed. `ff compare`, `ff waivers --weekly`, `ff plan`, and every weekly `ask` route go through `cli._prepare_weekly`. The `ff lineup` command does its own fresh reads and calls `load_weekly` only for the current season and week. Any other week is a projection-only scenario with no injury or game-lock handling. All current-week decision commands conclude with `review_players` + `run_qa("news_review")`.
 
 ```mermaid
 flowchart TD
@@ -297,60 +301,47 @@ flowchart TD
 
   prep["cli._prepare_weekly<br/>fresh state + league,<br/>_current_week = max(1, week, display_week)"]
   gate{"season current and<br/>regular season?"}
-  ros["fresh rosters + cached league users<br/>build_rosters, find the target team"]
-  proj["ProjectionsClient (api.sleeper.com)<br/>snapshot() for waiver candidates,<br/>week() otherwise"]
+  ros["fresh rosters + cached league users<br/>build_rosters, find target team"]
+  proj["ProjectionsClient (api.sleeper.com)<br/>snapshot() for waivers, week() otherwise"]
   lw["services.weekly<br/>load_weekly"]
   sched["Sleeper schedule<br/>api.sleeper.com"]
   espnn["ESPN scoreboard<br/>kickoff times, game status"]
-  status["fresh SleeperClient.player<br/>for each rostered player;<br/>player_news only if questionable/doubtful"]
+  status["fresh SleeperClient.player<br/>for each rostered player;<br/>player_news if questionable/doubtful"]
   match["league matchups<br/>roster and matchup starters must agree"]
   ctx["WeeklyContext<br/>game timing, availability, IR eligibility"]
-  fail(["refuse with a one-line error<br/>(Clarification, ValueError or _fail)"])
+  fail(["refuse with a one-line error"])
 
-  lineup_own["lineup's own fresh reads<br/>state, league, rosters,<br/>ProjectionsClient.week"]
+  lineup_own["lineup's own fresh reads<br/>state, league, rosters, ProjectionsClient.week"]
   cur{"current season<br/>and week?"}
   reg{"regular season?"}
   projonly(["projection-only scenario"])
 
-  lu_out["cli.lineup renders Panel + Table,<br/>render_weekly_notes, run_qa('lineup')"]
-  a_lu["analysis.lineup<br/>optimal_lineup<br/>locks started games, skips taxi / IR / unavailable"]
+  lu_out["cli.lineup renders Panel + Table,<br/>render_weekly_notes, review_players, run_qa"]
+  a_lu["analysis.lineup<br/>optimal_lineup"]
   a_cmp["analysis.compare<br/>compare_players"]
   a_ww["analysis.weekly_waivers<br/>weekly_waivers"]
-  jo["cli rendering helpers<br/>render_comparison / render_weekly_waivers<br/>(each runs its own run_qa)"]
+  jo["cli rendering helpers<br/>render_comparison / render_weekly_waivers<br/>(+ review_players & run_qa)"]
 
-  compare --> prep
-  ww --> prep
-  askw --> prep
-  prep --> gate
+  compare & ww & askw --> prep --> gate
   gate -- no --> fail
-  gate -- yes --> ros
-  ros -- team not found --> fail
-  ros --> proj
-  proj -- no projections --> fail
-  proj --> lw
-  lw --> sched & espnn & status & match
-  sched & espnn & status & match --> ctx
-  lw -- "sources disagree, no matchup,<br/>starters mismatch, no fresh status" --> fail
+  gate -- yes --> ros --> proj --> lw
+  lw --> sched & espnn & status & match --> ctx
+  lw -- "sources disagree or missing" --> fail
 
-  lineup --> lineup_own
-  lineup_own -- no projections --> fail
-  lineup_own --> cur
+  lineup --> lineup_own --> cur
   cur -- yes --> reg
   reg -- no --> fail
   reg -- yes --> lw
   cur -- no --> projonly --> a_lu
 
-  ctx --> a_lu
-  ctx --> a_cmp
-  ctx --> a_ww
+  ctx --> a_lu & a_cmp & a_ww
   a_lu --> lu_out
-  a_cmp --> jo
-  a_ww --> jo
+  a_cmp & a_ww --> jo
 ```
 
 ## 6. `ff ask`
 
-A local model picks the tool and its kwargs, then explains the deterministic calculation result in prose. The model never computes. The calculation runs in `analysis/` through `dispatch_tool`, which accepts only names in `services.llm.tools.ALLOWED_TOOLS`, against the same lazily loaded data as the structured commands (`cli._analysis_ctx`). Through `ask`, values come from the cache; `evaluate_trade` gets no drift check and no offer rule.
+A local model picks one or up to `MAX_ASK_TOOLS = 3` allowlisted tools and their kwargs, then explains the deterministic calculation results in prose. The model never computes. Calculations run in `analysis/` through `dispatch_tool`, which accepts only names in `services.llm.tools.ALLOWED_TOOLS` (17 tools), against lazily loaded data (`cli._analysis_ctx`, with DynastyProcess as the default secondary market).
 
 ```mermaid
 flowchart TD
@@ -361,29 +352,27 @@ flowchart TD
     run1["runner.TerminalRunner.run<br/>print/headless subprocess, 120s timeout"]
     reply{"reply"}
     prose1["print the markdown"]
-    onboard["setup_league<br/>onboarding.onboard_user<br/>saves config only if the league is unambiguous"]
+    onboard["setup_league<br/>onboarding.onboard_user<br/>saves config only if league is unambiguous"]
     unknown["unknown tool:<br/>list ALLOWED_TOOLS"]
     nocfg(["no config yet:<br/>ask for a Sleeper username"])
-    ctxl["cli._analysis_ctx<br/>KTC included"]
-    run2["runner.TerminalRunner.run<br/>second call writes prose over the result"]
+    ctxl["cli._analysis_ctx<br/>DP default secondary"]
+    run2["runner.TerminalRunner.run<br/>second call synthesizes prose over results"]
     qal["run_qa('ask')"]
   end
 
   rerr(["no runner found or runner failed, exit 1"])
-  dispatch["dispatcher.dispatch_tool<br/>ALLOWED_TOOLS only"]
-  analysis["analysis/ functions"]
+  dispatch["dispatcher.dispatch_tool<br/>ALLOWED_TOOLS only (up to 3 tools)"]
+  analysis["analysis/ & news/ functions"]
 
-  q --> pick
-  pick --> run1
+  q --> pick --> run1
   run1 -- error --> rerr
   run1 --> reply
   reply -- markdown --> prose1 --> qal
   reply -- unknown tool --> unknown --> qal
   reply -- setup_league --> onboard --> qal
-  reply -- "JSON {tool, kwargs}, no config" --> nocfg
-  reply -- "JSON {tool, kwargs}" --> ctxl --> dispatch
+  reply -- "JSON tool call, no config" --> nocfg
+  reply -- "JSON {tool} or {tools: [...]}" --> ctxl --> dispatch
   dispatch -.-> run2 --> qal
-  dispatch -. "tool error" .-> qal
-
+  dispatch -. "all tools errored" .-> qal
   dispatch --> analysis
 ```

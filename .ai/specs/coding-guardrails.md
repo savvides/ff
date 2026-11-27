@@ -1,13 +1,13 @@
 # Coding guardrails
 
-Baseline inspected on 2026-10-05 at commit `5bd80cd397d516969c800849544e91751479ee50` (main source snapshot). These are existing repository rules and observed implementation constraints, not new application behavior. Sources: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `pyproject.toml`, `Makefile`, `.githooks/pre-commit`, `.github/workflows/ci.yml`, `.gitignore`, and the source files named below. When prose is stale, use the source-backed contracts and flag the discrepancy.
+Baseline inspected on 2026-11-27 at the `v0.1.0` release baseline on `main`. These are existing repository rules and observed implementation constraints, not new application behavior. Sources: `AGENTS.md`, `CONTRIBUTING.md`, `pyproject.toml`, `Makefile`, `.githooks/pre-commit`, `.github/workflows/ci.yml`, `.gitignore`, and the source files named below. When prose is stale, use the source-backed contracts and flag the discrepancy.
 
 ## Style and tooling
 
 - Maintain Python 3.9 compatibility. Use `from __future__ import annotations` with modern annotations. Follow the existing `src/ff/` package layout and local style; do not reformat adjacent code.
 - Use Pydantic v2 models for domain data crossing module boundaries in `contracts/models.py`; update producers and consumers together. Config and QA report models have existing separate homes. Preserve `Field(default_factory=...)` for collection defaults.
 - Ruff targets `py39`, line length 100, selects `E4`, `E7`, `E9`, `F`, and ignores `E501`. Tests additionally ignore `F401` and `E402`. This is the actual lint contract; no formatter, comprehensive Ruff rule set or strict mypy mode is configured.
-- mypy targets Python 3.9, checks `ff` under `src`, uses `strict_optional`, `warn_unused_ignores` and `show_error_codes`. Keep existing narrow, justified ignores; do not suppress failures broadly.
+- mypy targets Python 3.10 in `pyproject.toml` (while preserving Python >=3.9 runtime compatibility), checks `ff` under `src`, uses `strict_optional`, `warn_unused_ignores` and `show_error_codes`. Keep existing narrow, justified ignores; do not suppress failures broadly.
 - Use tools/code for calculations, sorting, parsing, schema extraction and checkable transformations. Keep interpretation and judgment separate from deterministic execution. Claim a command/check ran only from its literal output and exit status.
 
 ## Boundary constraints
@@ -22,8 +22,8 @@ Baseline inspected on 2026-10-05 at commit `5bd80cd397d516969c800849544e91751479
 ## Domain constraints
 
 - Derive league format dynamically from Sleeper settings (`detect_format`), refreshing saved config on command execution. Do not ask users for format or guess superflex/PPR/team count. Treat 2QB leagues (`num_qbs >= 2`) as superflex so KTC secondary values select superflex values. Recognize both `bonus_rec_te` and `rec_te` for TE premium. Map team count to closest supported FantasyCalc tier (8, 10, 12, 14). Preserve the source-defined TEP mapping: FantasyCalc accepts `te+`/`te++` strings, not a numeric premium; KTC selects matching nested tiers. Keep dedicated TE-slot detection and the qualification for premiums below supported cut points. Lineup scores raw stats with `scoring_settings`, including `bonus_rec_te`; do not apply that reception bonus twice.
-- Keep player-only totals in `roster` and `power`. Draft capital belongs in `picks`/trade/draft surfaces; folding picks into player power totals requires an explicit scope decision.
-- Join roster players using FantasyCalc `sleeperId`. Preserve `secondary_value` plus `ktc_value`/`dealer_value` input/property compatibility. The active secondary provider is KTC; do not treat the compatibility Dealer module as a separate live market.
+- Keep player-only totals in `roster`; `power` ranks by player value while displaying 3-year pick capital, combined total, Max PF, and diagnosed window in separate columns.
+- Join roster players using FantasyCalc `sleeperId`. Preserve `secondary_value` plus `ktc_value`/`dealer_value` input/property compatibility. DynastyProcess (`dp`) is the default secondary market; KeepTradeCut (`ktc`) is opt-in (`--market ktc`, `--ktc-file`, or `$FF_HOME/ktc_pool.json`). Do not treat the compatibility `values/dealer.py` shim as a separate live market.
 - Preserve pick tier suffixes in `normalize_pick`; otherwise early/mid/late keys collide. Resolve slot picks to round values and use the existing flat/Mid fallbacks. Preserve exact KTC tier values when requested; flag generic Mid stand-ins with `secondary_approx` and do not use them to pass an exact-price offer rule. Do not invent a price for an unpriced pick round.
 - For future picks, reconcile default endowment with traded picks, retaining the last re-trade owner and the original roster ID. Determine tier from the original team's projected finish (power rank before the first game). Prefer league `draft_rounds` over startup-draft rounds; retain traded higher rounds and explicit `--rounds` overrides.
 - Use the individual `draft/{id}` endpoint for live `slot_to_roster_id`; do not substitute the league drafts list. Keep draft reads fresh (TTL 0). Direct draft fit excludes drafted and rostered players. Its roster-relative bounded fit tilts do not add age or format scarcity already priced by FantasyCalc.
