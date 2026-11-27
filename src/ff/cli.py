@@ -26,6 +26,7 @@ import statistics
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, Optional, Sequence, Set, Tuple
 
 import requests
@@ -133,8 +134,15 @@ def _load() -> Tuple[Config, SleeperClient]:
     return cfg, sc
 
 
-def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True,
-          fresh: bool = False, sc: Optional[SleeperClient] = None) -> ValueBook:
+def _book(
+    cfg: Config,
+    include_secondary: bool = True,
+    include_ktc: bool = True,
+    fresh: bool = False,
+    sc: Optional[SleeperClient] = None,
+    secondary: str = "dp",
+    ktc_file: Optional[Path] = None,
+) -> ValueBook:
     fmt = cfg.format
     if sc is not None:
         try:
@@ -143,12 +151,27 @@ def _book(cfg: Config, include_secondary: bool = True, include_ktc: bool = True,
                 fmt = detect_format(league)
         except Exception:
             pass
-    client = ValuesClient()
     should_include = include_secondary and include_ktc
     try:
-        return client.fetch(fmt, include_secondary=should_include, fresh=fresh)
+        client = ValuesClient(secondary=secondary, ktc_file=ktc_file)
     except TypeError:
-        return client.fetch(fmt, include_ktc=should_include)
+        client = ValuesClient()
+    try:
+        return client.fetch(
+            fmt,
+            include_secondary=should_include,
+            fresh=fresh,
+            secondary=secondary,
+            ktc_file=ktc_file,
+        )
+    except TypeError:
+        try:
+            return client.fetch(fmt, include_secondary=should_include, fresh=fresh)
+        except TypeError:
+            try:
+                return client.fetch(fmt, include_secondary=should_include)
+            except TypeError:
+                return client.fetch(fmt, include_ktc=should_include)
 
 
 def _league_rosters(cfg: Config, sc: SleeperClient) -> List[Roster]:
@@ -418,11 +441,24 @@ def _signed(n: int) -> str:
     return f"+{n:,}" if n > 0 else f"{n:,}"
 
 
-_KTC_DOWN = "KeepTradeCut values are unavailable right now"
+def _has_secondary(book: ValueBook) -> bool:
+    return bool(book.secondary_map) or any(a.secondary_value is not None for a in book.assets)
 
 
-def _has_ktc(book: ValueBook) -> bool:
-    return any(a.secondary_value is not None for a in book.assets)
+def _secondary_short(book: ValueBook) -> str:
+    if book.secondary_source == "dp" or book.secondary_label == "DynastyProcess":
+        return "DP"
+    if book.secondary_label and book.secondary_label.lower() != "none":
+        return book.secondary_label
+    return "KTC"
+
+
+def _secondary_name(book: ValueBook) -> str:
+    if book.secondary_label == "KTC":
+        return "KeepTradeCut"
+    if book.secondary_label and book.secondary_label.lower() != "none":
+        return book.secondary_label
+    return "Secondary market"
 
 
 def _ktc_site_verdict(evaluation: Any) -> str:
@@ -438,17 +474,54 @@ def _ktc_site_verdict(evaluation: Any) -> str:
             f"({larger:.1f}% of the larger side; {site_pct:.1f}% of both)")
 
 
-def _print_offer_rule(evaluation: Any, book: ValueBook) -> None:
+def _secondary_verdict(evaluation: Any) -> str:
+    """Render the active secondary market's verdict line."""
+    if evaluation.effective_secondary_source() == "dp":
+        net = evaluation.secondary_delta or 0
+        pct = evaluation.secondary_pct_diff or 0.0
+        if pct <= 5.0:
+            return f"[bold yellow]fair[/] - within {pct:.0f}%"
+        if net > 0:
+            return f"[bold green]you win[/] by {_signed(net)} ({pct:.0f}%)"
+        return f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
+    return _ktc_site_verdict(evaluation)
+
+
+def _print_offer_rule(evaluation: Any, book: ValueBook, *, fc_only: bool = False) -> None:
     """The offer rule on site-matching numbers, or why it cannot be judged."""
-    problems = check_calculators(book.secondary_html)
-    v = offer_verdict(evaluation, calculator_problems=problems)
-    rule = f"under {v.threshold_pct:g}% in FantasyCalc and KTC, and KTC says Fair"
+    check_ktc = (not fc_only) and book.secondary_source == "ktc"
+    problems = check_calculators(book.secondary_html, check_ktc=check_ktc)
+    v = offer_verdict(evaluation, calculator_problems=problems, fc_only=fc_only)
+    sec_label = v.secondary_label or book.secondary_label or "KTC"
+    sec_short = _secondary_short(book)
+    if fc_only:
+        rule = f"FC-only mode: under {v.threshold_pct:g}% in FantasyCalc"
+        if v.status == "CANNOT_JUDGE":
+            console.print(f"[bold yellow]offer rule: cannot judge[/] ({rule}): " + "; ".join(v.reasons))
+        else:
+            mark = "[bold green]PASS[/]" if v.passes else "[bold red]FAIL[/]"
+            console.print(f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%")
+        return
+
+    is_dp = (v.secondary_source or book.secondary_source) == "dp"
+    if is_dp:
+        rule = f"under {v.threshold_pct:g}% in FantasyCalc and {sec_label}"
+    else:
+        rule = f"under {v.threshold_pct:g}% in FantasyCalc and {sec_label}, and {sec_label} says Fair"
+
     if v.status == "CANNOT_JUDGE":
         console.print(f"[bold yellow]offer rule: cannot judge[/] ({rule}): " + "; ".join(v.reasons))
     else:
         mark = "[bold green]PASS[/]" if v.passes else "[bold red]FAIL[/]"
-        console.print(f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%, KTC {v.ktc_pct:.2f}%, "
-                      f"KTC site {'Fair' if v.ktc_site_fair else 'Favors one side'}")
+        sec_pct = v.secondary_pct if v.secondary_pct is not None else v.ktc_pct
+        sec_pct_str = f"{sec_pct:.2f}%" if sec_pct is not None else "--%"
+        if is_dp:
+            console.print(f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%, {sec_short} {sec_pct_str}")
+        else:
+            console.print(
+                f"offer rule: {mark} ({rule}): FC {v.fc_pct:.2f}%, {sec_label} {sec_pct_str}, "
+                f"{sec_label} site {'Fair' if v.ktc_site_fair else 'Favors one side'}"
+            )
 
 
 def _print_provenance(book: ValueBook, cfg: Config, include_secondary: bool) -> None:
@@ -458,18 +531,37 @@ def _print_provenance(book: ValueBook, cfg: Config, include_secondary: bool) -> 
     fmt = cfg.format
     fc_tep = fmt.fantasycalc_tep()
     parts = [f"FantasyCalc {at(book.fetched_at)} ({fmt.label()}" + (f", tep={fc_tep}" if fc_tep else "") + ")"]
-    if include_secondary and book.secondary_top:
-        tier = ["", " TE+", " TE++"][fmt.ktc_tep_tier()]
-        parts.append(f"KTC {at(book.secondary_fetched_at)} ({'SF' if fmt.superflex else '1QB'}{tier}, "
-                     f"top {book.secondary_top:,})")
+    if include_secondary and _has_secondary(book):
+        if book.secondary_source == "dp":
+            parts.append(
+                f"{book.secondary_label} {at(book.secondary_fetched_at)} "
+                f"({'SF' if fmt.superflex else '1QB'})"
+            )
+        elif book.secondary_top:
+            tier = ["", " TE+", " TE++"][fmt.ktc_tep_tier()]
+            parts.append(
+                f"{book.secondary_label} {at(book.secondary_fetched_at)} "
+                f"({'SF' if fmt.superflex else '1QB'}{tier}, top {book.secondary_top:,})"
+            )
     console.print("[dim]values: " + " | ".join(parts) + "[/]")
 
 
+def _print_secondary_notes(book: ValueBook) -> None:
+    """Print secondary-market caveat notes once."""
+    for note in dict.fromkeys(book.secondary_notes):
+        console.print(f"[yellow]note: {note}[/]")
+
+
 def _ktc_missing(book: ValueBook) -> str:
-    """Why a KTC number is missing, so a FantasyCalc-only fallback is never silent."""
-    if _has_ktc(book):
-        return "KeepTradeCut has no value for part of this; showing FantasyCalc only."
-    return f"{_KTC_DOWN}; showing FantasyCalc only."
+    """Why a secondary number is missing, so a FantasyCalc-only fallback is never silent."""
+    name = _secondary_name(book)
+    if _has_secondary(book):
+        return f"{name} has no value for part of this; showing FantasyCalc only."
+    return f"{name} values are unavailable right now; showing FantasyCalc only."
+
+
+def _secondary_down(book: ValueBook) -> str:
+    return f"{_secondary_name(book)} values are unavailable right now"
 
 
 # --- setup ---------------------------------------------------------------
@@ -1042,36 +1134,43 @@ def values(
                                             help="QB/RB/WR/TE; omit for overall."),
     limit: int = typer.Option(40, help="How many to list."),
     market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, ktc, or both (default: both)."),
+                               help="Market: fc, dp, ktc, or both (default: both)."),
+    ktc_file: Optional[Path] = typer.Option(None, "--ktc-file",
+                                            help="Load KeepTradeCut values from a local ktc_pool.json file."),
 ) -> None:
     """Dynasty rankings for your league format."""
     market = market.lower()
-    if market not in ("fc", "dealer", "ktc", "both"):
-        _fail("--market must be fc, ktc, or both.")
+    if market not in ("fc", "dp", "dealer", "ktc", "both"):
+        _fail("--market must be fc, dp, ktc, or both.")
 
     cfg, sc = _load()
     include_secondary = market != "fc"
-    book = _book(cfg, include_secondary=include_secondary)
+    sec_arg = "ktc" if (market in ("dealer", "ktc") or ktc_file is not None) else ("none" if market == "fc" else "dp")
+    book = _book(cfg, include_secondary=include_secondary, secondary=sec_arg, ktc_file=ktc_file)
 
-    if market in ("dealer", "ktc"):
-        pool = [a for a in book.assets if not a.is_pick]
+    sec_only = market in ("dp", "dealer", "ktc")
+    if sec_only:
+        pool = [a for a in book.assets if not a.is_pick and a.secondary_value is not None]
         if position:
             pool = [a for a in pool if a.position == position.upper()]
         assets = sorted(pool, key=lambda a: a.secondary_value or 0, reverse=True)[:limit]
+        if not assets:
+            assets = book.top(position, limit)
     else:
         assets = book.top(position, limit)
 
     has_secondary = any(a.secondary_value is not None for a in assets)
     dual_market = market == "both" and has_secondary
+    sec_short = _secondary_short(book)
 
     title = f"dynasty rankings - {cfg.format.label()}" + (f" - {position.upper()}" if position else "")
-    if market in ("dealer", "ktc"):
-        title += " - KeepTradeCut"
+    if sec_only:
+        title += f" - {_secondary_name(book)}"
 
     t = Table(title=title)
     if dual_market:
-        right: Set[str] = {"FC", "KTC", "30d", "age", "#", "posrk"}
-        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", "KTC", "30d"):
+        right: Set[str] = {"FC", sec_short, "30d", "age", "#", "posrk"}
+        for c in ("#", "player", "pos", "posrk", "team", "age", "FC", sec_short, "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
@@ -1080,9 +1179,9 @@ def values(
                       f"{a.age:.0f}" if a.age else "-", f"{a.value:,}",
                       sec_str,
                       _signed(a.trend_30day) if a.trend_30day else "-")
-    elif market in ("dealer", "ktc"):
-        right = {"KTC", "30d", "age", "#", "posrk"}
-        for c in ("#", "player", "pos", "posrk", "team", "age", "KTC", "30d"):
+    elif sec_only:
+        right = {sec_short, "30d", "age", "#", "posrk"}
+        for c in ("#", "player", "pos", "posrk", "team", "age", sec_short, "30d"):
             t.add_column(c, justify="right" if c in right else "left")
         for i, a in enumerate(assets, 1):
             posrk = f"{a.position}{a.position_rank}" if a.position_rank else "-"
@@ -1102,6 +1201,8 @@ def values(
     console.print(t)
     if market != "fc" and not has_secondary:
         console.print(f"[yellow]{_ktc_missing(book)}[/]")
+    if include_secondary:
+        _print_secondary_notes(book)
     qa_rep = run_qa("values", assets=assets, position=position, market=market)
     render_qa_footer(qa_rep, console)
 
@@ -1113,8 +1214,12 @@ def values(
 def trade(
     give: str = typer.Option(..., "--give", help="What you send, comma-separated."),
     get: str = typer.Option(..., "--get", help="What you receive, comma-separated."),
-    market: str = typer.Option("both", "--market", "-m",
-                               help="Market: fc, ktc, or both (default: both)."),
+    market: str = typer.Option("dp", "--market", "-m",
+                               help="Market: dp, ktc, both, or fc (default: dp)."),
+    ktc_file: Optional[Path] = typer.Option(None, "--ktc-file",
+                                            help="Load KeepTradeCut values from a local ktc_pool.json file."),
+    fc_only: bool = typer.Option(False, "--fc-only",
+                                 help="Evaluate the offer rule using FantasyCalc only."),
     mode: Optional[str] = typer.Option(
         None, "--mode",
         help="Override window target for strategy filters: auto, contend, or rebuild.",
@@ -1122,14 +1227,15 @@ def trade(
 ) -> None:
     """Analyze a trade. Players and picks both count (e.g. --get '2027 1st')."""
     market = market.lower()
-    if market not in ("fc", "dealer", "ktc", "both"):
-        _fail("--market must be fc, ktc, or both.")
+    if market not in ("fc", "dp", "dealer", "ktc", "both"):
+        _fail("--market must be fc, dp, ktc, or both.")
     mode_clean = _validate_window_mode(mode)
 
     cfg, sc = _load()
-    include_secondary = market != "fc"
+    include_secondary = not fc_only and market != "fc"
+    sec_arg = "ktc" if (market in ("dealer", "ktc") or ktc_file is not None) else ("none" if not include_secondary else "dp")
     # Live values for both markets: a verdict should match what the sites show now.
-    book = _book(cfg, include_secondary=include_secondary, fresh=True)
+    book = _book(cfg, include_secondary=include_secondary, fresh=True, secondary=sec_arg, ktc_file=ktc_file)
     give_tokens = [t for t in give.split(",") if t.strip()]
     get_tokens = [t for t in get.split(",") if t.strip()]
     # Surface any non-exact (fuzzy/surname) match so a substitution is never silent.
@@ -1155,19 +1261,20 @@ def trade(
         evaluation.secondary_value_a is not None
         and evaluation.secondary_value_b is not None
     )
-    dual_market = market == "both" and has_secondary
+    dual_market = (not fc_only) and market in ("dp", "ktc", "dealer", "both") and has_secondary
+    sec_short = _secondary_short(book)
 
-    # With KTC unable to price the trade, fall back to FantasyCalc's columns so the
-    # table always shows the numbers the verdict below is computed from.
-    show_fc = market in ("fc", "both") or not has_secondary
-    show_ktc = market != "fc" and has_secondary
+    # Always show FantasyCalc columns so dual-market (--market dp|ktc|both) and
+    # single-market (--market fc|--fc-only) trades render the numbers judged below.
+    show_fc = True
+    show_ktc = (not fc_only) and market != "fc" and has_secondary
     table = Table(title="trade")
     table.add_column("side")
     table.add_column("assets")
     if show_fc:
         table.add_column("FC", justify="right")
     if show_ktc:
-        table.add_column("KTC", justify="right")
+        table.add_column(sec_short, justify="right")
     for label, style, side in (("You get", "green", evaluation.side_a),
                                ("You give", "red", evaluation.side_b)):
         cells = [f"[{style}]{label}[/]", ", ".join(
@@ -1192,10 +1299,10 @@ def trade(
             table.add_row(*adj)
             table.add_row(*tot)
     console.print(table)
-    if market != "fc" and not has_secondary:
+    if include_secondary and not has_secondary:
         console.print(f"[yellow]{_ktc_missing(book)}[/]")
     if show_ktc and evaluation.secondary_hidden:
-        console.print("[dim]KTC counts its value adjustment in the verdict but hides it on its "
+        console.print(f"[dim]{sec_short} counts its value adjustment in the verdict but hides it on its "
                       "page, where the team totals show the raw sums.[/]")
 
     if dual_market:
@@ -1209,12 +1316,12 @@ def trade(
             verdict_fc = f"[bold red]you lose[/] by {_signed(net_fc)} ({pct_fc:.0f}%)"
 
         sec_net = evaluation.secondary_delta or 0
-        verdict_sec = _ktc_site_verdict(evaluation)
+        verdict_sec = _secondary_verdict(evaluation)
 
         arb_label = evaluation.secondary_arbitrage_label()
         banner_lines = [
             f"FC:     net {_signed(net_fc)} value to you   |   {verdict_fc}",
-            f"KTC:    net {_signed(sec_net)} value to you   |   {verdict_sec}",
+            f"{sec_short + ':':<7} net {_signed(sec_net)} value to you   |   {verdict_sec}",
         ]
         if arb_label:
             banner_lines.append(f"arbitrage: [bold cyan]{arb_label}[/]")
@@ -1223,11 +1330,6 @@ def trade(
             title="verdict",
             subtitle=f"[bold cyan]{arb_label}[/]" if arb_label else None,
         ))
-    elif market in ("dealer", "ktc") and has_secondary:
-        net = evaluation.secondary_delta or 0
-        console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {_ktc_site_verdict(evaluation)}",
-            title="verdict (KTC)"))
     else:
         net = evaluation.delta  # >0 = in your favor
         pct = evaluation.pct_diff
@@ -1237,14 +1339,23 @@ def trade(
             verdict = f"[bold green]you win[/] by {_signed(net)} ({pct:.0f}%)"
         else:
             verdict = f"[bold red]you lose[/] by {_signed(net)} ({pct:.0f}%)"
-        title = "verdict (FantasyCalc - KTC cannot price this)" if market in ("dealer", "ktc") else "verdict"
+        if fc_only:
+            title = "verdict (FC-only mode)"
+        elif market in ("dealer", "ktc"):
+            title = f"verdict (FantasyCalc - {sec_short} cannot price this)"
+        else:
+            title = "verdict"
         console.print(Panel.fit(f"net {_signed(net)} value to you   |   {verdict}", title=title))
 
-    if market == "both":
+    if fc_only:
+        _print_offer_rule(evaluation, book, fc_only=True)
+    elif market in ("dp", "ktc", "dealer", "both"):
         _print_offer_rule(evaluation, book)
     else:
-        console.print("[dim]offer rule: needs both markets - run without --market to judge it.[/]")
+        console.print("[dim]offer rule: needs both markets - omit --market (or pass --fc-only) to judge it.[/]")
     _print_provenance(book, cfg, include_secondary)
+    if include_secondary:
+        _print_secondary_notes(book)
 
     my_window: Optional[TeamWindow] = None
     phase: Optional[SeasonPhase] = None
@@ -1370,12 +1481,25 @@ def offers(
                                               "(repeatable); default: your vets 27+ and picks after round 1."),
     max_age: float = typer.Option(26, help="Oldest player you would take back."),
     limit: int = typer.Option(5, help="Packages to show per manager."),
+    market: str = typer.Option("dp", "--market", "-m",
+                               help="Secondary market: dp or ktc (default: dp)."),
+    ktc_file: Optional[Path] = typer.Option(None, "--ktc-file",
+                                            help="Load KeepTradeCut values from a local ktc_pool.json file."),
+    fc_only: bool = typer.Option(False, "--fc-only",
+                                 help="Evaluate using FantasyCalc only (skip secondary market)."),
 ) -> None:
     """Find packages for what you sell that pass the offer rule in both markets,
     ranked by how well they fit your roster."""
     from ff.offers import main  # ff.offers imports this module
 
-    argv = ["--max-age", str(max_age), "--limit", str(limit)]
+    market_clean = market.lower()
+    if market_clean not in ("dp", "ktc", "dealer"):
+        _fail("--market must be dp or ktc.")
+    argv = ["--max-age", str(max_age), "--limit", str(limit), "--market", market_clean]
+    if ktc_file is not None:
+        argv += ["--ktc-file", str(ktc_file)]
+    if fc_only:
+        argv.append("--fc-only")
     for flag, vals in (("--sell", sell), ("--to", to), ("--with", with_)):
         for v in vals or []:
             argv += [flag, v]
@@ -1782,23 +1906,36 @@ def cleanup(
 @app.command()
 @_guard
 def movers(
-    buy: bool = typer.Option(False, "--buy", help="Show buy-low instead of sell-high (or Dealer > FC for arbitrage)."),
-    sell: bool = typer.Option(False, "--sell", help="Show sell-high (or FC > Dealer for arbitrage)."),
+    buy: bool = typer.Option(False, "--buy", help="Show buy-low instead of sell-high (or Secondary > FC for arbitrage)."),
+    sell: bool = typer.Option(False, "--sell", help="Show sell-high (or FC > Secondary for arbitrage)."),
     limit: int = typer.Option(20, help="How many to show."),
     min_value: int = typer.Option(1000, "--min-value",
                                   help="Floor on both values; filters deep stashes."),
     arbitrage: bool = typer.Option(False, "--arbitrage", "-a",
-                                   help="Scan for market discrepancies between FantasyCalc and KeepTradeCut."),
+                                   help="Scan for market discrepancies between FantasyCalc and secondary market."),
+    market: str = typer.Option("dp", "--market", "-m",
+                               help="Market: dp, ktc, both, or fc (default: dp)."),
+    ktc_file: Optional[Path] = typer.Option(None, "--ktc-file",
+                                            help="Load KeepTradeCut values from a local ktc_pool.json file."),
 ) -> None:
     """Buy-low / sell-high: biggest gaps between dynasty and win-now value, or market arbitrage."""
+    market_clean = market.lower()
+    if market_clean not in ("fc", "dp", "dealer", "ktc", "both"):
+        _fail("--market must be fc, dp, ktc, or both.")
+    if arbitrage and market_clean == "fc":
+        _fail("--arbitrage needs a secondary market (dp, ktc, or both).")
+
     cfg, sc = _load()
-    book = _book(cfg, include_secondary=arbitrage)
+    include_secondary = arbitrage and market_clean != "fc"
+    sec_arg = "ktc" if (market_clean in ("dealer", "ktc") or ktc_file is not None) else ("none" if not include_secondary else "dp")
+    book = _book(cfg, include_secondary=include_secondary, secondary=sec_arg, ktc_file=ktc_file)
 
     if arbitrage:
         rosters = _league_rosters(cfg, sc)
+        sec_short = _secondary_short(book)
         market_filter = None
         if buy and not sell:
-            market_filter = "ktc"
+            market_filter = book.secondary_source or "ktc"
         elif sell and not buy:
             market_filter = "fc"
 
@@ -1810,21 +1947,25 @@ def movers(
             market=market_filter,
         )
 
-        if market_filter in ("dealer", "ktc"):
-            kind = "KTC > FC (buy on FC / hype)"
+        if market_filter in ("dp", "dealer", "ktc"):
+            kind = f"{sec_short} > FC (buy on FC / hype)"
         elif market_filter == "fc":
-            kind = "FC > KTC (value veterans / sell on KTC)"
+            kind = f"FC > {sec_short} (value veterans / sell on {sec_short})"
         else:
-            kind = "market discrepancies (FC vs KTC)"
+            kind = f"market discrepancies (FC vs {sec_short})"
 
         t = Table(title=f"arbitrage movers - {kind} - {cfg.format.label()}")
-        right_arb: Set[str] = {"FC", "KTC", "KTC@FC", "diff", "gap%", "age"}
-        for c in ("player", "pos", "owner", "FC", "KTC", "KTC@FC", "diff", "gap%", "bias"):
+        right_arb: Set[str] = {"FC", sec_short, f"{sec_short}@FC", "diff", "gap%", "age"}
+        for c in ("player", "pos", "owner", "FC", sec_short, f"{sec_short}@FC", "diff", "gap%", "bias"):
             t.add_column(c, justify="right" if c in right_arb else "left")
         for m in arb_movers:
             a = m.asset
             owner = m.team_name or "-"
-            bias_color = "[cyan]KTC[/]" if m.market_bias in ("Dealer", "KTC") else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
+            bias_color = (
+                f"[cyan]{sec_short}[/]"
+                if m.market_bias in ("DP", "Dealer", "KTC")
+                else ("[yellow]FC[/]" if m.market_bias == "FC" else "EVEN")
+            )
             t.add_row(
                 a.name,
                 a.position or "-",
@@ -1837,14 +1978,17 @@ def movers(
                 bias_color,
             )
         console.print(t)
-        if not _has_ktc(book):
-            console.print(f"[yellow]{_KTC_DOWN}; there is nothing to compare.[/]")
+        if not _has_secondary(book):
+            console.print(f"[yellow]{_secondary_down(book)}; there is nothing to compare.[/]")
         elif not arb_movers:
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")
         else:
-            console.print("[dim]KTC@FC = FantasyCalc's value at the asset's KTC rank, since the two "
-                          "markets use different scales. diff = KTC@FC - FC; bias = the market that "
-                          "ranks the asset higher.[/]")
+            console.print(
+                f"[dim]{sec_short}@FC = FantasyCalc's value at the asset's {sec_short} rank, since the two "
+                f"markets use different scales. diff = {sec_short}@FC - FC; bias = the market that "
+                "ranks the asset higher.[/]"
+            )
+        _print_secondary_notes(book)
         qa_rep = run_qa("movers", movers=arb_movers, mode="arbitrage")
         render_qa_footer(qa_rep, console)
         return

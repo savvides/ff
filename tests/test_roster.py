@@ -32,7 +32,7 @@ def test_power_rankings_order(book, rosters_raw, users_raw, players_meta):
     valuations = value_all_rosters(rosters, book, players_meta)
     # Gridiron Kings (22000) > Dynasty Warriors (17500) > carol (0)
     assert [v.team_name for v in valuations] == [
-        "Gridiron Kings", "Dynasty Warriors", "carol",
+        "Gridiron Kings (@bob)", "Dynasty Warriors (@alice)", "@carol",
     ]
     assert valuations[0].power_rank == 1
     assert valuations[0].total_value == 22000

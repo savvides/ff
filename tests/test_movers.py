@@ -150,3 +150,25 @@ def test_find_arbitrage_movers_positional_args_flexibility():
     assert len(m2) == 1
 
 
+def test_find_arbitrage_movers_labels_dp_bias_and_filters_dp():
+    book = ValueBook(
+        [
+            Asset(id="1", name="DP Stud", position="WR", value=4000, secondary_value=6000),
+            Asset(id="2", name="FC Stud", position="RB", value=5000, secondary_value=3500),
+            Asset(id="3", name="Consensus", position="QB", value=7000, secondary_value=7000),
+        ],
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+    all_movers = find_arbitrage_movers(book=book, min_value=1000)
+    by_name = {m.asset.name: m for m in all_movers}
+    assert by_name["DP Stud"].diff > 0
+    assert by_name["DP Stud"].market_bias == "DP"
+    assert by_name["FC Stud"].market_bias == "FC"
+    assert by_name["Consensus"].market_bias == "EVEN"
+
+    dp_only = find_arbitrage_movers(book=book, min_value=1000, market="dp")
+    assert [m.asset.name for m in dp_only] == ["DP Stud"]
+    assert dp_only[0].market_bias == "DP"
+
+

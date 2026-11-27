@@ -112,3 +112,219 @@ def test_a_flagged_starter_is_not_counted_as_young_value():
     singles = [r for r in rows if len(r["get"]) == 1]
     assert [r["get"] for r in singles] == [["Young QB"], ["Hurt QB"]]
     assert singles[1]["roles"]["Hurt QB"] == "starts at QB" and singles[1]["net_youth"] == 0
+
+
+def _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta, traded_picks,
+                     trending, book, *, seen_vc=None):
+    from ff.core.config import Config
+    from ff.sleeper import detect_format
+
+    cfg = Config(
+        league_id="LG1", season="2026", name="Test Dynasty",
+        format=detect_format(league), username="alice", user_id="userA",
+    )
+
+    class _StubSleeper:
+        def state(self, sport="nfl", *, fresh=False):
+            return {"season": "2026", "previous_season": "2025"}
+
+        def league(self, lid, *, fresh=False):
+            return league
+
+        def rosters(self, lid, *, fresh=False):
+            return rosters_raw
+
+        def league_users(self, lid):
+            return users_raw
+
+        def players(self, sport="nfl", *, fresh=False):
+            return players_meta
+
+        def trending(self, sport="nfl", kind="add", lookback_hours=24, limit=25):
+            return trending
+
+        def traded_picks(self, lid):
+            return traded_picks
+
+        def matchups(self, lid, week, *, ttl=0):
+            return []
+
+        def drafts(self, lid):
+            return [{"draft_id": "DR1", "status": "complete", "type": "linear",
+                     "season": "2026", "settings": {"teams": 3, "rounds": 2}}]
+
+    class _StubVC:
+        def __init__(self, *args, **kwargs):
+            if seen_vc is not None:
+                seen_vc.append(kwargs)
+
+        def fetch(self, fmt, **kwargs):
+            return book
+
+    monkeypatch.setattr(find_offers, "load_config", lambda: cfg)
+    monkeypatch.setattr(find_offers, "SleeperClient", lambda *a, **k: _StubSleeper())
+    monkeypatch.setattr(find_offers, "ValuesClient", _StubVC)
+    monkeypatch.setattr(find_offers, "check_calculators", lambda *a, **k: [])
+
+
+def test_offers_search_with_dp_market():
+    sale_dp = Asset(id="1", name="Vet QB", position="QB", age=38, value=3000, secondary_value=2000,
+                    redraft_value=2800)
+    theirs_dp = [
+        Asset(id="2", name="Young WR", position="WR", age=24, value=3050, secondary_value=2050),
+        Asset(id="3", name="DP Overvalued", position="WR", age=24, value=3000, secondary_value=4000),
+        Asset(id="4", name="Old WR", position="WR", age=31, value=3000, secondary_value=2000),
+    ]
+    rows = find_offers.search(
+        [sale_dp], theirs_dp, [], top=None,
+        secondary_source="dp", secondary_label="DynastyProcess",
+    )
+    assert [r["get"] for r in rows] == [["Young WR"]]
+    assert rows[0]["fc_pct"] < 10
+    assert rows[0]["secondary_pct"] is not None and rows[0]["secondary_pct"] < 10
+    assert rows[0]["ktc_pct"] is None
+    _, verdict = find_offers.judge(
+        [sale_dp], [theirs_dp[0]], top=None,
+        secondary_source="dp", secondary_label="DynastyProcess",
+    )
+    assert verdict.passes and verdict.secondary_source == "dp"
+
+
+def test_offers_search_fc_only_mode():
+    sale_no_sec = Asset(id="1", name="Vet QB", position="QB", age=38, value=3000,
+                        secondary_value=None, redraft_value=2800)
+    theirs_no_sec = [
+        Asset(id="2", name="Young WR", position="WR", age=24, value=3050, secondary_value=None),
+        Asset(id="3", name="Reach WR", position="WR", age=24, value=5000, secondary_value=None),
+    ]
+    rows = find_offers.search([sale_no_sec], theirs_no_sec, [], top=None, fc_only=True)
+    assert [r["get"] for r in rows] == [["Young WR"]]
+    assert rows[0]["fc_pct"] < 10
+    assert rows[0]["secondary_pct"] is None
+    assert rows[0]["ktc_totals"] == (None, None)
+
+
+def test_offers_main_empty_secondary_market_gives_actionable_error(
+    monkeypatch, capsys, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from ff.values import ValueBook
+
+    empty_sec_book = ValueBook(
+        [a.model_copy() for a in book.assets],
+        secondary_map={},
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+    )
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, empty_sec_book)
+
+    rc = find_offers.main(["--sell", "Ja'Marr Chase"])
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "values unavailable" in out
+    assert "--fc-only" in out
+    assert "--ktc-file" in out
+
+
+def test_offers_main_unpriced_rostered_asset_distinct_from_missing(
+    monkeypatch, capsys, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from ff.values import ValueBook
+
+    # Roster 1 owns Ja'Marr Chase (7564) and Jahmyr Gibbs (9221); DP only prices Chase & Bijan.
+    dp_map = {"7564": 9000, "8138": 8900}
+    assets = [
+        a.model_copy(update={"secondary_value": dp_map.get(a.id)})
+        for a in book.assets
+    ]
+    dp_book = ValueBook(
+        assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+    )
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, dp_book)
+
+    rc_unpriced = find_offers.main(["--sell", "Jahmyr Gibbs"])
+    out_unpriced = capsys.readouterr().out
+    assert rc_unpriced != 0
+    assert "on your roster in FantasyCalc, but unpriced in DynastyProcess (pass --fc-only or --market ktc)" in out_unpriced
+    assert "not on your roster" not in out_unpriced
+
+    rc_missing = find_offers.main(["--sell", "Bijan Robinson"])
+    out_missing = capsys.readouterr().out
+    assert rc_missing != 0
+    assert "not on your roster" in out_missing
+
+
+def test_offers_main_dp_skips_2029_picks_with_note_and_prints_tep_caveat(
+    monkeypatch, capsys, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from ff.values import ValueBook
+
+    dp_map = {"7564": 9000, "8138": 8900, "2027 1": 3100, "2028 1": 2200}
+    assets = [a.model_copy(update={"secondary_value": dp_map.get(a.id)}) for a in book.assets]
+    assets.append(Asset(id="2029 1", name="2029 1st", kind="pick", position="PICK",
+                        value=2000, secondary_value=None))
+    dp_book = ValueBook(
+        assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+        secondary_notes=["DynastyProcess values do not adjust for TE premium"],
+    )
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, dp_book)
+
+    rc = find_offers.main(["--sell", "Ja'Marr Chase", "--to", "Gridiron Kings", "--years", "3"])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "2029" in out and "skipped" in out.lower()
+    assert out.count("DynastyProcess values do not adjust for TE premium") == 1
+    assert "Bijan Robinson" in out
+
+
+def test_offers_main_missing_ktc_file_errors_cleanly(
+    monkeypatch, capsys, tmp_path, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book, fc_entries,
+):
+    from ff.values import ValuesClient as RealValuesClient
+
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, book)
+    monkeypatch.setattr(find_offers, "ValuesClient", RealValuesClient)
+    monkeypatch.setattr("ff.values.client.get_json", lambda *a, **k: fc_entries)
+
+    rc = find_offers.main(["--sell", "Ja'Marr Chase", "--ktc-file", str(tmp_path / "missing.json")])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "Invalid or missing KTC pool file" in out
+
+
+def test_offers_main_unpriced_2029_sell_pick_explains_dp_gap(
+    monkeypatch, capsys, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from ff.values import ValueBook
+
+    dp_map = {"7564": 9000, "8138": 8900, "2027 2": 1500, "2028 2": 1300}
+    assets = [a.model_copy(update={"secondary_value": dp_map.get(a.id)}) for a in book.assets]
+    assets.append(Asset(id="2029 2", name="2029 2nd", kind="pick", position="PICK",
+                        value=1200, secondary_value=None))
+    dp_book = ValueBook(
+        assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+    )
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, dp_book)
+
+    rc = find_offers.main(["--sell", "2029 2nd", "--years", "3"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "on your roster in FantasyCalc, but unpriced in DynastyProcess (pass --fc-only or --market ktc)" in out
+    assert "not on your roster" not in out

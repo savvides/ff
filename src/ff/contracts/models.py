@@ -457,7 +457,15 @@ class TradeEvaluation(BaseModel):
     is_dynasty: bool = True
     secondary_top: Optional[int] = None  # KTC's top value used for its adjustment
     secondary_hidden: bool = False  # KTC counts its adjustment but its page hides it
+    secondary_source: Optional[str] = None  # "dp" | "ktc" | "none" | None
+    secondary_label: str = "KTC"
     unresolved: List[str] = Field(default_factory=list)
+
+    def effective_secondary_source(self) -> Optional[str]:
+        """Active secondary market source, inferring legacy KTC when `secondary_top` is set."""
+        if self.secondary_source is None and self.secondary_top is not None:
+            return "ktc"
+        return self.secondary_source
 
     @property
     def value_a(self) -> int:
@@ -583,7 +591,10 @@ class TradeEvaluation(BaseModel):
         if self.secondary_delta is None or self.secondary_pct_diff is None:
             return None
         fc_fair = self.is_fair(threshold_pct)
-        sec_fair = self.secondary_is_fair(threshold_pct)
+        if self.effective_secondary_source() == "dp":
+            sec_fair = self.secondary_pct_diff <= threshold_pct
+        else:
+            sec_fair = self.secondary_is_fair(threshold_pct)
 
         if fc_fair and sec_fair:
             return "Fair"
@@ -617,9 +628,10 @@ class TradeEvaluation(BaseModel):
 
 class OfferVerdict(BaseModel):
     """The offer rule: the gap on the site-adjusted totals is under `threshold_pct`
-    of the larger side in BOTH FantasyCalc and KTC, and KTC's own verdict is
-    "Fair Trade". CANNOT_JUDGE lists why (missing prices, redraft, drifted site
-    code...), so a verdict is never reported on numbers the sites would not show."""
+    of the larger side in BOTH FantasyCalc and the active secondary market (plus KTC's
+    own "Fair Trade" verdict when KTC is active), unless `fc_only=True`. CANNOT_JUDGE
+    lists why (missing prices, redraft, drifted site code...), so a verdict is never
+    reported on numbers the sites would not show."""
 
     status: str  # "PASS" | "FAIL" | "CANNOT_JUDGE"
     threshold_pct: float = 10.0
@@ -627,6 +639,10 @@ class OfferVerdict(BaseModel):
     ktc_pct: Optional[float] = None
     ktc_site_pct: Optional[float] = None
     ktc_site_fair: Optional[bool] = None
+    secondary_pct: Optional[float] = None
+    secondary_source: Optional[str] = None
+    secondary_label: str = "KTC"
+    fc_only: bool = False
     reasons: List[str] = Field(default_factory=list)
 
     @property
@@ -634,7 +650,7 @@ class OfferVerdict(BaseModel):
         return self.status == "PASS"
 
 class ArbitrageMover(BaseModel):
-    """An asset with valuation discrepancies across FantasyCalc and secondary market (Dynasty Dealer / KTC)."""
+    """An asset with valuation discrepancies across FantasyCalc and secondary market (DynastyProcess / KTC)."""
 
     asset: Asset
     fc_value: int = 0
@@ -647,7 +663,7 @@ class ArbitrageMover(BaseModel):
     diff_pct: float = 0.0
     roster_id: Optional[int] = None
     team_name: Optional[str] = None
-    market_bias: str = ""  # "Dealer" | "KTC" | "FC" | "EVEN"
+    market_bias: str = ""  # "DP" | "Dealer" | "KTC" | "FC" | "EVEN"
 
     @model_validator(mode="before")
     @classmethod

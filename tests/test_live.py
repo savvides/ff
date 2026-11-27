@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -113,6 +114,62 @@ def test_sleeper_projections_live_have_stat_lines():
     assert allen and (allen.get("pass_yd") or allen.get("pts_half_ppr"))
 
 
+def _ktc_player_pool_status() -> Optional[int]:
+    """Return HTTP status code for KTC's /dynasty-rankings/player-pool endpoint."""
+    import requests
+    from ff.core.http import BROWSER_UA
+
+    url = "https://keeptradecut.com/dynasty-rankings/player-pool"
+    try:
+        resp = requests.get(url, headers={"User-Agent": BROWSER_UA}, timeout=15)
+        return resp.status_code
+    except requests.exceptions.SSLError:
+        try:
+            res = subprocess.run(
+                ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-A", BROWSER_UA, url],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            code = res.stdout.strip()
+            return int(code) if code.isdigit() else None
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return None
+    except requests.exceptions.RequestException:
+        return None
+
+
+def _skip_if_ktc_pool_gated(html: str) -> None:
+    """Skip when KTC is unreachable or its live player pool is gated or blocked."""
+    from ff.values.ktc import KtcClient, _extract_players
+
+    page_html = html or KtcClient()._fetch_text(use_cache=False)
+    if not page_html:
+        pytest.skip("KTC unreachable (offline or blocked)")
+    if _extract_players(page_html):
+        return
+    status = _ktc_player_pool_status()
+    if status is None or status in (0, 401, 403, 429, 503):
+        pytest.skip(
+            "KTC live pool gated (no embedded pool in /trade-calculator and "
+            f"/dynasty-rankings/player-pool returned {status})"
+        )
+
+
+def test_dynastyprocess_live_maps_values_and_picks():
+    from ff.values.dp import DynastyProcessClient
+
+    client = DynastyProcessClient()
+    sf = client.fetch_snapshot(Format(superflex=True))
+    one = client.fetch_snapshot(Format(superflex=False))
+    assert sf.source == "dp"
+    assert len(sf.values) > 500
+    assert len(one.values) > 500
+    assert sf.values.get("josh allen", 0) > one.values.get("josh allen", 0) > 0
+    assert sf.values.get("2027 1 early", 0) > 0
+    assert sf.values.get("2028 1", 0) > 0
+
+
 def test_ktc_live_maps_values():
     # Dual-market merge depends on KeepTradeCut returning values for players and picks.
     # If the page structure drifts, secondary market values silently go missing.
@@ -120,10 +177,9 @@ def test_ktc_live_maps_values():
     client = KtcClient()
     values = client.fetch_values(Format(superflex=True), use_cache=False)
     if not values:
-        # Offline is a skip; a page that downloads but parses to nothing is the
-        # drift this check exists to catch (it hid KTC's Sept 2026 layout change).
-        if not client._fetch_text(use_cache=False):
-            pytest.skip("KTC unreachable (offline or blocked)")
+        # Offline or gated (no embedded pool + 403 on /dynasty-rankings/player-pool) is a skip;
+        # a page that downloads with an un-gated endpoint but parses to nothing is layout drift.
+        _skip_if_ktc_pool_gated(client.last_html)
         pytest.fail("KTC page downloaded but no values parsed - the page layout changed")
     assert any(" " in k for k in values), "no player/pick name keys in KTC map"
     assert any(v > 0 for v in values.values())
@@ -200,7 +256,10 @@ def test_trade_numbers_match_the_sites_on_live_data():
     if not shutil.which("node"):
         pytest.skip("node not installed")
     from ff.analysis import analyze_trade
-    book = ValuesClient().fetch(LEAGUE_FMT, fresh=True)
+    book = ValuesClient().fetch(LEAGUE_FMT, fresh=True, secondary="ktc")
+    if not book.secondary_map:
+        _skip_if_ktc_pool_gated(book.secondary_html)
+        pytest.fail("KTC live pool returned no values despite not being gated")
     trades = [  # (ff tokens get, ff tokens give, site names get, site names give)
         (["Quinshon Judkins"], ["Kirk Cousins", "Michael Pittman"],
          [("Quinshon Judkins", "Quinshon Judkins")], [("Kirk Cousins", "Kirk Cousins"), ("Michael Pittman", "Michael Pittman")]),
@@ -249,9 +308,18 @@ def test_live_news_client_fetches_all_sources():
 
 
 def test_te_premium_reaches_both_markets_live():
-    plain = ValuesClient().fetch(Format(is_dynasty=True, superflex=True, num_qbs=2, num_teams=12, ppr=0.5))
-    tep = ValuesClient().fetch(LEAGUE_FMT, fresh=True)
+    plain = ValuesClient().fetch(
+        Format(is_dynasty=True, superflex=True, num_qbs=2, num_teams=12, ppr=0.5),
+        secondary="ktc",
+    )
+    tep = ValuesClient().fetch(LEAGUE_FMT, fresh=True, secondary="ktc")
     bowers_plain, bowers_tep = plain.resolve("Brock Bowers"), tep.resolve("Brock Bowers")
+    cousins_plain, cousins_tep = plain.resolve("Kirk Cousins"), tep.resolve("Kirk Cousins")
+    assert bowers_plain and bowers_tep
+    assert cousins_plain and cousins_tep
     assert bowers_tep.value > bowers_plain.value  # FantasyCalc tep=te+
+    assert cousins_tep.value == cousins_plain.value  # non-TEs unchanged
+    if bowers_plain.secondary_value is None or bowers_tep.secondary_value is None:
+        _skip_if_ktc_pool_gated(tep.secondary_html)
+        pytest.fail("KTC live pool returned no TE values despite not being gated")
     assert bowers_tep.secondary_value > bowers_plain.secondary_value  # KTC TE+ tier
-    assert tep.resolve("Kirk Cousins").value == plain.resolve("Kirk Cousins").value  # non-TEs unchanged

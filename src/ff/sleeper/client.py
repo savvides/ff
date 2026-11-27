@@ -154,11 +154,20 @@ def detect_format(league: Dict[str, Any] | str) -> Format:
 
 
 def team_names(users: List[Dict[str, Any]]) -> Dict[str, str]:
-    """owner_id -> display name (team name if set, else username)."""
+    """owner_id -> display label ('Team Name (@user)', '@user' if no team name, else 'Unknown')."""
     out: Dict[str, str] = {}
     for u in users:
         meta = u.get("metadata") or {}
-        name = meta.get("team_name") or u.get("display_name") or "Unknown"
+        team = (meta.get("team_name") or "").strip()
+        user = (u.get("display_name") or "").strip()
+        if team and user and team.lower() != user.lower():
+            name = f"{team} (@{user})"
+        elif user:
+            name = f"@{user}"
+        elif team:
+            name = team
+        else:
+            name = "Unknown"
         out[u["user_id"]] = name
     return out
 

@@ -43,7 +43,7 @@ def test_traded_away_and_acquired(rosters, book, traded_picks):
     assert {(p.season, p.round, p.original_roster_id) for p in warriors.picks} == {
         ("2027", 1, 1), ("2027", 1, 2), ("2027", 2, 3), ("2028", 1, 1), ("2028", 2, 1)}
     acquired = [p for p in warriors.picks if p.acquired]
-    assert {p.original_team for p in acquired} == {"Gridiron Kings", "carol"}
+    assert {p.original_team for p in acquired} == {"Gridiron Kings (@bob)", "@carol"}
     # Gridiron kept nothing in 2027 but its own 2nd.
     assert [(p.season, p.round) for p in gridiron.picks] == [
         ("2027", 2), ("2028", 1), ("2028", 2)]

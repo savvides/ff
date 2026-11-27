@@ -335,7 +335,7 @@ def validate_values(assets: List[Asset], position: Optional[str] = None, market:
             message="" if pos_match else f"One or more assets do not match filtered position '{pos_upper}'",
         ))
 
-    if market in ("dealer", "ktc"):
+    if market in ("dealer", "ktc", "dp"):
         sec_present = any(a.secondary_value is not None for a in assets)
         sec_valid = all(a.secondary_value is not None and a.secondary_value >= 0 for a in assets)
         checks.append(QACheck(
@@ -393,12 +393,17 @@ def validate_trade(
             passed=got_fc == expected_fc and not (adj_a and adj_b),
             message="" if got_fc == expected_fc else f"FantasyCalc adjustment {got_fc} != site formula {expected_fc}",
         ))
+        sec_label = (
+            evaluation.secondary_label
+            if evaluation.secondary_label and evaluation.secondary_label.lower() != "none"
+            else "Secondary"
+        )
         expected_k = (redo.side_a.secondary_adjustment, redo.side_b.secondary_adjustment)
         got_k = (evaluation.side_a.secondary_adjustment, evaluation.side_b.secondary_adjustment)
         checks.append(QACheck(
-            name="Trade KTC Adjustment Matches Site",
+            name=f"Trade {sec_label} Adjustment Matches Site",
             passed=got_k == expected_k,
-            message="" if got_k == expected_k else f"KTC adjustment {got_k} != site formula {expected_k}",
+            message="" if got_k == expected_k else f"{sec_label} adjustment {got_k} != site formula {expected_k}",
         ))
 
     all_trade_assets = evaluation.side_a.assets + evaluation.side_b.assets
@@ -475,7 +480,7 @@ def validate_movers(movers: Any, mode: str = "gap") -> List[QACheck]:
             message="" if pcts_valid else "Arbitrage pct_diff cannot be negative",
         ))
 
-        biases_valid = all(m.market_bias in {"Dealer", "FC", "EVEN", "KTC"} for m in arb_items)
+        biases_valid = all(m.market_bias in {"DP", "Dealer", "FC", "EVEN", "KTC"} for m in arb_items)
         checks.append(QACheck(
             name="Arbitrage Market Bias Valid",
             passed=biases_valid,

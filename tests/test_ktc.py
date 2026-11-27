@@ -195,3 +195,46 @@ def test_ktc_export_in_values_package():
     from ff.values import KtcClient as ExportedKtcClient, DynastyDealerClient as ExportedDealerClient
     assert ExportedKtcClient is KtcClient
     assert ExportedDealerClient is KtcClient
+
+
+def test_ktc_client_loads_explicit_file_path_with_tep_and_top(tmp_path):
+    pool = [
+        {"playerName": "Brock Bowers", "position": "TE", "sleeper_id": "11604",
+         "superflexValues": {"value": 6000, "tep": {"value": 7200}},
+         "oneQBValues": {"value": 5800, "tep": {"value": 7000}}},
+        {"playerName": "2027 Mid 1st", "position": "RDP",
+         "superflexValues": {"value": 4100}, "oneQBValues": {"value": 3900}},
+    ]
+    pool_file = tmp_path / "ktc.json"
+    pool_file.write_text(json.dumps(pool), encoding="utf-8")
+    snap = KtcClient(file_path=pool_file).fetch_snapshot(Format(superflex=True, tep=0.5))
+    assert snap.source == "ktc" and snap.label == "KTC"
+    assert snap.top == 7200
+    assert snap.values["11604"] == 7200
+    assert snap.values["2027 1 mid"] == 4100
+    assert "2027 1" in snap.approx_keys
+
+
+def test_ktc_client_explicit_missing_or_invalid_file_raises_value_error(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="KTC pool file"):
+        KtcClient(file_path=tmp_path / "missing.json").fetch_snapshot(Format(superflex=True))
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"not": "a list"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="KTC pool file"):
+        KtcClient(file_path=bad).fetch_snapshot(Format(superflex=True))
+
+
+@responses.activate
+def test_ktc_client_falls_back_to_ff_home_ktc_pool_json_when_html_empty(ff_home):
+    responses.add(responses.GET, KTC_VALUES_URL, body="<html>var playersArray = [];</html>", status=200)
+    pool_path = ff_home / ".ff" / "ktc_pool.json"
+    pool_path.parent.mkdir(parents=True, exist_ok=True)
+    pool_path.write_text(json.dumps([
+        {"playerName": "Jahmyr Gibbs", "position": "RB", "sleeper_id": "9221",
+         "superflexValues": {"value": 8500}, "oneQBValues": {"value": 8200}}
+    ]), encoding="utf-8")
+    snap = KtcClient().fetch_snapshot(Format(superflex=True), use_cache=False)
+    assert snap.values["9221"] == 8500
+    assert snap.top == 8500
+

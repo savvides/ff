@@ -404,3 +404,48 @@ def test_validate_trade_with_filters_and_ask_batch():
     assert any(not c.passed for c in bad_tool)
     missing_result = validate_ask(None, None, "Analyze", tool_names=["get_power_rankings"])
     assert any(not c.passed for c in missing_result)
+
+
+def test_validate_trade_accepts_dp_zero_adjustments():
+    from ff.analysis import apply_site_adjustments
+
+    a1 = Asset(id="1", name="Player 1", position="WR", value=2000, secondary_value=1000)
+    a2 = Asset(id="2", name="Player 2", position="WR", value=2050, secondary_value=1050)
+    ev = TradeEvaluation(
+        side_a=TradeSide(assets=[a1]),
+        side_b=TradeSide(assets=[a2]),
+        label_a="You get",
+        label_b="You give",
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+    apply_site_adjustments(ev)
+    assert (ev.side_a.secondary_adjustment, ev.side_b.secondary_adjustment) == (0, 0)
+    checks = validate_trade(ev)
+    assert all(c.passed for c in checks)
+
+    tampered = ev.model_copy(deep=True)
+    tampered.side_a.secondary_adjustment = 250
+    failed = [c for c in validate_trade(tampered) if not c.passed]
+    assert any("Adjustment Matches Site" in c.name for c in failed)
+
+
+def test_validate_values_dp_market_and_movers_dp_bias():
+    a1 = Asset(id="1", name="Player 1", value=4000, position="WR", secondary_value=6000)
+    a2 = Asset(id="2", name="Player 2", value=5000, position="WR", secondary_value=3500)
+    assert all(c.passed for c in validate_values([a1, a2], position="WR", market="dp"))
+
+    a_missing = Asset(id="3", name="Player 3", value=3000, position="WR", secondary_value=None)
+    missing_checks = [c for c in validate_values([a_missing], market="dp") if not c.passed]
+    assert any("Secondary Prices Present" in c.name for c in missing_checks)
+
+    mover = ArbitrageMover(
+        asset=a1,
+        fc_value=4000,
+        secondary_value=6000,
+        secondary_scaled=5000,
+        diff=1000,
+        pct_diff=20.0,
+        market_bias="DP",
+    )
+    assert all(c.passed for c in validate_movers([mover], mode="arbitrage"))

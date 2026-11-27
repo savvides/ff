@@ -177,6 +177,10 @@ def test_cli_trade_and_news_player_run_mandatory_news_review(
         body="<rss><channel></channel></rss>",
     )
 
+    from rich.console import Console
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr("ff.cli.console", Console(width=200))
     runner = CliRunner()
     res_news = runner.invoke(app, ["news", "--player", "Josh Allen"])
     assert res_news.exit_code == 0, res_news.stdout

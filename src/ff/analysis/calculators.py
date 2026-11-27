@@ -3,7 +3,7 @@
 Both sites add a *package adjustment* to one side of a trade before comparing
 totals, so a raw sum disagrees with them on nearly every uneven deal (and KTC
 adjusts 1-for-1s too). These are verbatim ports of the functions the sites run:
-FantasyCalc's `getValueAdjustment` (dynasty) and KTC's `adjustPackageNew` with
+FantasyCalc's `getValueAdjustment` (dynasty) and KTC's `calcAdjustPackageNew` with
 `processVNew` / `reverseAdjustNew` / `solveForX` / `checkEquality`. They are pinned
 by vectors produced by executing the sites' own code
 (`scripts/calculator_oracle.mjs` -> `tests/fixtures/calculator_vectors.json`).
@@ -27,7 +27,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 NAN = float("nan")
 
-# --- FantasyCalc (chunk-F4CNOEUX.js: Y={pctFactor:.6982,adjustmentFactor:753,adjustmentScalar:.23})
+# --- FantasyCalc (chunk-QICC6OWP.js: Y={pctFactor:.6982,adjustmentFactor:753,adjustmentScalar:.23})
 FC_PCT_FACTOR = 0.6982
 FC_ADJUSTMENT_FACTOR = 753
 FC_ADJUSTMENT_SCALAR = 0.23
@@ -36,8 +36,8 @@ FC_ADJUSTMENT_SCALAR = 0.23
 KTC_PV_SCALE = 10099  # hard-coded in processVNew
 KTC_MAX_PLAYER_VAL = 10000  # MAXPLAYERVAL=1e4
 KTC_VARIANCE = 5  # tcFilters.variance default (the page's slider runs 0-10)
-KTC_TOP_OFFSET = 100  # t = playersArray[0].value + 100 in adjustPackageNew
-KTC_DISPLAY_RATIO = 0.033  # below this share of the combined total the block is hidden
+KTC_TOP_OFFSET = 100  # t = playersArray[0].value + 100 in calcAdjustPackageNew
+KTC_DISPLAY_RATIO = 0.02  # below this share of the combined total the block is hidden
 
 
 # --- JavaScript numeric semantics -------------------------------------------
@@ -164,7 +164,7 @@ def _check_equality(e: float, a: float, t: float) -> bool:
 
 def ktc_adjustment(side1: Sequence[int], side2: Sequence[int], top: int,
                    variance: int = KTC_VARIANCE) -> Optional[KtcAdjustment]:
-    """KTC's value adjustment. Verbatim port of `adjustPackageNew` (ALGOTOUSE=2).
+    """KTC's value adjustment. Verbatim port of `calcAdjustPackageNew` (ALGOTOUSE=2).
 
     `top` is `playersArray[0].value`: the most valuable asset on the whole page in
     the chosen format/TEP. Returns None when a side is empty (the site then only
@@ -294,12 +294,12 @@ def ktc_adjustment(side1: Sequence[int], side2: Sequence[int], top: int,
 
 # --- site-code fingerprints (drift detection) ---------------------------------
 
-# Verified against the live bundles (scripts/calculator_oracle.mjs) on 2026-09-30. The bundle names
+# Verified against the live bundles (scripts/calculator_oracle.mjs) on 2026-11-27. The bundle names
 # are content-hashed, so an unchanged name means unchanged code.
 FINGERPRINTS: Dict[str, Dict[str, Any]] = {
     "fc": {
-        "main": "main-QU22HJEG.js",
-        "chunk": "chunk-F4CNOEUX.js",
+        "main": "main-ZB6X6DLB.js",
+        "chunk": "chunk-QICC6OWP.js",
         "constants": {"pctFactor": FC_PCT_FACTOR, "adjustmentFactor": FC_ADJUSTMENT_FACTOR,
                       "adjustmentScalar": FC_ADJUSTMENT_SCALAR},
         "hashes": {
@@ -309,18 +309,18 @@ FINGERPRINTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "ktc": {
-        "version": "q_FrAXDmPCSBij8MDiPA1mxk_RQ17dn3TxS0QPcvRHk",
+        "version": "DkgCIlIjvHdsmttA-N8fUtbe-MpgY4iRJMMpqPSf-JI",
         "constants": {"ALGOTOUSE": 2, "MAXPLAYERVAL": KTC_MAX_PLAYER_VAL, "variance": KTC_VARIANCE,
                       "pickVal": 0},
         "hashes": {
-            "adjustPackageNew": "b26ab426ebad3ae412350e4f7933bee40b90954d784fe347e8e1b91799706322",
+            "calcAdjustPackageNew": "d089eca58047bfa84a9f6909f1a488175d23a29c6a7ed1f6b7006fe94ce20fe0",
             "processVNew": "06eeac86e1d4a9261e56145c2bd091b3a6173556eedbe84c9c8c2a5e05f7c27f",
             "reverseAdjustNew": "1f390640fb2ab27ce0abe8ffba63df8b8ae8b4f77a7559cad8ab5f278d4fff2d",
             "solveForX": "cf9462244fcaa0407f6b79c26777c40296bad0486764118ad64f402697a0ad6f",
             "checkEquality": "6fd27e4f2bafbf2982fc04401405e210996e54041ae53d7ed93bec3ab143431b",
-            "evaluateTrade": "49e5517cc8726edb1b5cd3a3955235c2a86baebf621e2a91e888f86dee436c46",
+            "evaluateTrade": "6ecc6d647654d80c030c5b5fdd64fa1f83435aec1203ea0df6caf5350e301554",
             "updateSingleDynastyAsset": "e20849129d2df6f858eb78eb395f6e51527c7655f4eb7e48609aba97c9c37f11",
-            "processTeam": "f4b774e852690ecf4d3400bda202891888369b07b377be3477a8f7d3d667d35c",
+            "processTeam": "51aab7cfdec866d58eda6defc29f1e96f3c0ccdb1a3d8cc6bb8700831b369da6",
         },
     },
 }

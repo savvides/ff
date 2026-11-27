@@ -97,14 +97,26 @@ def test_format_label_shows_tep_when_present():
 
 def test_team_names_falls_back_to_username(users_raw):
     names = team_names(users_raw)
-    assert names["userA"] == "Dynasty Warriors"
-    assert names["userC"] == "carol"  # no team_name set
+    assert names["userA"] == "Dynasty Warriors (@alice)"
+    assert names["userC"] == "@carol"  # no team_name set
+
+
+def test_team_names_edge_cases():
+    users = [
+        {"user_id": "u1", "display_name": "alice", "metadata": {"team_name": "Alice"}},
+        {"user_id": "u2", "display_name": "", "metadata": {"team_name": "Only Team"}},
+        {"user_id": "u3", "display_name": "", "metadata": {}},
+    ]
+    names = team_names(users)
+    assert names["u1"] == "@alice"
+    assert names["u2"] == "Only Team"
+    assert names["u3"] == "Unknown"
 
 
 def test_build_rosters(rosters_raw, users_raw):
     rosters = build_rosters(rosters_raw, users_raw)
     r1 = next(r for r in rosters if r.roster_id == 1)
-    assert r1.team_name == "Dynasty Warriors"
+    assert r1.team_name == "Dynasty Warriors (@alice)"
     assert r1.player_ids == ["7564", "9221", "9999"]
     assert r1.starters == ["7564", "9221"]
     assert r1.wins == 8 and r1.losses == 5

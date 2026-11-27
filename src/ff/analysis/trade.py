@@ -108,6 +108,8 @@ def analyze_trade(
         label_b=labels[1],
         is_dynasty=book.format.is_dynasty if book.format is not None else True,
         secondary_top=book.secondary_top,
+        secondary_source=book.secondary_source,
+        secondary_label=book.secondary_label,
         unresolved=a_missing + b_missing,
     )
     apply_site_adjustments(evaluation)
@@ -118,33 +120,71 @@ def apply_site_adjustments(evaluation: TradeEvaluation) -> TradeEvaluation:
     """Set both sites' package adjustments on the sides (side_a = the site's Team 1).
 
     FantasyCalc: its dynasty waiver adjustment (redraft is not modeled, so it stays
-    None there). KTC: its value adjustment, only when every asset has a KTC value
-    and KTC's top value is known; a failed solve leaves it None."""
+    None there). Secondary market: KTC computes its value adjustment when every asset
+    has a KTC value and KTC's top value is known (a failed solve leaves it None);
+    DynastyProcess prices packages via raw sums (0/0 when every asset is priced);
+    'none' leaves adjustments None."""
     a, b = evaluation.side_a, evaluation.side_b
     if evaluation.is_dynasty:
         a.adjustment, b.adjustment = fc_adjustment([x.value for x in a.assets],
                                                    [x.value for x in b.assets])
-    if a.secondary_complete and b.secondary_complete and evaluation.secondary_top:
-        res = ktc_adjustment([x.secondary_value or 0 for x in a.assets],
-                             [x.secondary_value or 0 for x in b.assets], evaluation.secondary_top)
-        if res is not None and math.isfinite(res.adj1) and math.isfinite(res.adj2):
-            a.secondary_adjustment, b.secondary_adjustment = int(res.adj1), int(res.adj2)
-            evaluation.secondary_hidden = bool((res.adj1 or res.adj2) and not res.shown)
+    source = evaluation.effective_secondary_source()
+    if source == "dp":
+        if a.secondary_complete and b.secondary_complete:
+            a.secondary_adjustment, b.secondary_adjustment = 0, 0
+        else:
+            a.secondary_adjustment, b.secondary_adjustment = None, None
+    elif source == "ktc":
+        if a.secondary_complete and b.secondary_complete and evaluation.secondary_top:
+            res = ktc_adjustment([x.secondary_value or 0 for x in a.assets],
+                                 [x.secondary_value or 0 for x in b.assets], evaluation.secondary_top)
+            if res is not None and math.isfinite(res.adj1) and math.isfinite(res.adj2):
+                a.secondary_adjustment, b.secondary_adjustment = int(res.adj1), int(res.adj2)
+                evaluation.secondary_hidden = bool((res.adj1 or res.adj2) and not res.shown)
+            else:
+                a.secondary_adjustment, b.secondary_adjustment = None, None
+        else:
+            a.secondary_adjustment, b.secondary_adjustment = None, None
+    else:
+        a.secondary_adjustment, b.secondary_adjustment = None, None
     evaluation.adjusted = True
     return evaluation
 
 
-def offer_verdict(evaluation: TradeEvaluation, threshold_pct: float = OFFER_THRESHOLD_PCT,
-                  calculator_problems: Sequence[str] = ()) -> OfferVerdict:
-    """The offer rule, judged only on numbers the sites themselves would show.
+def _is_ktc_problem(problem: str) -> bool:
+    return "ktc" in problem.lower()
 
-    PASS: on the site-adjusted totals the gap is under `threshold_pct` of the larger
-    side in FantasyCalc AND in KTC, and KTC's own verdict reads "Fair Trade".
-    CANNOT_JUDGE when any input the sites would need is missing, or when a site's
-    calculator code has changed since ff's port was verified (`calculator_problems`,
-    from ff.values.calculators_live)."""
+
+def _display_secondary_label(evaluation: TradeEvaluation) -> str:
+    label = (evaluation.secondary_label or "").strip()
+    if not label or label.lower() == "none":
+        return "secondary market"
+    return label
+
+
+def offer_verdict(
+    evaluation: TradeEvaluation,
+    threshold_pct: float = OFFER_THRESHOLD_PCT,
+    calculator_problems: Sequence[str] = (),
+    fc_only: bool = False,
+) -> OfferVerdict:
+    """The offer rule, judged only on numbers the active market(s) would show.
+
+    With `fc_only=True`, evaluates FantasyCalc alone (under `threshold_pct`, still
+    enforcing FantasyCalc calculator drift checks) and skips secondary-market
+    prices and KTC drift errors.
+
+    Otherwise:
+      - `"dp"` (DynastyProcess): PASS when both FC and DP gaps are under `threshold_pct`.
+      - `"ktc"` (KeepTradeCut): PASS when both FC and KTC gaps are under `threshold_pct`
+        and KTC's own verdict reads "Fair Trade", with no tier stand-ins or KTC drift.
+    """
     assets = evaluation.side_a.assets + evaluation.side_b.assets
+    source = evaluation.effective_secondary_source()
+    label = evaluation.secondary_label or "KTC"
+    display_label = _display_secondary_label(evaluation)
     reasons: List[str] = []
+
     if evaluation.unresolved:
         reasons.append("unresolved: " + ", ".join(evaluation.unresolved))
     if not evaluation.side_a.assets or not evaluation.side_b.assets:
@@ -153,28 +193,67 @@ def offer_verdict(evaluation: TradeEvaluation, threshold_pct: float = OFFER_THRE
         reasons.append("site adjustments were not computed")
     elif not evaluation.is_dynasty:
         reasons.append("redraft calculators are not modeled")
-    unpriced = [x.name for x in assets if x.secondary_value is None]
-    if unpriced:
-        reasons.append("KTC has no value for " + ", ".join(unpriced))
-    elif evaluation.adjusted and assets and (evaluation.side_a.secondary_adjustment is None
-                                             or evaluation.side_b.secondary_adjustment is None):
-        reasons.append("KTC's adjustment could not be computed")
-    reasons.extend(calculator_problems)
-    stand_ins = [x.name for x in assets if x.secondary_approx]
-    if stand_ins:
-        # KTC prices future picks only as Early/Mid/Late: a generic pick has no KTC
-        # number of its own, so the rule would be judging a guess.
-        reasons.append("KTC prices only Early/Mid/Late picks - name the tier for "
-                       + ", ".join(stand_ins) + ' (e.g. "2028 1st (Early)")')
-    verdict = OfferVerdict(status="CANNOT_JUDGE", threshold_pct=threshold_pct, reasons=reasons)
+
+    if fc_only or source != "ktc":
+        reasons.extend(p for p in calculator_problems if not _is_ktc_problem(p))
+    else:
+        reasons.extend(calculator_problems)
+
+    if not fc_only:
+        if source == "none" or (assets and all(x.secondary_value is None for x in assets)):
+            reasons.append(f"{display_label} values unavailable (pass --fc-only to evaluate with FantasyCalc only)")
+        else:
+            unpriced = [x.name for x in assets if x.secondary_value is None]
+            if unpriced:
+                reasons.append(f"{display_label} has no value for " + ", ".join(unpriced))
+            elif evaluation.adjusted and assets and (
+                evaluation.side_a.secondary_adjustment is None
+                or evaluation.side_b.secondary_adjustment is None
+            ):
+                reasons.append(f"{display_label}'s adjustment could not be computed")
+        if source == "ktc":
+            stand_ins = [x.name for x in assets if x.secondary_approx]
+            if stand_ins:
+                # KTC prices future picks only as Early/Mid/Late: a generic pick has no KTC
+                # number of its own, so the rule would be judging a guess.
+                reasons.append(
+                    "KTC prices only Early/Mid/Late picks - name the tier for "
+                    + ", ".join(stand_ins) + ' (e.g. "2028 1st (Early)")'
+                )
+
+    verdict = OfferVerdict(
+        status="CANNOT_JUDGE",
+        threshold_pct=threshold_pct,
+        secondary_source=source,
+        secondary_label=label,
+        fc_only=fc_only,
+        reasons=reasons,
+    )
     if reasons:
         return verdict
+
     verdict.fc_pct = evaluation.pct_diff
-    verdict.ktc_pct = evaluation.secondary_pct_diff
-    verdict.ktc_site_pct = evaluation.secondary_site_pct
-    verdict.ktc_site_fair = evaluation.secondary_is_fair()
-    ok = (verdict.fc_pct < threshold_pct and verdict.ktc_pct is not None
-          and verdict.ktc_pct < threshold_pct and verdict.ktc_site_fair)
+    if fc_only:
+        verdict.status = "PASS" if verdict.fc_pct < threshold_pct else "FAIL"
+        return verdict
+
+    verdict.secondary_pct = evaluation.secondary_pct_diff
+    if source == "ktc":
+        verdict.ktc_pct = evaluation.secondary_pct_diff
+        verdict.ktc_site_pct = evaluation.secondary_site_pct
+        verdict.ktc_site_fair = evaluation.secondary_is_fair()
+        ok = (
+            verdict.fc_pct < threshold_pct
+            and verdict.secondary_pct is not None
+            and verdict.secondary_pct < threshold_pct
+            and bool(verdict.ktc_site_fair)
+        )
+    else:
+        ok = (
+            verdict.fc_pct < threshold_pct
+            and verdict.secondary_pct is not None
+            and verdict.secondary_pct < threshold_pct
+        )
     verdict.status = "PASS" if ok else "FAIL"
     return verdict
 
