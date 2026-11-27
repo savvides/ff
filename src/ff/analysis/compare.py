@@ -32,7 +32,18 @@ def _aliases(pid: str, row: dict) -> set:
 
 def resolve_player(text: str, players_meta: Dict[str, Any]) -> str:
     query = _normalize(text)
-    matches = [pid for pid, row in players_meta.items() if query in _aliases(pid, row)]
+    matches = [
+        pid for pid, row in players_meta.items()
+        if isinstance(row, dict) and query in _aliases(pid, row)
+    ]
+    if len(matches) > 1:
+        active_true = [pid for pid in matches if players_meta[pid].get("active") is True]
+        if len(active_true) == 1:
+            return active_true[0]
+        if not active_true:
+            not_false = [pid for pid in matches if players_meta[pid].get("active") is not False]
+            if len(not_false) == 1:
+                return not_false[0]
     if len(matches) != 1:
         raise ValueError(f"Player '{text}' is {'ambiguous' if matches else 'not found'}; use a full name or Sleeper player ID.")
     return matches[0]

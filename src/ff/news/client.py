@@ -63,11 +63,15 @@ def _player_full_name(meta: Dict[str, Any], pid: str) -> str:
     )
 
 
-def _parse_iso_ms(raw: Optional[str]) -> Optional[int]:
-    if not raw:
+def _str_field(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _parse_iso_ms(raw: Any) -> Optional[int]:
+    if not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp() * 1000)
@@ -75,8 +79,8 @@ def _parse_iso_ms(raw: Optional[str]) -> Optional[int]:
         return None
 
 
-def _parse_rfc822_ms(raw: Optional[str]) -> Optional[int]:
-    if not raw:
+def _parse_rfc822_ms(raw: Any) -> Optional[int]:
+    if not isinstance(raw, str) or not raw.strip():
         return None
     try:
         dt = parsedate_to_datetime(raw.strip())
@@ -92,12 +96,11 @@ def _espn_article_to_item(article: Dict[str, Any]) -> NewsItem:
     links = raw_links if isinstance(raw_links, dict) else {}
     raw_web = links.get("web")
     web = raw_web if isinstance(raw_web, dict) else {}
-    url = (web.get("href") or article.get("link") or "")
-    url_str = url.strip() or None if isinstance(url, str) else None
-    title = (article.get("headline") or article.get("title") or "").strip() or "(untitled)"
-    description = (article.get("description") or "").strip()
-    published = _parse_iso_ms(article.get("published") or article.get("lastModified"))
-    source = (article.get("byline") or "ESPN").strip() or "ESPN"
+    url_str = _str_field(web.get("href")) or _str_field(article.get("link")) or None
+    title = _str_field(article.get("headline")) or _str_field(article.get("title")) or "(untitled)"
+    description = _str_field(article.get("description"))
+    published = _parse_iso_ms(article.get("published")) or _parse_iso_ms(article.get("lastModified"))
+    source = _str_field(article.get("byline")) or "ESPN"
     return NewsItem(
         provider="espn",
         published=published,
@@ -194,17 +197,20 @@ class NewsClient:
         if err is not None:
             return [], FeedStatus(provider="espn", ok=False, error=err)
 
-        ambiguous = ambiguous_names or set()
-        matched_items: List[NewsItem] = []
-        for article in articles:
-            if not isinstance(article, dict):
-                continue
-            item = _espn_article_to_item(article)
-            raw_text = f"{item.title} {item.description}"
-            text_norm = _norm_text(raw_text)
-            if _matches_player(text_norm, raw_text, meta, pid, ambiguous):
-                matched_items.append(item)
-        return matched_items, FeedStatus(provider="espn", ok=True, item_count=len(matched_items))
+        try:
+            ambiguous = ambiguous_names or set()
+            matched_items: List[NewsItem] = []
+            for article in articles:
+                if not isinstance(article, dict):
+                    continue
+                item = _espn_article_to_item(article)
+                raw_text = f"{item.title} {item.description}"
+                text_norm = _norm_text(raw_text)
+                if _matches_player(text_norm, raw_text, meta, pid, ambiguous):
+                    matched_items.append(item)
+            return matched_items, FeedStatus(provider="espn", ok=True, item_count=len(matched_items))
+        except (ValueError, TypeError, AttributeError) as exc:
+            return [], FeedStatus(provider="espn", ok=False, error=str(exc))
 
     def _fetch_espn_league_feed(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         try:

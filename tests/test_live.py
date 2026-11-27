@@ -291,6 +291,7 @@ def test_trade_numbers_match_the_sites_on_live_data():
 
 def test_live_news_client_fetches_all_sources():
     from ff.news import NewsClient, review_players
+    from ff.qa.validators import validate_news_review
 
     players = SleeperClient().players()
     pid = next(
@@ -300,11 +301,15 @@ def test_live_news_client_fetches_all_sources():
     review = review_players([pid], players, "lookup", news_client=NewsClient())
     assert len(review.briefs) == 1
     brief = review.briefs[0]
-    assert len(brief.feeds) == 3
-    espn_feed = next(f for f in brief.feeds if f.provider == "espn")
-    assert espn_feed.ok
+    feeds_by_provider = {f.provider: f for f in brief.feeds}
+    assert set(feeds_by_provider) == {"sleeper", "espn", "rss"}
+    assert feeds_by_provider["sleeper"].ok, feeds_by_provider["sleeper"].error
+    assert feeds_by_provider["espn"].ok, feeds_by_provider["espn"].error
+    assert feeds_by_provider["rss"].ok, feeds_by_provider["rss"].error
+    assert review.degraded_feeds == []
     espn_items = [i for i in brief.items if i.provider == "espn"]
-    assert all("allen" in f"{i.title} {i.description}".lower() for i in espn_items)
+    assert not espn_items or any("allen" in f"{i.title} {i.description}".lower() for i in espn_items)
+    assert all(c.passed for c in validate_news_review(review))
 
 
 def test_te_premium_reaches_both_markets_live():

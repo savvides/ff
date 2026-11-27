@@ -1557,12 +1557,14 @@ def render_news_review(
         flag_str = ", ".join(f"[{f.code}]" for f in brief.flags) if brief.flags else "-"
         items = brief.items[:max_items_per_player]
         if not items:
+            all_failed = bool(brief.feeds) and all(not f.ok for f in brief.feeds)
+            empty_msg = "News unavailable (all feeds failed)" if all_failed else "No recent news (14d)"
             t.add_row(
                 Text(brief.player_name),
                 Text(flag_str),
                 Text("-"),
                 Text("-"),
-                Text("No recent news (14d)"),
+                Text(empty_msg),
             )
         else:
             for idx, item in enumerate(items):

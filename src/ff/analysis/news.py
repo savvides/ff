@@ -313,13 +313,26 @@ def build_player_brief(
     )
 
 
-def _flag_keywords(flag: NewsFlag) -> Set[str]:
+def _flag_keywords_list(flag: NewsFlag) -> List[str]:
     if flag.keywords:
-        return {kw.lower() for kw in flag.keywords}
+        return list(flag.keywords)
     prefix = "Matched keyword(s): "
     if flag.reason.startswith(prefix):
-        return {part.strip().lower() for part in flag.reason[len(prefix) :].split(",")}
-    return set()
+        return [part.strip() for part in flag.reason[len(prefix) :].split(",") if part.strip()]
+    return []
+
+
+def _flag_keywords(flag: NewsFlag) -> Set[str]:
+    return {kw.lower() for kw in _flag_keywords_list(flag)}
+
+
+def _format_flag_reason(flag: NewsFlag, allowed_kws: Optional[Set[str]] = None) -> str:
+    kws = _flag_keywords_list(flag)
+    if allowed_kws is not None:
+        kws = [kw for kw in kws if kw.lower() in allowed_kws]
+    if kws:
+        return f"{flag.code}: {'/'.join(kws)}"
+    return flag.code
 
 
 def _headline_for_keywords(brief: PlayerNewsBrief, target_kws: Set[str], fallback: str) -> str:
@@ -339,19 +352,29 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
         neg_role_kws = _flag_keywords(role) & _NEGATIVE_ROLE_KWS if role is not None else set()
         neg_role = bool(neg_role_kws)
         if any(c in codes for c in ("BREAKING", "INJURY", "DISCIPLINE")) or neg_role:
-            reasons = [f.code for f in brief.flags if f.code in {"BREAKING", "INJURY", "DISCIPLINE"} or (f.code == "ROLE_CHANGE" and neg_role)]
-            reason_set = set(reasons)
-            headline = next((f.headline for f in brief.flags if f.code in reason_set), "")
+            trigger_flags = [
+                f for f in brief.flags
+                if f.code in {"BREAKING", "INJURY", "DISCIPLINE"} or (f.code == "ROLE_CHANGE" and neg_role)
+            ]
+            reasons = [
+                _format_flag_reason(f, _NEGATIVE_ROLE_KWS if f.code == "ROLE_CHANGE" else None)
+                for f in trigger_flags
+            ]
+            headline = trigger_flags[0].headline if trigger_flags else ""
             if neg_role and role is not None and not any(c in codes for c in ("BREAKING", "INJURY", "DISCIPLINE")):
                 headline = _headline_for_keywords(brief, neg_role_kws, headline)
             out.append(f"Start check — {brief.player_name} ({', '.join(reasons)}): {headline}")
 
     elif decision == "trade":
-        active = [f.code for f in brief.flags if f.code in {"BREAKING", "INJURY", "DISCIPLINE", "TRANSACTION", "ROLE_CHANGE"}]
-        if active:
-            headline = next((f.headline for f in brief.flags if f.code in active), "")
+        active_flags = [
+            f for f in brief.flags
+            if f.code in {"BREAKING", "INJURY", "DISCIPLINE", "TRANSACTION", "ROLE_CHANGE"}
+        ]
+        if active_flags:
+            reasons = [_format_flag_reason(f) for f in active_flags]
+            headline = active_flags[0].headline
             out.append(
-                f"Trade check — {brief.player_name} ({', '.join(active)}): market values may lag breaking news — {headline}"
+                f"Trade check — {brief.player_name} ({', '.join(reasons)}): market values may lag breaking news — {headline}"
             )
 
     elif decision == "drop":
@@ -362,9 +385,22 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
         pos_role = bool(pos_role_kws)
         pos_tx = bool(pos_tx_kws)
         if "BREAKING" in codes or pos_role or pos_tx:
-            drop_reasons = [c for c in ("BREAKING", "ROLE_CHANGE", "TRANSACTION") if (c == "BREAKING" and c in codes) or (c == "ROLE_CHANGE" and pos_role) or (c == "TRANSACTION" and pos_tx)]
-            drop_set = set(drop_reasons)
-            headline = next((f.headline for f in brief.flags if f.code in drop_set), "")
+            drop_flags = [
+                f for f in brief.flags
+                if (f.code == "BREAKING")
+                or (f.code == "ROLE_CHANGE" and pos_role)
+                or (f.code == "TRANSACTION" and pos_tx)
+            ]
+            drop_reasons = [
+                _format_flag_reason(
+                    f,
+                    _POSITIVE_ROLE_KWS
+                    if f.code == "ROLE_CHANGE"
+                    else (_POSITIVE_TX_KWS if f.code == "TRANSACTION" else None),
+                )
+                for f in drop_flags
+            ]
+            headline = drop_flags[0].headline if drop_flags else ""
             if (pos_role or pos_tx) and "BREAKING" not in codes:
                 headline = _headline_for_keywords(brief, pos_role_kws | pos_tx_kws, headline)
             out.append(
@@ -372,15 +408,17 @@ def _decision_warnings_for_brief(decision: DecisionType, brief: PlayerNewsBrief)
             )
 
     elif decision == "waiver":
-        opp = [f.code for f in brief.flags if f.code in {"ROLE_CHANGE", "TRANSACTION"}]
-        caution = [f.code for f in brief.flags if f.code in {"INJURY", "DISCIPLINE"}]
-        if opp:
-            headline = next((f.headline for f in brief.flags if f.code in opp), "")
-            out.append(f"Waiver opportunity — {brief.player_name} ({', '.join(opp)}): {headline}")
-        if caution:
-            headline = next((f.headline for f in brief.flags if f.code in caution), "")
+        opp_flags = [f for f in brief.flags if f.code in {"ROLE_CHANGE", "TRANSACTION"}]
+        caution_flags = [f for f in brief.flags if f.code in {"INJURY", "DISCIPLINE"}]
+        if opp_flags:
+            reasons = [_format_flag_reason(f) for f in opp_flags]
+            headline = opp_flags[0].headline
+            out.append(f"Waiver opportunity — {brief.player_name} ({', '.join(reasons)}): {headline}")
+        if caution_flags:
+            reasons = [_format_flag_reason(f) for f in caution_flags]
+            headline = caution_flags[0].headline
             out.append(
-                f"Waiver caution — {brief.player_name} ({', '.join(caution)}): verify before spending FAAB — {headline}"
+                f"Waiver caution — {brief.player_name} ({', '.join(reasons)}): verify before spending FAAB — {headline}"
             )
 
     return out

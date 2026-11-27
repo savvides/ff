@@ -18,7 +18,10 @@ def test_render_news_review_shows_banner_warnings_and_quiet_fallback():
                 player_name="Quiet Player",
                 items=[],
                 flags=[],
-                feeds=[FeedStatus(provider="sleeper", ok=False, error="500")],
+                feeds=[
+                    FeedStatus(provider="sleeper", ok=False, error="500"),
+                    FeedStatus(provider="espn", ok=True, item_count=0),
+                ],
                 warnings=[],
             ),
             PlayerNewsBrief(
@@ -55,6 +58,69 @@ def test_render_news_review_shows_banner_warnings_and_quiet_fallback():
     assert "sleeper" in out.lower()
     assert "No recent news (14d)" in out
     assert "Active Player named starter" in out
+
+
+def test_render_news_review_shows_unavailable_when_all_feeds_fail():
+    as_of = datetime(2026, 11, 24, tzinfo=timezone.utc)
+    unavailable_brief = PlayerNewsBrief(
+        player_id="1",
+        player_name="Unavailable Player",
+        items=[],
+        flags=[],
+        feeds=[
+            FeedStatus(provider="sleeper", ok=False, error="500"),
+            FeedStatus(provider="espn", ok=False, error="500"),
+            FeedStatus(provider="rss", ok=False, error="timeout"),
+        ],
+        warnings=[],
+    )
+    no_feeds_brief = PlayerNewsBrief(
+        player_id="2",
+        player_name="No Feeds Player",
+        items=[],
+        flags=[],
+        feeds=[],
+        warnings=[],
+    )
+
+    combined = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[unavailable_brief, no_feeds_brief],
+        degraded_feeds=["sleeper", "espn", "rss"],
+        warnings=[],
+    )
+    c_combined = Console(record=True, width=120)
+    render_news_review(combined, c_combined)
+    out_combined = c_combined.export_text()
+    assert "News unavailable (all feeds failed)" in out_combined
+    assert "No recent news (14d)" in out_combined
+
+    only_unavailable = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[unavailable_brief],
+        degraded_feeds=["sleeper", "espn", "rss"],
+        warnings=[],
+    )
+    c_unavail = Console(record=True, width=120)
+    render_news_review(only_unavailable, c_unavail)
+    out_unavail = c_unavail.export_text()
+    assert "News unavailable (all feeds failed)" in out_unavail
+    assert "No recent news (14d)" not in out_unavail
+
+    only_no_feeds = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[no_feeds_brief],
+        degraded_feeds=[],
+        warnings=[],
+    )
+    c_nofeeds = Console(record=True, width=120)
+    render_news_review(only_no_feeds, c_nofeeds)
+    out_nofeeds = c_nofeeds.export_text()
+    assert "No recent news (14d)" in out_nofeeds
+    assert "News unavailable" not in out_nofeeds
 
 
 def test_render_news_review_escapes_brackets_and_strips_raw_markup_tags():
@@ -194,6 +260,59 @@ def test_cli_trade_and_news_player_run_mandatory_news_review(
     assert res_trade.exit_code == 0, res_trade.stdout
     assert "Latest News Review" in res_trade.stdout
     assert "sleeper" in res_trade.stdout.lower()  # degraded warning for 6794 500
+
+
+@responses.activate
+def test_cli_news_player_prefers_active_player_over_inactive_namesake(
+    monkeypatch, league, players_meta
+):
+    import ff.news
+
+    monkeypatch.setattr("ff.cli.review_players", ff.news.review_players)
+    meta_with_inactive = {
+        **players_meta,
+        "4984": {**players_meta["4984"], "active": True},
+        "9991": {"full_name": "Josh Allen", "position": "OL", "team": None, "active": False},
+    }
+
+    class _StubSleeper:
+        def players(self, fresh=False):
+            return meta_with_inactive
+
+    cfg = Config(
+        league_id=league["league_id"],
+        user_id="u1",
+        user_name="owner1",
+        season=2026,
+        format=Format(superflex=True, ppr=1.0, num_teams=12, is_dynasty=True),
+    )
+    monkeypatch.setattr("ff.cli._load", lambda: (cfg, _StubSleeper()))
+    responses.add(
+        responses.GET,
+        "https://api.sleeper.com/players/nfl/4984/news",
+        json=[{"source": "RotoWire", "published": 1795400000000, "metadata": {"title": "Josh Allen practicing in full"}}],
+    )
+    responses.add(
+        responses.GET,
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        json={"articles": []},
+    )
+    responses.add(
+        responses.GET,
+        "https://www.espn.com/espn/rss/nfl/news",
+        body="<rss><channel></channel></rss>",
+    )
+    responses.add(
+        responses.GET,
+        "https://www.nbcsports.com/nfl/profootballtalk.rss",
+        body="<rss><channel></channel></rss>",
+    )
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr("ff.cli.console", Console(width=200))
+    res = CliRunner().invoke(app, ["news", "--player", "Josh Allen"])
+    assert res.exit_code == 0, res.stdout
+    assert "practicing in full" in res.stdout
 
 
 @responses.activate

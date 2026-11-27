@@ -737,9 +737,18 @@ def validate_news_review(review: NewsReview) -> List[QACheck]:
         if not feed.ok
     }
     degraded_set = set(review.degraded_feeds)
-    warnings_text = " ".join(review.warnings).lower()
+    degradation_prefix = "news feed(s) degraded or unreachable:"
+    warned_providers: Set[str] = set()
+    for warning in review.warnings:
+        lower_w = warning.lower()
+        if lower_w.startswith(degradation_prefix):
+            providers_part = lower_w[len(degradation_prefix):].split(".", 1)[0]
+            warned_providers.update(
+                tok.strip() for tok in providers_part.split(",") if tok.strip()
+            )
+    required_warned = failed_providers | degraded_set
     degradation_consistent = failed_providers.issubset(degraded_set) and all(
-        p.lower() in warnings_text for p in failed_providers
+        p.lower() in warned_providers for p in required_warned
     )
     checks.append(QACheck(
         name="News Degradation Consistency",

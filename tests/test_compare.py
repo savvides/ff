@@ -75,3 +75,31 @@ def test_unowned_player_is_not_a_start_sit_option():
     with pytest.raises(ValueError, match="both players"):
         compare_players(["a", "b"], Roster(roster_id=1, player_ids=["a"]), {}, {}, ["WR"], META,
                         WeeklyContext(as_of=datetime.now(timezone.utc)), "2026", 3)
+
+
+def test_resolve_player_prefers_active_over_inactive_and_keeps_active_ties_ambiguous():
+    meta_active_vs_inactive = {
+        "4984": {"full_name": "Josh Allen", "position": "QB", "active": True},
+        "9991": {"full_name": "Josh Allen", "position": "OL", "active": False},
+    }
+    assert resolve_player("Josh Allen", meta_active_vs_inactive) == "4984"
+
+    meta_missing_active_flag = {
+        "4984": {"full_name": "Josh Allen", "position": "QB"},
+        "9991": {"full_name": "Josh Allen", "position": "OL", "active": False},
+    }
+    assert resolve_player("Josh Allen", meta_missing_active_flag) == "4984"
+
+    meta_two_active = {
+        "1": {"full_name": "Josh Allen", "active": True},
+        "2": {"full_name": "Josh Allen", "active": True},
+        "3": {"full_name": "Josh Allen", "active": False},
+    }
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_player("Josh Allen", meta_two_active)
+
+    meta_unique_inactive = {
+        "9991": {"full_name": "Andrew Luck", "position": "QB", "active": False},
+    }
+    assert resolve_player("Andrew Luck", meta_unique_inactive) == "9991"
+    assert resolve_player("9991", meta_unique_inactive) == "9991"

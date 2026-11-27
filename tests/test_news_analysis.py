@@ -164,3 +164,62 @@ def test_multi_keyword_flags_across_items_and_tiers_preserve_start_and_drop_warn
     drop_brief = build_player_brief("p2", {"full_name": "Stash WR"}, drop_items, feeds, as_of)
     drop_rev = build_news_review("drop", [drop_brief], as_of)
     assert any("elevated" in w.lower() for w in drop_rev.warnings)
+
+
+def test_decision_warnings_surface_matched_keywords():
+    as_of = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+    feeds = [FeedStatus(provider="sleeper", ok=True, item_count=1)]
+
+    # Teammate-mention case: Bijan Robinson flagged because description mentions Brian Robinson's injury
+    bijan_items = [
+        NewsItem(
+            provider="espn",
+            source="ESPN",
+            title="Bijan Robinson poised for heavy workload",
+            description="Teammate Brian Robinson missed practice with a knee injury.",
+            published=_ts(as_of, 40),
+        )
+    ]
+    bijan_brief = build_player_brief("p1", {"full_name": "Bijan Robinson"}, bijan_items, feeds, as_of)
+    for decision in ("trade", "start", "waiver"):
+        rev = build_news_review(decision, [bijan_brief], as_of)
+        assert any("(INJURY: injury)" in w for w in rev.warnings), f"{decision}: {rev.warnings}"
+
+    # Multi-keyword flag
+    multi_items = [
+        NewsItem(
+            provider="sleeper",
+            source="RotoWire",
+            title="Player ruled out with concussion",
+            published=_ts(as_of, 4),
+        )
+    ]
+    multi_brief = build_player_brief("p2", {"full_name": "Star WR"}, multi_items, feeds, as_of)
+    multi_trade = build_news_review("trade", [multi_brief], as_of)
+    assert any("(BREAKING, INJURY: ruled out/concussion)" in w for w in multi_trade.warnings)
+
+    # Split role keywords for start vs drop
+    split_items = [
+        NewsItem(provider="sleeper", source="RotoWire", title="Player named starter earlier", published=_ts(as_of, 30)),
+        NewsItem(provider="sleeper", source="RotoWire", title="Player benched for disciplinary reasons", published=_ts(as_of, 50)),
+    ]
+    split_brief = build_player_brief("p3", {"full_name": "Split QB"}, split_items, feeds, as_of)
+    start_rev = build_news_review("start", [split_brief], as_of)
+    assert any("(ROLE_CHANGE: benched)" in w for w in start_rev.warnings)
+    assert not any("named starter" in w for w in start_rev.warnings)
+    drop_rev = build_news_review("drop", [split_brief], as_of)
+    assert any("(ROLE_CHANGE: named starter)" in w for w in drop_rev.warnings)
+    assert not any("benched" in w for w in drop_rev.warnings)
+
+    # Waiver opportunity keywords
+    waiver_items = [
+        NewsItem(
+            provider="rss",
+            source="PFT",
+            title="Player signed and named starter",
+            published=_ts(as_of, 40),
+        )
+    ]
+    waiver_brief = build_player_brief("p4", {"full_name": "Waiver RB"}, waiver_items, feeds, as_of)
+    waiver_rev = build_news_review("waiver", [waiver_brief], as_of)
+    assert any("TRANSACTION: signed" in w and "ROLE_CHANGE: named starter" in w for w in waiver_rev.warnings)
