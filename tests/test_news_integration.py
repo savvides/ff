@@ -283,8 +283,8 @@ def test_cli_news_player_prefers_active_player_over_inactive_namesake(
         league_id=league["league_id"],
         user_id="u1",
         user_name="owner1",
-        season="2026",
-        format=Format(superflex=True, ppr=1.0, teams=12, is_dynasty=True),
+        season=2026,
+        format=Format(superflex=True, ppr=1.0, num_teams=12, is_dynasty=True),
     )
     monkeypatch.setattr("ff.cli._load", lambda: (cfg, _StubSleeper()))
     responses.add(
