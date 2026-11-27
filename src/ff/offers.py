@@ -205,10 +205,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     seasons, rounds = _pick_window(sc, cfg, league, years=args.years)
     ledger = {tp.roster_id: tp.picks for tp in pick_ledger(rosters, sc.traded_picks(cfg.league_id), book,
                                                            ranks, seasons=seasons, rounds=rounds)}
-    # League users carry display names only; the username is on each user record.
-    names = {u["user_id"]: (sc.user(u["user_id"]) or {}).get("username") or u.get("display_name")
-             for u in users}
-    user_of = {r.roster_id: names.get(r.owner_id or "", f"roster {r.roster_id}") for r in rosters}
+    team_of = {r.roster_id: r.team_name for r in rosters}
 
     def tier_of(original_roster_id: int) -> str:
         return pick_tier(ranks.get(original_roster_id), len(rosters))
@@ -219,7 +216,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     dropped = {str(t.get("player_id")) for t in sc.trending(kind="drop", limit=50)}
     my_origins: Dict[str, str] = {}
     my_assets = _roster_assets(book, my_val.assets, ledger.get(mine.roster_id, []), tier_of,
-                               lambda rid: "your own" if rid == mine.roster_id else f"from {user_of[rid]}",
+                               lambda rid: "your own" if rid == mine.roster_id else f"from {team_of[rid]}",
                                my_origins)
 
     def mine_named(tok: str) -> Optional[Asset]:
@@ -251,18 +248,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"values live: FantasyCalc + KTC (top {book.secondary_top:,}); calculators verified; "
           f"rule: under 10% in both markets and KTC says Fair; your needs: "
           f"{', '.join(sorted(needs)) or 'none below the league median'}")
-    for username in args.to or [user_of[r.roster_id] for r in rosters if r is not mine]:
-        roster = next((r for r in rosters if r is not mine and (
-            names.get(r.owner_id or "") == username or username.lower() in r.team_name.lower())), None)
+    for query in args.to or [r.team_name for r in rosters if r is not mine]:
+        roster = next((r for r in rosters if r is not mine and query.lower() in r.team_name.lower()), None)
         if roster is None:
-            print(f"\nno manager named {username}")
+            print(f"\nno manager named {query}")
             continue
-        username = f"{roster.team_name} ({user_of[roster.roster_id]})"
         their_origins: Dict[str, str] = {}
         target_rid = roster.roster_id
 
         def their_origin(rid: int) -> str:
-            return "their own" if rid == target_rid else f"theirs, from {user_of[rid]}"
+            return "their own" if rid == target_rid else f"theirs, from {team_of[rid]}"
 
         theirs = _roster_assets(
             book, val_of[roster.roster_id].assets, ledger.get(roster.roster_id, []), tier_of,
@@ -272,7 +267,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       is_dynasty=cfg.format.is_dynasty, max_age=args.max_age, limit=args.limit,
                       my_players=my_players, roster_positions=roster_positions, needs=needs,
                       dropped=dropped)
-        print(f"\n{username}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
+        print(f"\n{roster.team_name}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
         for r in rows:
             for a in r["assets"]:
                 if not a.is_pick:

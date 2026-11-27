@@ -74,11 +74,17 @@ def test_picks_team_detail(fake_clients, league):
     _write_config(league)
     result = runner.invoke(app, ["picks", "Dynasty Warriors"])
     assert result.exit_code == 0, result.output
+    assert "@alice" in result.output
     assert "9,100" in result.output
     assert "from Gridiron Kings" in result.output  # acquired pick names its origin
+    assert "@bob" in result.output
     # The tier COLUMN itself, not the footer text: own 2027 1st row reads
     # own | mid | 3,100. (The footer always contains "early/mid/late".)
     assert re.search(r"own\s+│\s+mid\s+│\s+3,100", result.output)
+
+    by_user = runner.invoke(app, ["picks", "@alice"])
+    assert by_user.exit_code == 0, by_user.output
+    assert "Dynasty Warriors (@alice)" in by_user.output
 
 
 def test_waivers_pool_size(fake_clients, league, trending, monkeypatch):
