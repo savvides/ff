@@ -263,6 +263,59 @@ def test_cli_trade_and_news_player_run_mandatory_news_review(
 
 
 @responses.activate
+def test_cli_news_player_prefers_active_player_over_inactive_namesake(
+    monkeypatch, league, players_meta
+):
+    import ff.news
+
+    monkeypatch.setattr("ff.cli.review_players", ff.news.review_players)
+    meta_with_inactive = {
+        **players_meta,
+        "4984": {**players_meta["4984"], "active": True},
+        "9991": {"full_name": "Josh Allen", "position": "OL", "team": None, "active": False},
+    }
+
+    class _StubSleeper:
+        def players(self, fresh=False):
+            return meta_with_inactive
+
+    cfg = Config(
+        league_id=league["league_id"],
+        user_id="u1",
+        user_name="owner1",
+        season="2026",
+        format=Format(superflex=True, ppr=1.0, teams=12, is_dynasty=True),
+    )
+    monkeypatch.setattr("ff.cli._load", lambda: (cfg, _StubSleeper()))
+    responses.add(
+        responses.GET,
+        "https://api.sleeper.com/players/nfl/4984/news",
+        json=[{"source": "RotoWire", "published": 1795400000000, "metadata": {"title": "Josh Allen practicing in full"}}],
+    )
+    responses.add(
+        responses.GET,
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        json={"articles": []},
+    )
+    responses.add(
+        responses.GET,
+        "https://www.espn.com/espn/rss/nfl/news",
+        body="<rss><channel></channel></rss>",
+    )
+    responses.add(
+        responses.GET,
+        "https://www.nbcsports.com/nfl/profootballtalk.rss",
+        body="<rss><channel></channel></rss>",
+    )
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr("ff.cli.console", Console(width=200))
+    res = CliRunner().invoke(app, ["news", "--player", "Josh Allen"])
+    assert res.exit_code == 0, res.stdout
+    assert "practicing in full" in res.stdout
+
+
+@responses.activate
 def test_dispatcher_attaches_news_review_and_supports_get_player_news(
     monkeypatch, book, league, rosters_raw, players_meta
 ):
