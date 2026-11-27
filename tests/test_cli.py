@@ -806,3 +806,189 @@ def test_plan_command(fake_clients, league):
     assert result.exit_code == 0, result.output
     assert "stance:" in result.output
     assert "trades" in result.output
+
+
+def test_cli_trade_dp_default_and_fc_only_and_tep_note(fake_clients, league, book, monkeypatch):
+    from ff.values import ValueBook
+
+    dp_map = {"7564": 9000, "9221": 8100, "8138": 8600, "4984": 7000}
+    dp_assets = [a.model_copy(update={"secondary_value": dp_map.get(a.id)}) for a in book.assets]
+    dp_book = ValueBook(
+        dp_assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+        secondary_notes=["DynastyProcess values do not adjust for TE premium"],
+    )
+
+    class DpValuesClient:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
+            return dp_book if (include_secondary and include_ktc) else book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: DpValuesClient())
+    _write_config(league)
+
+    res = runner.invoke(app, ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson"])
+    assert res.exit_code == 0, res.output
+    assert "DP" in res.output and "DynastyProcess" in res.output
+    assert res.output.count("DynastyProcess values do not adjust for TE premium") == 1
+
+    res_fc = runner.invoke(
+        app,
+        ["trade", "--give", "Ja'Marr Chase", "--get", "Bijan Robinson", "--fc-only"],
+    )
+    assert res_fc.exit_code == 0, res_fc.output
+    assert "FC-only mode" in res_fc.output
+    assert "PASS" in res_fc.output
+    assert "DynastyProcess values do not adjust for TE premium" not in res_fc.output
+
+
+def test_cli_trade_ktc_file_loads_ktc_with_no_dp_caveat(
+    fake_clients, league, fc_entries, tmp_path, monkeypatch,
+):
+    import json
+    from ff.values import ValuesClient as RealValuesClient
+
+    pool_file = tmp_path / "ktc_pool.json"
+    pool_file.write_text(json.dumps([
+        {"playerName": "Ja'Marr Chase", "position": "WR", "sleeper_id": "7564",
+         "superflexValues": {"value": 9600}},
+        {"playerName": "Jahmyr Gibbs", "position": "RB", "sleeper_id": "9221",
+         "superflexValues": {"value": 8400}},
+        {"playerName": "Bijan Robinson", "position": "RB", "sleeper_id": "8138",
+         "superflexValues": {"value": 8900}},
+        {"playerName": "Brock Bowers", "position": "TE", "sleeper_id": "6666",
+         "superflexValues": {"value": 6100, "tep": {"value": 7200}}},
+    ]), encoding="utf-8")
+
+    seen_ktc_files = []
+
+    def _spy_vc(*args, **kwargs):
+        seen_ktc_files.append(kwargs.get("ktc_file"))
+        return RealValuesClient(*args, **kwargs)
+
+    monkeypatch.setattr("ff.cli.ValuesClient", _spy_vc)
+    monkeypatch.setattr("ff.values.client.get_json", lambda *a, **k: fc_entries)
+    _write_config(league)  # league has bonus_rec_te = 0.5 -> TE+ tier
+
+    res = runner.invoke(
+        app,
+        ["trade", "--give", "Jahmyr Gibbs", "--get", "Brock Bowers", "--ktc-file", str(pool_file)],
+    )
+    assert res.exit_code == 0, res.output
+    assert seen_ktc_files[-1] == pool_file
+    assert "KTC" in res.output
+    assert "7,200" in res.output
+    assert "DynastyProcess values do not adjust for TE premium" not in res.output
+
+    res_ktc = runner.invoke(
+        app,
+        ["trade", "--give", "Jahmyr Gibbs", "--get", "Brock Bowers",
+         "--market", "ktc", "--ktc-file", str(pool_file)],
+    )
+    assert res_ktc.exit_code == 0, res_ktc.output
+    assert "KTC" in res_ktc.output
+    assert "7,200" in res_ktc.output
+    assert "DynastyProcess values do not adjust for TE premium" not in res_ktc.output
+
+
+def test_cli_movers_arbitrage_dp_label(fake_clients, league, book, monkeypatch):
+    from ff.values import ValueBook
+
+    dp_map = {"7564": 9600, "8138": 8300, "9221": 8400, "4984": 7200, "6666": 6000}
+    dp_assets = [a.model_copy(update={"secondary_value": dp_map.get(a.id)}) for a in book.assets]
+    dp_book = ValueBook(
+        dp_assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+        secondary_notes=["DynastyProcess values do not adjust for TE premium"],
+    )
+
+    class DpValuesClient:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
+            return dp_book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: DpValuesClient())
+    _write_config(league)
+
+    res = runner.invoke(app, ["movers", "--arbitrage"])
+    assert res.exit_code == 0, res.output
+    assert "DP" in res.output
+    assert "DP@FC" in res.output
+    assert "Jahmyr Gibbs" in res.output
+    assert res.output.count("DynastyProcess values do not adjust for TE premium") == 1
+
+
+def test_cli_values_dp_and_ktc_file(fake_clients, league, fc_entries, tmp_path, monkeypatch):
+    import json
+    from ff.values import ValueBook, ValuesClient as RealValuesClient
+    from ff.values.client import _asset_from_entry
+
+    dp_map = {"7564": 9000, "9221": 8100, "8138": 8600, "4984": 7000, "6666": 5900}
+    dp_book = ValueBook(
+        [_asset_from_entry(e, secondary_map=dp_map) for e in fc_entries],
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+        secondary_notes=["DynastyProcess values do not adjust for TE premium"],
+    )
+
+    class DpValuesClient:
+        def fetch(self, fmt, include_secondary=True, include_ktc=True, **kwargs):
+            return dp_book
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: DpValuesClient())
+    _write_config(league)
+
+    res_dp = runner.invoke(app, ["values", "--market", "dp"])
+    assert res_dp.exit_code == 0, res_dp.output
+    assert "DynastyProcess" in res_dp.output
+    assert "DP" in res_dp.output
+    assert res_dp.output.count("DynastyProcess values do not adjust for TE premium") == 1
+
+    pool_file = tmp_path / "ktc_pool.json"
+    pool_file.write_text(json.dumps([
+        {"playerName": "Brock Bowers", "position": "TE", "sleeper_id": "6666",
+         "superflexValues": {"value": 6100, "tep": {"value": 7200}}},
+    ]), encoding="utf-8")
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: RealValuesClient(*a, **k))
+    monkeypatch.setattr("ff.values.client.get_json", lambda *a, **k: fc_entries)
+
+    res_ktc = runner.invoke(app, ["values", "--market", "ktc", "--ktc-file", str(pool_file), "-p", "TE"])
+    assert res_ktc.exit_code == 0, res_ktc.output
+    assert "KTC" in res_ktc.output
+    assert "7,200" in res_ktc.output
+    assert "DynastyProcess values do not adjust for TE premium" not in res_ktc.output
+
+
+def test_cli_offers_forwards_market_ktc_file_and_fc_only(fake_clients, league, tmp_path, monkeypatch):
+    import ff.offers as offers_mod
+
+    _write_config(league)
+    seen = []
+
+    def _stub_main(argv=None):
+        seen.append(list(argv or []))
+        return 0
+
+    monkeypatch.setattr(offers_mod, "main", _stub_main)
+    pool_file = tmp_path / "ktc_pool.json"
+    pool_file.write_text("[]", encoding="utf-8")
+
+    res = runner.invoke(
+        app,
+        ["offers", "--sell", "Ja'Marr Chase", "--market", "ktc", "--ktc-file", str(pool_file), "--fc-only"],
+    )
+    assert res.exit_code == 0, res.output
+    assert seen == [[
+        "--max-age", "26.0", "--limit", "5", "--market", "ktc",
+        "--ktc-file", str(pool_file), "--fc-only", "--sell", "Ja'Marr Chase",
+    ]]
+
+    bad = runner.invoke(app, ["offers", "--sell", "Ja'Marr Chase", "--market", "invalid"])
+    assert bad.exit_code == 1
+    assert "--market must be dp or ktc" in bad.output
