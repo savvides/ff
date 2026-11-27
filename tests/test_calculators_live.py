@@ -49,3 +49,9 @@ def test_an_unreachable_site_cannot_be_verified():
     responses.add(responses.GET, f"{FC}/trade-calculator", status=404)
     problems = live.check_calculators(KNOWN_KTC_PAGE)
     assert problems == ["could not verify FantasyCalc's calculator code (HTTPError)"]
+
+
+@responses.activate
+def test_check_calculators_skips_ktc_when_check_ktc_false():
+    responses.add(responses.GET, f"{FC}/trade-calculator", body=_fc_page(FINGERPRINTS["fc"]["main"]))
+    assert live.check_calculators('<script src="/js/site.min.js?v=DRIFTED"></script>', check_ktc=False) == []

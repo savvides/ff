@@ -96,7 +96,7 @@ async function loadFantasyCalc() {
 
 // ------------------------------------------------------------------------ KTC
 
-const BRANCH_TAG = /adjustment\.value=(?!=)/g;
+const BRANCH_TAG = /calcAdjustment\.value=(?!=)/g;
 
 async function loadKtc() {
   const page = await text(`${KTC_SITE}/trade-calculator`);
@@ -107,17 +107,17 @@ async function loadKtc() {
     if (!re.test(js)) throw new Error(`KTC ${what} changed`);
   }
   let tag = 0;
-  const adjust = one(js, "adjustPackageNew").replace(BRANCH_TAG, () => `__hit(${tag++}),adjustment.value=`);
+  const adjust = one(js, "calcAdjustPackageNew").replace(BRANCH_TAG, () => `__hit(${tag++}),calcAdjustment.value=`);
   const branchCount = tag;
   const noop = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => "" : noop), apply: () => noop });
   const ctx = {
     Math, JSON, parseInt, parseFloat, console,
-    $: noop, d3: noop, setURLParams() {}, displayAdjustment() {}, displayPlayerToEven() {},
-    tradeExamples() {}, tradeGraphs() {}, clearGraphs() {},
+    $: noop, d3: noop, dtcSetURLParams() {}, displayAdjustment() {}, displayPlayerToEven() {},
+    tradeExamples() {}, tradeGraphs() {}, clearGraphs() {}, tcEvaluateInsights() {},
     updateSummary(t, r) { ctx.__summary = [t, r]; },
     ALGOTOUSE: 2, MAXPLAYERVAL: 1e4, CURTRADE: 0,
     tcFilters: { variance: 5, pickVal: 0, leagueSize: 12 },
-    adjustment: { side: -1, value: 0, display: false },
+    calcAdjustment: { side: -1, value: 0, display: false },
     playersArray: [{ value: 9999 }],
     __hit(i) { ctx.__branch.push(i); },
     __branch: [],
@@ -140,7 +140,7 @@ async function loadKtc() {
     ctx.__branch = []; ctx.__summary = null; ctx.CURTRADE = 0;
     let error = null;
     try { vm.runInContext("evaluateTrade(true, false)", ctx); } catch (e) { error = String(e.message || e); }
-    const a = ctx.adjustment;
+    const a = ctx.calcAdjustment;
     return {
       adj1: ctx.teamOne.adjust, adj2: ctx.teamTwo.adjust, side: a.side,
       shown: Boolean(a.display) && (s1.length > 1 || s2.length > 1),

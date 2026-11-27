@@ -13,7 +13,7 @@ which the offer rule turns into "cannot judge".
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import Callable, List, Tuple
 
 from ff.analysis.calculators import FINGERPRINTS, fingerprint_problems
 from ff.core.http import get_text
@@ -22,12 +22,14 @@ FC_SITE = "https://fantasycalc.com"
 KTC_SITE = "https://keeptradecut.com"
 
 
-def check_calculators(ktc_html: str = "") -> List[str]:
+def check_calculators(ktc_html: str = "", *, check_ktc: bool = True) -> List[str]:
     """Problems that mean ff's calculator ports may no longer match the sites.
     Empty = verified. `ktc_html` is the KTC page ff fetched for values."""
+    checks: List[Tuple[str, Callable[[], List[str]]]] = [("FantasyCalc", _check_fantasycalc)]
+    if check_ktc:
+        checks.append(("KTC", lambda: _check_ktc(ktc_html)))
     problems: List[str] = []
-    for label, check in (("FantasyCalc", _check_fantasycalc),
-                         ("KTC", lambda: _check_ktc(ktc_html))):
+    for label, check in checks:
         try:
             problems += check()
         except Exception as err:  # unreachable site, bad TLS, parse failure
