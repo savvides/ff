@@ -203,3 +203,98 @@ def test_news_client_uses_no_retry_http_session(monkeypatch):
 
     review = review_players(["100"], players_meta, "start", news_client=NewsClient())
     assert review.degraded_feeds == []
+
+
+@responses.activate
+def test_espn_fallback_handles_non_string_fields_without_crashing():
+    players_meta = {
+        "100": {
+            "full_name": "A.J. Brown",
+            "position": "WR",
+            "team": "PHI",
+        }
+    }
+    responses.add(responses.GET, "https://api.sleeper.com/players/nfl/100/news", json=[])
+    responses.add(
+        responses.GET,
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        json={
+            "articles": [
+                {
+                    "headline": 123,
+                    "title": ["bad"],
+                    "description": {"bad": 1},
+                    "byline": 456,
+                    "published": 789,
+                    "links": 999,
+                },
+                {
+                    "headline": "A.J. Brown shines at practice",
+                    "description": ["non-string"],
+                    "byline": {"name": "x"},
+                    "published": 12345,
+                    "links": {"web": {"href": 42}},
+                    "link": "https://espn.com/aj-fallback",
+                },
+            ]
+        },
+    )
+    responses.add(
+        responses.GET,
+        "https://www.espn.com/espn/rss/nfl/news",
+        body="<rss><channel></channel></rss>",
+    )
+    responses.add(
+        responses.GET,
+        "https://www.nbcsports.com/nfl/profootballtalk.rss",
+        body="<rss><channel></channel></rss>",
+    )
+
+    as_of = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+    review = review_players(["100"], players_meta, "trade", news_client=NewsClient(), as_of=as_of)
+    assert review.degraded_feeds == []
+    assert len(review.briefs[0].items) == 1
+    item = review.briefs[0].items[0]
+    assert item.title == "A.J. Brown shines at practice"
+    assert item.source == "ESPN"
+    assert item.description == ""
+    assert item.published is None
+    assert item.url == "https://espn.com/aj-fallback"
+
+
+@responses.activate
+def test_espn_fallback_degrades_cleanly_on_parse_error(monkeypatch):
+    players_meta = {
+        "100": {
+            "full_name": "A.J. Brown",
+            "position": "WR",
+            "team": "PHI",
+        }
+    }
+    responses.add(responses.GET, "https://api.sleeper.com/players/nfl/100/news", json=[])
+    responses.add(
+        responses.GET,
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+        json={"articles": [{"headline": "A.J. Brown update"}]},
+    )
+    responses.add(
+        responses.GET,
+        "https://www.espn.com/espn/rss/nfl/news",
+        body="<rss><channel></channel></rss>",
+    )
+    responses.add(
+        responses.GET,
+        "https://www.nbcsports.com/nfl/profootballtalk.rss",
+        body="<rss><channel></channel></rss>",
+    )
+
+    def _boom(_article):
+        raise AttributeError("bad espn field")
+
+    monkeypatch.setattr("ff.news.client._espn_article_to_item", _boom)
+
+    review = review_players(["100"], players_meta, "trade", news_client=NewsClient())
+    assert "espn" in review.degraded_feeds
+    espn_feed = next(f for f in review.briefs[0].feeds if f.provider == "espn")
+    assert espn_feed.ok is False
+    assert "bad espn field" in (espn_feed.error or "")

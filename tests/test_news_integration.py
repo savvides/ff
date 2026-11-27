@@ -18,7 +18,10 @@ def test_render_news_review_shows_banner_warnings_and_quiet_fallback():
                 player_name="Quiet Player",
                 items=[],
                 flags=[],
-                feeds=[FeedStatus(provider="sleeper", ok=False, error="500")],
+                feeds=[
+                    FeedStatus(provider="sleeper", ok=False, error="500"),
+                    FeedStatus(provider="espn", ok=True, item_count=0),
+                ],
                 warnings=[],
             ),
             PlayerNewsBrief(
@@ -55,6 +58,69 @@ def test_render_news_review_shows_banner_warnings_and_quiet_fallback():
     assert "sleeper" in out.lower()
     assert "No recent news (14d)" in out
     assert "Active Player named starter" in out
+
+
+def test_render_news_review_shows_unavailable_when_all_feeds_fail():
+    as_of = datetime(2026, 11, 24, tzinfo=timezone.utc)
+    unavailable_brief = PlayerNewsBrief(
+        player_id="1",
+        player_name="Unavailable Player",
+        items=[],
+        flags=[],
+        feeds=[
+            FeedStatus(provider="sleeper", ok=False, error="500"),
+            FeedStatus(provider="espn", ok=False, error="500"),
+            FeedStatus(provider="rss", ok=False, error="timeout"),
+        ],
+        warnings=[],
+    )
+    no_feeds_brief = PlayerNewsBrief(
+        player_id="2",
+        player_name="No Feeds Player",
+        items=[],
+        flags=[],
+        feeds=[],
+        warnings=[],
+    )
+
+    combined = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[unavailable_brief, no_feeds_brief],
+        degraded_feeds=["sleeper", "espn", "rss"],
+        warnings=[],
+    )
+    c_combined = Console(record=True, width=120)
+    render_news_review(combined, c_combined)
+    out_combined = c_combined.export_text()
+    assert "News unavailable (all feeds failed)" in out_combined
+    assert "No recent news (14d)" in out_combined
+
+    only_unavailable = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[unavailable_brief],
+        degraded_feeds=["sleeper", "espn", "rss"],
+        warnings=[],
+    )
+    c_unavail = Console(record=True, width=120)
+    render_news_review(only_unavailable, c_unavail)
+    out_unavail = c_unavail.export_text()
+    assert "News unavailable (all feeds failed)" in out_unavail
+    assert "No recent news (14d)" not in out_unavail
+
+    only_no_feeds = NewsReview(
+        decision="trade",
+        as_of=as_of,
+        briefs=[no_feeds_brief],
+        degraded_feeds=[],
+        warnings=[],
+    )
+    c_nofeeds = Console(record=True, width=120)
+    render_news_review(only_no_feeds, c_nofeeds)
+    out_nofeeds = c_nofeeds.export_text()
+    assert "No recent news (14d)" in out_nofeeds
+    assert "News unavailable" not in out_nofeeds
 
 
 def test_render_news_review_escapes_brackets_and_strips_raw_markup_tags():
