@@ -56,7 +56,7 @@ def _check_fantasycalc() -> List[str]:
 
 def _check_ktc(ktc_html: str) -> List[str]:
     if not ktc_html:
-        return []  # no KTC values at all; the offer rule already cannot judge
+        ktc_html = get_text(f"{KTC_SITE}/trade-calculator", ttl=0)
     version = re.search(r"site\.min\.js\?v=([\w-]+)", ktc_html)
     if not version:
         return ["KTC's calculator page changed (no site.min.js version found)"]

@@ -304,6 +304,27 @@ def test_value_book_resolve_tiered_fc_picks_fall_back_to_flat_dp_round():
     assert resolved_unpriced.secondary_value is None
     assert resolved_unpriced.secondary_approx is False
 
+    # When FC only has tiered "2027 1 mid" and DP has both "2027 1 mid" and flat "2027 1",
+    # resolving a flat ask "2027 1st" must prefer DP's exact flat "2027 1" value.
+    mid_2027 = Asset(
+        id="2027 1 mid",
+        name="2027 1st (Mid)",
+        kind="pick",
+        position="PICK",
+        value=3400,
+        secondary_value=3200,
+    )
+    dp_both_2027 = ValueBook(
+        [mid_2027],
+        secondary_map={"2027 1 mid": 3200, "2027 1": 2374},
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+    resolved_2027 = dp_both_2027.resolve("2027 1st")
+    assert resolved_2027 is not None
+    assert resolved_2027.secondary_value == 2374
+    assert resolved_2027.secondary_approx is False
+
 
 def test_value_book_legacy_none_source_does_not_pull_flat_ktc_key_as_exact():
     flat_fc = Asset(id="2028 1", name="2028 1st", kind="pick", position="PICK", value=2362)

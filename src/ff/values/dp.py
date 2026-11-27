@@ -29,12 +29,17 @@ def _empty_snapshot() -> SecondarySnapshot:
     return SecondarySnapshot(source="dp", label="DynastyProcess", values={})
 
 
+def _clean_id(raw: Optional[str]) -> str:
+    val = (raw or "").strip()
+    return "" if val.upper() == "NA" else val
+
+
 def _parse_id_map(ids_csv: str) -> Dict[str, str]:
     """Map non-empty `fantasypros_id` -> `sleeper_id` from db_playerids.csv."""
     mapping: Dict[str, str] = {}
     for row in csv.DictReader(io.StringIO(ids_csv)):
-        fp_id = (row.get("fantasypros_id") or "").strip()
-        sleeper_id = (row.get("sleeper_id") or "").strip()
+        fp_id = _clean_id(row.get("fantasypros_id"))
+        sleeper_id = _clean_id(row.get("sleeper_id"))
         if fp_id and sleeper_id:
             mapping[fp_id] = sleeper_id
     return mapping
@@ -68,14 +73,19 @@ class DynastyProcessClient:
         try:
             values_text = get_text(self.values_url, ttl=values_ttl)
             fetched_at = _cache_file(self.values_url, None).stat().st_mtime
-            ids_text = get_text(self.ids_url, ttl=ids_ttl)
-            fp_to_sleeper = _parse_id_map(ids_text)
         except Exception as err:
-            logger.warning("Failed to fetch DynastyProcess data: %s", err)
+            logger.warning("Failed to fetch DynastyProcess values: %s", err)
             return _empty_snapshot()
 
         if not values_text.strip():
             return _empty_snapshot()
+
+        fp_to_sleeper: Dict[str, str] = {}
+        try:
+            ids_text = get_text(self.ids_url, ttl=ids_ttl)
+            fp_to_sleeper = _parse_id_map(ids_text)
+        except Exception as err:
+            logger.warning("Failed to fetch DynastyProcess player IDs: %s", err)
 
         is_sf = True if fmt is None or fmt.superflex else False
         val_col = "value_2qb" if is_sf else "value_1qb"
@@ -100,8 +110,8 @@ class DynastyProcessClient:
                 else:
                     norm = normalize_name(name) if name else None
                     if norm:
-                        values[norm] = val
-                    fp_id = (row.get("fp_id") or "").strip()
+                        values[norm] = max(values.get(norm, 0), val)
+                    fp_id = _clean_id(row.get("fp_id"))
                     if fp_id and fp_id in fp_to_sleeper:
                         values[fp_to_sleeper[fp_id]] = val
         except Exception as err:

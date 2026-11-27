@@ -55,3 +55,21 @@ def test_an_unreachable_site_cannot_be_verified():
 def test_check_calculators_skips_ktc_when_check_ktc_false():
     responses.add(responses.GET, f"{FC}/trade-calculator", body=_fc_page(FINGERPRINTS["fc"]["main"]))
     assert live.check_calculators('<script src="/js/site.min.js?v=DRIFTED"></script>', check_ktc=False) == []
+    assert live.check_calculators("", check_ktc=False) == []
+    assert len(responses.calls) == 2  # only FantasyCalc page requests, never KTC
+
+
+@responses.activate
+def test_check_calculators_fetches_ktc_page_when_html_empty_and_check_ktc_true():
+    responses.add(responses.GET, f"{FC}/trade-calculator", body=_fc_page(FINGERPRINTS["fc"]["main"]))
+    responses.add(responses.GET, f"{KTC}/trade-calculator", body=KNOWN_KTC_PAGE)
+    assert live.check_calculators("", check_ktc=True) == []
+
+    responses.replace(responses.GET, f"{KTC}/trade-calculator", body='<script src="/js/site.min.js?v=NEWKTC"></script>')
+    responses.add(responses.GET, f"{KTC}/js/site.min.js?v=NEWKTC", body="var ALGOTOUSE=3;")
+    problems = live.check_calculators("", check_ktc=True)
+    assert any(p.startswith("KTC") and "changed" in p for p in problems)
+
+    responses.replace(responses.GET, f"{KTC}/trade-calculator", status=503)
+    unreachable = live.check_calculators("", check_ktc=True)
+    assert unreachable == ["could not verify KTC's calculator code (HTTPError)"]

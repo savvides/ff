@@ -878,8 +878,11 @@ def test_cli_trade_ktc_file_loads_ktc_with_no_dp_caveat(
     )
     assert res.exit_code == 0, res.output
     assert seen_ktc_files[-1] == pool_file
+    assert "FC" in res.output
     assert "KTC" in res.output
     assert "7,200" in res.output
+    assert "offer rule:" in res.output
+    assert "needs both markets" not in res.output
     assert "DynastyProcess values do not adjust for TE premium" not in res.output
 
     res_ktc = runner.invoke(
@@ -888,9 +891,39 @@ def test_cli_trade_ktc_file_loads_ktc_with_no_dp_caveat(
          "--market", "ktc", "--ktc-file", str(pool_file)],
     )
     assert res_ktc.exit_code == 0, res_ktc.output
+    assert "FC" in res_ktc.output
     assert "KTC" in res_ktc.output
     assert "7,200" in res_ktc.output
+    assert "offer rule:" in res_ktc.output
+    assert "needs both markets" not in res_ktc.output
     assert "DynastyProcess values do not adjust for TE premium" not in res_ktc.output
+
+
+def test_cli_trade_invalid_or_missing_ktc_file_errors_cleanly(
+    fake_clients, league, fc_entries, tmp_path, monkeypatch,
+):
+    from ff.values import ValuesClient as RealValuesClient
+
+    monkeypatch.setattr("ff.cli.ValuesClient", lambda *a, **k: RealValuesClient(*a, **k))
+    monkeypatch.setattr("ff.values.client.get_json", lambda *a, **k: fc_entries)
+    _write_config(league)
+
+    missing = tmp_path / "missing.json"
+    res_missing = runner.invoke(
+        app,
+        ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--ktc-file", str(missing)],
+    )
+    assert res_missing.exit_code == 1
+    assert "KTC pool file" in res_missing.output
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    res_bad = runner.invoke(
+        app,
+        ["trade", "--give", "Jahmyr Gibbs", "--get", "Bijan Robinson", "--ktc-file", str(bad)],
+    )
+    assert res_bad.exit_code == 1
+    assert "KTC pool file" in res_bad.output
 
 
 def test_cli_movers_arbitrage_dp_label(fake_clients, league, book, monkeypatch):

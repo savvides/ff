@@ -74,3 +74,36 @@ def test_dp_graceful_degradation_on_http_error():
     responses.add(responses.GET, DP_VALUES_URL, status=500)
     snap = DynastyProcessClient().fetch_snapshot(Format(superflex=True), use_cache=False)
     assert snap.source == "dp" and snap.label == "DynastyProcess" and snap.values == {}
+
+
+@responses.activate
+def test_dp_filters_r_na_sentinels_and_keeps_max_duplicate_name():
+    values_csv = (
+        '"player","pos","team","age","draft_year","ecr_1qb","ecr_2qb","ecr_pos","value_1qb","value_2qb","scrape_date","fp_id"\n'
+        '"Isaiah Williams","WR","DET",24.0,2024,99.0,99.0,50.0,300,350,"2026-11-27","NA"\n'
+        '"Isaiah Williams","WR","CIN",25.0,2024,99.0,99.0,50.0,100,120,"2026-11-27","na"\n'
+        '"Real Player","RB","KC",23.0,2025,20.0,20.0,10.0,4000,4200,"2026-11-27","77777"\n'
+    )
+    ids_csv = (
+        "mfl_id,fantasypros_id,sleeper_id,name\n"
+        "10001,NA,99999,Unrelated Rookie\n"
+        "10002,77777,NA,Real Player\n"
+    )
+    responses.add(responses.GET, DP_VALUES_URL, body=values_csv, status=200)
+    responses.add(responses.GET, DP_PLAYERIDS_URL, body=ids_csv, status=200)
+    snap = DynastyProcessClient().fetch_snapshot(Format(superflex=True), use_cache=False)
+    assert "NA" not in snap.values
+    assert "na" not in snap.values
+    assert "99999" not in snap.values
+    assert snap.values["isaiah williams"] == 350
+    assert snap.values["real player"] == 4200
+
+
+@responses.activate
+def test_dp_playerids_http_error_still_returns_name_and_pick_values():
+    responses.add(responses.GET, DP_VALUES_URL, body=VALUES_CSV, status=200)
+    responses.add(responses.GET, DP_PLAYERIDS_URL, status=500)
+    snap = DynastyProcessClient().fetch_snapshot(Format(superflex=True), use_cache=False)
+    assert snap.values["michael pittman"] == 461
+    assert snap.values["2028 1"] == 1899
+    assert "6819" not in snap.values

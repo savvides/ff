@@ -167,6 +167,17 @@ def test_arbitrage_classifications():
     assert TradeEvaluation(side_a=side_a, side_b=side_b).arbitrage_label() == "Fair"
     assert TradeEvaluation(side_a=side_a, side_b=side_b).secondary_arbitrage_label() == "Fair"
 
+    # 6. DP vs KTC fairness in the 5%-9.5% larger-side gap range:
+    # 4600 vs 5000 -> secondary_pct_diff = 8.0%, secondary_site_pct = 4.17%
+    loss_a = TradeSide(assets=[Asset(id="1", name="A", value=5000, secondary_value=4600)])
+    loss_b = TradeSide(assets=[Asset(id="2", name="B", value=5000, secondary_value=5000)])
+    assert TradeEvaluation(side_a=loss_a, side_b=loss_b, secondary_source="dp").secondary_arbitrage_label() == "Consensus Loss"
+    assert TradeEvaluation(side_a=loss_a, side_b=loss_b, secondary_source="ktc").secondary_arbitrage_label() == "Fair"
+
+    win_a = TradeSide(assets=[Asset(id="1", name="A", value=5000, secondary_value=5000)])
+    win_b = TradeSide(assets=[Asset(id="2", name="B", value=5000, secondary_value=4600)])
+    assert TradeEvaluation(side_a=win_a, side_b=win_b, secondary_source="dp").secondary_arbitrage_label() == "Hype Arbitrage"
+
 
 def test_arbitrage_mover_secondary_value():
     asset = Asset(id="1", name="Bijan Robinson", value=7000, secondary_value=7500)

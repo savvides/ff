@@ -591,7 +591,10 @@ class TradeEvaluation(BaseModel):
         if self.secondary_delta is None or self.secondary_pct_diff is None:
             return None
         fc_fair = self.is_fair(threshold_pct)
-        sec_fair = self.secondary_is_fair(threshold_pct)
+        if self.effective_secondary_source() == "dp":
+            sec_fair = self.secondary_pct_diff <= threshold_pct
+        else:
+            sec_fair = self.secondary_is_fair(threshold_pct)
 
         if fc_fair and sec_fair:
             return "Fair"

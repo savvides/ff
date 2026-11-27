@@ -202,11 +202,14 @@ class ValueBook:
                 return self.pick_at_tier(m.group(1), int(m.group(2)), m.group(3))
             if f"{pk} mid" in self.picks:
                 mid = self.picks[f"{pk} mid"]
-                m = re.match(r"(20\d{2}) ([1-9])$", pk)
-                if m:
-                    fallback = self._flat_pick_fallback(mid, m.group(1), m.group(2))
-                    if fallback is not None:
-                        return fallback
+                if (
+                    self.secondary_source not in (None, "ktc")
+                    and re.match(r"(20\d{2}) ([1-9])$", pk)
+                    and pk in self.secondary_map
+                ):
+                    return mid.model_copy(
+                        update={"secondary_value": self.secondary_map[pk], "secondary_approx": False}
+                    )
                 mid_copy = mid.model_copy()
                 mid_copy.secondary_approx = mid_copy.secondary_value is not None
                 return mid_copy

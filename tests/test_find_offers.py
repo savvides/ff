@@ -286,3 +286,45 @@ def test_offers_main_dp_skips_2029_picks_with_note_and_prints_tep_caveat(
     assert "2029" in out and "skipped" in out.lower()
     assert out.count("DynastyProcess values do not adjust for TE premium") == 1
     assert "Bijan Robinson" in out
+
+
+def test_offers_main_missing_ktc_file_errors_cleanly(
+    monkeypatch, capsys, tmp_path, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book, fc_entries,
+):
+    from ff.values import ValuesClient as RealValuesClient
+
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, book)
+    monkeypatch.setattr(find_offers, "ValuesClient", RealValuesClient)
+    monkeypatch.setattr("ff.values.client.get_json", lambda *a, **k: fc_entries)
+
+    rc = find_offers.main(["--sell", "Ja'Marr Chase", "--ktc-file", str(tmp_path / "missing.json")])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "Invalid or missing KTC pool file" in out
+
+
+def test_offers_main_unpriced_2029_sell_pick_explains_dp_gap(
+    monkeypatch, capsys, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from ff.values import ValueBook
+
+    dp_map = {"7564": 9000, "8138": 8900, "2027 2": 1500, "2028 2": 1300}
+    assets = [a.model_copy(update={"secondary_value": dp_map.get(a.id)}) for a in book.assets]
+    assets.append(Asset(id="2029 2", name="2029 2nd", kind="pick", position="PICK",
+                        value=1200, secondary_value=None))
+    dp_book = ValueBook(
+        assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+    )
+    _stub_offers_env(monkeypatch, league, rosters_raw, users_raw, players_meta,
+                     traded_picks, trending, dp_book)
+
+    rc = find_offers.main(["--sell", "2029 2nd", "--years", "3"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "on your roster in FantasyCalc, but unpriced in DynastyProcess (pass --fc-only or --market ktc)" in out
+    assert "not on your roster" not in out

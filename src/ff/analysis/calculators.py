@@ -294,7 +294,7 @@ def ktc_adjustment(side1: Sequence[int], side2: Sequence[int], top: int,
 
 # --- site-code fingerprints (drift detection) ---------------------------------
 
-# Verified against the live bundles (scripts/calculator_oracle.mjs) on 2026-09-30. The bundle names
+# Verified against the live bundles (scripts/calculator_oracle.mjs) on 2026-11-27. The bundle names
 # are content-hashed, so an unchanged name means unchanged code.
 FINGERPRINTS: Dict[str, Dict[str, Any]] = {
     "fc": {

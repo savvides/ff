@@ -1261,12 +1261,12 @@ def trade(
         evaluation.secondary_value_a is not None
         and evaluation.secondary_value_b is not None
     )
-    dual_market = (not fc_only) and market in ("dp", "both") and has_secondary
+    dual_market = (not fc_only) and market in ("dp", "ktc", "dealer", "both") and has_secondary
     sec_short = _secondary_short(book)
 
-    # With secondary market unable to price the trade, fall back to FantasyCalc's columns so the
-    # table always shows the numbers the verdict below is computed from.
-    show_fc = fc_only or market in ("fc", "dp", "both") or not has_secondary
+    # Always show FantasyCalc columns so dual-market (--market dp|ktc|both) and
+    # single-market (--market fc|--fc-only) trades render the numbers judged below.
+    show_fc = True
     show_ktc = (not fc_only) and market != "fc" and has_secondary
     table = Table(title="trade")
     table.add_column("side")
@@ -1330,11 +1330,6 @@ def trade(
             title="verdict",
             subtitle=f"[bold cyan]{arb_label}[/]" if arb_label else None,
         ))
-    elif (not fc_only) and market in ("dealer", "ktc") and has_secondary:
-        net = evaluation.secondary_delta or 0
-        console.print(Panel.fit(
-            f"net {_signed(net)} value to you   |   {_secondary_verdict(evaluation)}",
-            title=f"verdict ({sec_short})"))
     else:
         net = evaluation.delta  # >0 = in your favor
         pct = evaluation.pct_diff
@@ -1354,7 +1349,7 @@ def trade(
 
     if fc_only:
         _print_offer_rule(evaluation, book, fc_only=True)
-    elif market in ("dp", "both"):
+    elif market in ("dp", "ktc", "dealer", "both"):
         _print_offer_rule(evaluation, book)
     else:
         console.print("[dim]offer rule: needs both markets - omit --market (or pass --fc-only) to judge it.[/]")

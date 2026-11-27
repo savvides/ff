@@ -5,12 +5,14 @@
 For each manager (Sleeper username or team name; everyone else when none is
 named), tries packages of one or two of their
 assets (players, plus the picks they own, tiered like `ff picks`) against what you
-sell plus at most one balancer of yours. Every package is priced exactly as
-fantasycalc.com and keeptradecut.com would price it
+sell plus at most one balancer of yours. Every package is priced as FantasyCalc and
+the active secondary market (DynastyProcess by default, or KeepTradeCut via
+`--market ktc` / `--ktc-file`, or FantasyCalc-only via `--fc-only`) would price it
 (ff.analysis.trade.apply_site_adjustments) and kept only when the offer rule
-passes (ff.analysis.trade.offer_verdict): under 10% of the larger side in both
-markets, and KTC's own verdict "Fair Trade". One fresh fetch of both markets per
-run, after checking that neither site's calculator code has drifted.
+passes (ff.analysis.trade.offer_verdict): under 10% of the larger side in active
+markets (plus KTC's own "Fair Trade" verdict when KTC is active). One fresh fetch
+of active markets per run, after checking that active site calculator code has
+not drifted.
 
 Ranking favors a rebuild that fills needs: young value gained that actually helps
 you (picks, or players <= 25 who would start for you or play a position where you
@@ -209,8 +211,8 @@ def _roster_assets(
 ) -> List[Asset]:
     """A roster's priced players (its valuation's assets) plus the picks it owns.
     Each pick is priced at the tier ff projects from its ORIGINAL team's power rank
-    (as `ff picks` does), on both sites, so KTC's number is its value for that exact
-    Early/Mid/Late pick.
+    (as `ff picks` does), on both active markets (falling back to the flat round
+    for non-KTC markets when tiered picks are absent).
     A second pick at the same tier is named "#2" (and so on); `origins` records
     whose pick each name is, so an offer says which one to ask for."""
     assets = list(players)
@@ -244,7 +246,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--max-age", type=float, default=26, help="oldest player you would take back")
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--years", type=int, default=3,
-                    help="future draft years whose picks can be traded (both sites price three)")
+                    help="future draft years whose picks can be traded (default: 3)")
     ap.add_argument("--market", default="dp",
                     help="secondary market: dp or ktc (default: dp)")
     ap.add_argument("--ktc-file", type=Path, default=None,
@@ -287,7 +289,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     users = sc.league_users(cfg.league_id)
     rosters = build_rosters(sc.rosters(cfg.league_id), users)
-    league = sc.league(cfg.league_id) or {}
     meta = sc.players()
     valuations = value_all_rosters(rosters, book, meta)  # players priced, with injury/depth status
     val_of = {v.roster_id: v for v in valuations}
