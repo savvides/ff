@@ -11,12 +11,15 @@ from __future__ import annotations
 import difflib
 import re
 import time
-from typing import Dict, List, Optional, Set
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 from ff.contracts import Asset, Format
 from ff.core.http import _cache_file, get_json
+from ff.values.dp import DynastyProcessClient
 from ff.values.ktc import KtcClient
 from ff.values.normalize import normalize_name, normalize_pick
+from ff.values.snapshot import SecondarySnapshot
 
 
 VALUES_URL = "https://api.fantasycalc.com/values/current"
@@ -81,20 +84,34 @@ class ValueBook:
     """An indexed snapshot of FantasyCalc values for one league format.
 
     `secondary_top` is KTC's most valuable asset in the same format/TEP (an input to
-    KTC's trade adjustment); it defaults to the largest KTC value in the book. The
-    fetch metadata (`format`, `fetched_at`, `secondary_fetched_at`, `secondary_html`)
-    lets `ff trade` say where its numbers came from and check the KTC calculator
-    code for drift."""
+    KTC's trade adjustment); it defaults to the largest secondary value in the book
+    for KTC/legacy books and remains `None` for DynastyProcess. The fetch metadata
+    (`format`, `fetched_at`, `secondary_fetched_at`, `secondary_html`,
+    `secondary_source`, `secondary_label`, `secondary_notes`) lets `ff trade` say
+    where its numbers came from and check the KTC calculator code for drift."""
 
-    def __init__(self, assets: List[Asset], *, secondary_top: Optional[int] = None,
-                 fmt: Optional[Format] = None, fetched_at: Optional[float] = None,
-                 secondary_fetched_at: Optional[float] = None, secondary_html: str = "",
-                 secondary_map: Optional[Dict[str, int]] = None) -> None:
+    def __init__(
+        self,
+        assets: List[Asset],
+        *,
+        secondary_top: Optional[int] = None,
+        fmt: Optional[Format] = None,
+        fetched_at: Optional[float] = None,
+        secondary_fetched_at: Optional[float] = None,
+        secondary_html: str = "",
+        secondary_map: Optional[Dict[str, int]] = None,
+        secondary_source: Optional[str] = None,
+        secondary_label: str = "KTC",
+        secondary_notes: Optional[List[str]] = None,
+    ) -> None:
         self.assets = assets
-        # KTC's own values by key, so a pick can be priced at the tier a trade names
-        # (KTC has Early/Mid/Late for every year; FantasyCalc only near-season).
+        # Secondary market's own values by key, so a pick can be priced at the tier
+        # a trade names (or fall back to the flat round for markets like DP).
         self.secondary_map: Dict[str, int] = dict(secondary_map or {})
-        if secondary_top is None:
+        self.secondary_source = secondary_source
+        self.secondary_label = secondary_label
+        self.secondary_notes: List[str] = list(secondary_notes or [])
+        if secondary_top is None and secondary_source in (None, "ktc"):
             priced = [a.secondary_value for a in assets if a.secondary_value is not None]
             secondary_top = max(priced) if priced else None
         self.secondary_top = secondary_top
@@ -127,14 +144,19 @@ class ValueBook:
     def pick_at_tier(self, season: str, round_: int, tier: str) -> Optional[Asset]:
         """The pick "<season> <round> <tier>" priced as each site prices it: the
         FantasyCalc tiered entry when it has one (else its flat round value), and
-        KTC's value for that exact tier. None if FantasyCalc has no such round."""
+        the secondary market's value for that tier (falling back to the flat round
+        when the active secondary market is not KTC). None if FantasyCalc has no
+        such round."""
         fc = self.picks.get(f"{season} {round_} {tier}") or self.picks.get(f"{season} {round_}")
         if fc is None:
             return None
         ordinal = {1: "1st", 2: "2nd", 3: "3rd"}.get(round_, f"{round_}th")
         out = fc.model_copy()
         out.name = f"{season} {ordinal} ({tier.capitalize()})"
-        out.secondary_value = self.secondary_map.get(f"{season} {round_} {tier}")
+        tiered = self.secondary_map.get(f"{season} {round_} {tier}")
+        if tiered is None and self.secondary_source != "ktc":
+            tiered = self.secondary_map.get(f"{season} {round_}")
+        out.secondary_value = tiered
         out.secondary_approx = False
         return out
 
@@ -214,15 +236,40 @@ class ValueBook:
         return sorted(pool, key=lambda a: a.value, reverse=True)[:limit]
 
 
+def _normalize_mode(mode: str) -> str:
+    """Normalize secondary market selection to 'dp', 'ktc', or 'none'."""
+    norm = mode.strip().lower()
+    if norm == "dealer":
+        return "ktc"
+    if norm not in ("dp", "ktc", "none"):
+        raise ValueError(f"Unsupported secondary market: {mode!r} (expected 'dp', 'ktc', or 'none')")
+    return norm
+
+
 class ValuesClient:
+    """Fetches FantasyCalc dynasty values merged with a pluggable secondary market."""
+
     def __init__(
         self,
         url: str = VALUES_URL,
+        secondary: str = "dp",
+        dp_client: Optional[DynastyProcessClient] = None,
         ktc_client: Optional[KtcClient] = None,
         dealer_client: Optional[KtcClient] = None,
+        ktc_file: Optional[Path] = None,
     ) -> None:
         self.url = url
-        self.ktc_client = ktc_client or dealer_client or KtcClient()
+        self.dp_client = dp_client or DynastyProcessClient()
+        self.ktc_file = ktc_file
+        self.ktc_client = ktc_client or dealer_client or KtcClient(file_path=ktc_file)
+        norm_sec = _normalize_mode(secondary)
+        if norm_sec == "dp" and (
+            ktc_file is not None
+            or (dp_client is None and (ktc_client is not None or dealer_client is not None))
+        ):
+            self.secondary = "ktc"
+        else:
+            self.secondary = norm_sec
 
     @property
     def dealer_client(self) -> KtcClient:
@@ -232,12 +279,67 @@ class ValuesClient:
     def dealer_client(self, client: KtcClient) -> None:
         self.ktc_client = client
 
+    @staticmethod
+    def _fetch_ktc_snapshot(client: Any, fmt: Format, fresh: bool) -> SecondarySnapshot:
+        """Fetch a SecondarySnapshot from KtcClient or a legacy fetch_values()-only mock."""
+        if hasattr(client, "fetch_snapshot"):
+            snap = client.fetch_snapshot(fmt, fresh=fresh)
+            if isinstance(snap, SecondarySnapshot):
+                return snap
+        raw_vals = client.fetch_values(fmt, fresh=fresh) or {}
+        values = raw_vals if isinstance(raw_vals, dict) else {}
+        top_v = getattr(client, "last_top", None)
+        fetched_v = getattr(client, "last_fetched_at", None)
+        approx_v = getattr(client, "last_approx_keys", None)
+        html_v = getattr(client, "last_html", None)
+        return SecondarySnapshot(
+            source="ktc",
+            label="KTC",
+            values=values,
+            top=top_v if isinstance(top_v, int) and not isinstance(top_v, bool) else None,
+            fetched_at=(
+                float(fetched_v)
+                if isinstance(fetched_v, (int, float)) and not isinstance(fetched_v, bool)
+                else None
+            ),
+            approx_keys=approx_v if isinstance(approx_v, set) else set(),
+            html=html_v if isinstance(html_v, str) else "",
+        )
+
+    def _fetch_secondary(
+        self,
+        mode: str,
+        fmt: Format,
+        fresh: bool,
+        ktc_file: Optional[Path],
+    ) -> SecondarySnapshot:
+        """Fetch the active secondary market snapshot, degrading on network errors."""
+        if mode == "none":
+            return SecondarySnapshot(source="none", label="None", values={})
+        if mode == "dp":
+            try:
+                snap = self.dp_client.fetch_snapshot(fmt, fresh=fresh)
+                if isinstance(snap, SecondarySnapshot):
+                    return snap
+            except Exception:
+                pass
+            return SecondarySnapshot(source="dp", label="DynastyProcess", values={})
+        ktc = KtcClient(file_path=ktc_file) if ktc_file is not None else self.ktc_client
+        try:
+            return self._fetch_ktc_snapshot(ktc, fmt, fresh)
+        except ValueError:
+            raise
+        except Exception:
+            return SecondarySnapshot(source="ktc", label="KTC", values={})
+
     def fetch(
         self,
         fmt: Format,
         include_secondary: bool = True,
         include_ktc: bool = True,
         fresh: bool = False,
+        secondary: Optional[str] = None,
+        ktc_file: Optional[Path] = None,
     ) -> ValueBook:
         """`fresh` fetches both markets live (and refreshes the cache) instead of
         using a copy up to VALUES_TTL old; `ff trade` uses it so its numbers match
@@ -248,28 +350,29 @@ class ValuesClient:
             fetched_at: Optional[float] = _cache_file(self.url, params).stat().st_mtime
         except OSError:
             fetched_at = time.time()
-        secondary_map: Dict[str, int] = {}
-        should_include = include_secondary and include_ktc
-        if should_include:
-            try:
-                secondary_map = self.ktc_client.fetch_values(fmt, fresh=fresh) or {}
-            except Exception:
-                secondary_map = {}
 
-        def meta(attr: str, kind: type) -> object:
-            v = getattr(self.ktc_client, attr, None) if should_include else None
-            return v if isinstance(v, kind) else None
+        if not (include_secondary and include_ktc):
+            mode = "none"
+        elif ktc_file is not None:
+            mode = "ktc"
+        else:
+            mode = _normalize_mode(secondary or self.secondary)
 
-        approx = meta("last_approx_keys", set) or set()
-        assets = [_asset_from_entry(e, secondary_map=secondary_map, approx_keys=approx)  # type: ignore[arg-type]
-                  for e in (data if isinstance(data, list) else [])]
+        snap = self._fetch_secondary(mode, fmt, fresh, ktc_file)
+        assets = [
+            _asset_from_entry(e, secondary_map=snap.values, approx_keys=snap.approx_keys)
+            for e in (data if isinstance(data, list) else [])
+        ]
         return ValueBook(
             assets,
-            secondary_top=meta("last_top", int) if secondary_map else None,  # type: ignore[arg-type]
+            secondary_top=snap.top if snap.values else None,
             fmt=fmt,
             fetched_at=fetched_at,
-            secondary_fetched_at=meta("last_fetched_at", float),  # type: ignore[arg-type]
-            secondary_html=(meta("last_html", str) or "") if secondary_map else "",  # type: ignore[arg-type]
-            secondary_map=secondary_map,
+            secondary_fetched_at=snap.fetched_at,
+            secondary_html=snap.html if snap.values else "",
+            secondary_map=snap.values,
+            secondary_source=snap.source,
+            secondary_label=snap.label,
+            secondary_notes=snap.notes,
         )
 

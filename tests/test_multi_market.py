@@ -118,8 +118,8 @@ def test_offline_degradation_ktc_network_error():
         requests.exceptions.ReadTimeout("Read timed out"),
     ]:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
-             patch("ff.values.ktc.KtcClient.fetch_values", side_effect=exception):
-            client = ValuesClient()
+             patch("ff.values.ktc.KtcClient.fetch_snapshot", side_effect=exception):
+            client = ValuesClient(secondary="ktc")
             book = client.fetch(Format(), include_ktc=True)
 
             chase = book.resolve("Ja'Marr Chase")
@@ -150,7 +150,7 @@ def test_offline_degradation_ktc_malformed_payloads():
     for bad_resp in malformed_responses:
         with patch("ff.values.client.get_json", return_value=fc_entries), \
              patch.object(KtcClient, "_fetch_text", return_value=bad_resp):
-            client = ValuesClient()
+            client = ValuesClient(secondary="ktc")
             book = client.fetch(Format(), include_ktc=True)
             chase = book.resolve("Ja'Marr Chase")
             assert chase is not None
@@ -164,10 +164,12 @@ def test_include_ktc_false_skips_secondary_market():
         {"player": {"sleeperId": "7564", "name": "Ja'Marr Chase", "position": "WR"}, "value": 9500},
     ]
     with patch("ff.values.client.get_json", return_value=fc_entries), \
-         patch("ff.values.ktc.KtcClient.fetch_values") as mock_ktc_fetch:
-        client = ValuesClient()
+         patch("ff.values.ktc.KtcClient.fetch_snapshot") as mock_ktc_fetch, \
+         patch("ff.values.dp.DynastyProcessClient.fetch_snapshot") as mock_dp_fetch:
+        client = ValuesClient(secondary="ktc")
         book = client.fetch(Format(), include_ktc=False)
         mock_ktc_fetch.assert_not_called()
+        mock_dp_fetch.assert_not_called()
         chase = book.resolve("Ja'Marr Chase")
         assert chase is not None
         assert chase.value == 9500
