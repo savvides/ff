@@ -269,6 +269,64 @@ def test_value_book_pick_at_tier_falls_back_to_flat_round_for_dp():
     assert p_ktc.secondary_value is None
 
 
+def test_value_book_resolve_tiered_fc_picks_fall_back_to_flat_dp_round():
+    early_fc = Asset(id="2028 1 early", name="2028 1st (Early)", kind="pick", position="PICK", value=2600)
+    mid_fc = Asset(id="2028 1 mid", name="2028 1st (Mid)", kind="pick", position="PICK", value=2200)
+    dp_book = ValueBook(
+        [early_fc, mid_fc],
+        secondary_map={"2028 1": 1899},
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+
+    resolved_early = dp_book.resolve("2028 1st (Early)")
+    assert resolved_early is not None
+    assert resolved_early.value == 2600
+    assert resolved_early.secondary_value == 1899
+    assert resolved_early.secondary_approx is False
+    assert dp_book.picks["2028 1 early"].secondary_value is None
+
+    resolved_flat = dp_book.resolve("2028 1st")
+    assert resolved_flat is not None
+    assert resolved_flat.value == 2200
+    assert resolved_flat.secondary_value == 1899
+    assert resolved_flat.secondary_approx is False
+
+    unpriced_mid = Asset(id="2029 1 mid", name="2029 1st (Mid)", kind="pick", position="PICK", value=1900)
+    dp_unpriced = ValueBook(
+        [unpriced_mid],
+        secondary_map={"2028 1": 1899},
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+    resolved_unpriced = dp_unpriced.resolve("2029 1st")
+    assert resolved_unpriced is not None
+    assert resolved_unpriced.secondary_value is None
+    assert resolved_unpriced.secondary_approx is False
+
+
+def test_value_book_legacy_none_source_does_not_pull_flat_ktc_key_as_exact():
+    flat_fc = Asset(id="2028 1", name="2028 1st", kind="pick", position="PICK", value=2362)
+    legacy_book = ValueBook(
+        [flat_fc],
+        secondary_map={"2028 1": 4600},
+        secondary_source=None,
+    )
+    p = legacy_book.pick_at_tier("2028", 1, "early")
+    assert p is not None
+    assert p.secondary_value is None
+
+    early_fc = Asset(id="2028 1 early", name="2028 1st (Early)", kind="pick", position="PICK", value=2600)
+    legacy_tiered = ValueBook(
+        [early_fc],
+        secondary_map={"2028 1": 4600},
+        secondary_source=None,
+    )
+    r = legacy_tiered.resolve("2028 1st (Early)")
+    assert r is not None
+    assert r.secondary_value is None
+
+
 def test_values_package_exports_dp_and_snapshot():
     from ff.values import DynastyProcessClient, SecondarySnapshot
     from ff.values.dp import DynastyProcessClient as DirectDP

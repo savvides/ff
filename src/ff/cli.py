@@ -441,10 +441,7 @@ def _signed(n: int) -> str:
     return f"+{n:,}" if n > 0 else f"{n:,}"
 
 
-_KTC_DOWN = "KeepTradeCut values are unavailable right now"
-
-
-def _has_ktc(book: ValueBook) -> bool:
+def _has_secondary(book: ValueBook) -> bool:
     return bool(book.secondary_map) or any(a.secondary_value is not None for a in book.assets)
 
 
@@ -534,7 +531,7 @@ def _print_provenance(book: ValueBook, cfg: Config, include_secondary: bool) -> 
     fmt = cfg.format
     fc_tep = fmt.fantasycalc_tep()
     parts = [f"FantasyCalc {at(book.fetched_at)} ({fmt.label()}" + (f", tep={fc_tep}" if fc_tep else "") + ")"]
-    if include_secondary and _has_ktc(book):
+    if include_secondary and _has_secondary(book):
         if book.secondary_source == "dp":
             parts.append(
                 f"{book.secondary_label} {at(book.secondary_fetched_at)} "
@@ -558,7 +555,7 @@ def _print_secondary_notes(book: ValueBook) -> None:
 def _ktc_missing(book: ValueBook) -> str:
     """Why a secondary number is missing, so a FantasyCalc-only fallback is never silent."""
     name = _secondary_name(book)
-    if _has_ktc(book):
+    if _has_secondary(book):
         return f"{name} has no value for part of this; showing FantasyCalc only."
     return f"{name} values are unavailable right now; showing FantasyCalc only."
 
@@ -1986,7 +1983,7 @@ def movers(
                 bias_color,
             )
         console.print(t)
-        if not _has_ktc(book):
+        if not _has_secondary(book):
             console.print(f"[yellow]{_secondary_down(book)}; there is nothing to compare.[/]")
         elif not arb_movers:
             console.print("[dim]No market arbitrage opportunities found above the value floor.[/]")

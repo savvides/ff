@@ -140,7 +140,7 @@ def _ktc_player_pool_status() -> Optional[int]:
 
 
 def _skip_if_ktc_pool_gated(html: str) -> None:
-    """Skip when KTC is unreachable or its live player pool is gated (no embedded pool + 403)."""
+    """Skip when KTC is unreachable or its live player pool is gated or blocked."""
     from ff.values.ktc import KtcClient, _extract_players
 
     page_html = html or KtcClient()._fetch_text(use_cache=False)
@@ -148,10 +148,11 @@ def _skip_if_ktc_pool_gated(html: str) -> None:
         pytest.skip("KTC unreachable (offline or blocked)")
     if _extract_players(page_html):
         return
-    if _ktc_player_pool_status() == 403:
+    status = _ktc_player_pool_status()
+    if status is None or status in (0, 401, 403, 429, 503):
         pytest.skip(
             "KTC live pool gated (no embedded pool in /trade-calculator and "
-            "/dynasty-rankings/player-pool returned 403)"
+            f"/dynasty-rankings/player-pool returned {status})"
         )
 
 

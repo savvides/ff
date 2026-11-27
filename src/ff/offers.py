@@ -32,7 +32,7 @@ from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Set, T
 
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.analysis.fit import positional_standing, startable_value, starting_assets
-from ff.cli import _finish_ranks, _pick_window, _season_sim, render_news_review
+from ff.cli import _finish_ranks, _has_secondary, _pick_window, _season_sim, _secondary_short, render_news_review
 from ff.contracts import Asset, FuturePick, OfferVerdict, Roster, TradeEvaluation, TradeSide
 from ff.core.config import load_config
 from ff.news import review_players
@@ -194,18 +194,6 @@ def search(
         max(r["fc_pct"] or 0.0, r["secondary_pct"] or 0.0),
     ))
     return rows[:limit]
-
-
-def _has_secondary(book: ValueBook) -> bool:
-    return bool(book.secondary_map) or any(a.secondary_value is not None for a in book.assets)
-
-
-def _secondary_short(book: ValueBook) -> str:
-    if book.secondary_source == "dp" or book.secondary_label == "DynastyProcess":
-        return "DP"
-    if book.secondary_label and book.secondary_label.lower() != "none":
-        return book.secondary_label
-    return "KTC"
 
 
 def _roster_assets(

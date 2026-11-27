@@ -187,7 +187,7 @@ class KtcClient:
         fresh: bool = False,
     ) -> SecondarySnapshot:
         """Fetch and return a SecondarySnapshot of KTC values."""
-        self.last_top, self.last_approx_keys = None, set()
+        self.last_top, self.last_fetched_at, self.last_approx_keys = None, None, set()
         raw_players: List[Dict[str, Any]] = []
 
         if self.file_path is not None:

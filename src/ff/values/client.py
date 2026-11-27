@@ -141,6 +141,15 @@ class ValueBook:
         self._name_keys = list(self.by_name.keys())
 
     # --- lookups ---------------------------------------------------------
+    def _flat_pick_fallback(self, pick: Asset, season: str, round_: str) -> Optional[Asset]:
+        """Fall back to a flat round key for non-KTC markets when a tiered pick is unpriced."""
+        if pick.secondary_value is not None or self.secondary_source in (None, "ktc"):
+            return None
+        flat = self.secondary_map.get(f"{season} {round_}")
+        if flat is None:
+            return None
+        return pick.model_copy(update={"secondary_value": flat, "secondary_approx": False})
+
     def pick_at_tier(self, season: str, round_: int, tier: str) -> Optional[Asset]:
         """The pick "<season> <round> <tier>" priced as each site prices it: the
         FantasyCalc tiered entry when it has one (else its flat round value), and
@@ -154,7 +163,7 @@ class ValueBook:
         out = fc.model_copy()
         out.name = f"{season} {ordinal} ({tier.capitalize()})"
         tiered = self.secondary_map.get(f"{season} {round_} {tier}")
-        if tiered is None and self.secondary_source != "ktc":
+        if tiered is None and self.secondary_source not in (None, "ktc"):
             tiered = self.secondary_map.get(f"{season} {round_}")
         out.secondary_value = tiered
         out.secondary_approx = False
@@ -173,7 +182,11 @@ class ValueBook:
         pk = normalize_pick(token)
         if pk:
             if pk in self.picks:
-                return self.picks[pk]
+                pick = self.picks[pk]
+                m = re.match(r"(20\d{2}) ([1-9]) (early|mid|late)$", pk)
+                if m:
+                    return self._flat_pick_fallback(pick, m.group(1), m.group(2)) or pick
+                return pick
             # round-level fallback for a slot pick we don't have ("2026 pick 1.05"
             # -> "2026 1") so traded future picks still get a value.
             m = re.match(r"(20\d{2}) pick (\d+)\.\d+", pk)
@@ -188,9 +201,15 @@ class ValueBook:
             if m:
                 return self.pick_at_tier(m.group(1), int(m.group(2)), m.group(3))
             if f"{pk} mid" in self.picks:
-                mid = self.picks[f"{pk} mid"].model_copy()
-                mid.secondary_approx = mid.secondary_value is not None
-                return mid
+                mid = self.picks[f"{pk} mid"]
+                m = re.match(r"(20\d{2}) ([1-9])$", pk)
+                if m:
+                    fallback = self._flat_pick_fallback(mid, m.group(1), m.group(2))
+                    if fallback is not None:
+                        return fallback
+                mid_copy = mid.model_copy()
+                mid_copy.secondary_approx = mid_copy.secondary_value is not None
+                return mid_copy
             return None
 
         # a player, by exact normalized name then fuzzy
