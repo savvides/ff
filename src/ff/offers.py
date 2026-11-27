@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Set, Tuple, TypedDict
 
+from ff import cli
 from ff.analysis import apply_site_adjustments, offer_verdict, pick_ledger, pick_tier, value_all_rosters
 from ff.analysis.fit import positional_standing, startable_value, starting_assets
 from ff.cli import _finish_ranks, _has_secondary, _pick_window, _season_sim, _secondary_short, render_news_review
@@ -40,7 +41,6 @@ from ff.core.config import load_config
 from ff.news import review_players
 from ff.qa import run_qa
 from ff.sleeper import SleeperClient, build_rosters, detect_format
-from rich.console import Console
 from ff.values import ValueBook, ValuesClient
 from ff.values.calculators_live import check_calculators
 
@@ -115,6 +115,7 @@ def flags(a: Asset, dropped: AbstractSet[str]) -> List[str]:
 class OfferResult(TypedDict):
     give: List[str]
     get: List[str]
+    give_assets: List[Asset]
     assets: List[Asset]
     roles: Dict[str, str]
     lineup_gain: int
@@ -177,6 +178,7 @@ def search(
             rows.append({
                 "give": [a.name for a in give],
                 "get": [a.name for a in get],
+                "give_assets": list(give),
                 "assets": list(get),
                 "roles": role,
                 "lineup_gain": lineup_gain,
@@ -438,7 +440,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         print(f"\n{roster.team_name}: {len(rows)} passing package(s)" + ("" if rows else " - none within the rule"))
         for r in rows:
-            for a in r["assets"]:
+            for a in r["give_assets"] + r["assets"]:
                 if not a.is_pick:
                     offer_player_ids.append(a.id)
             fc_give, fc_get = r["fc_totals"]
@@ -472,7 +474,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print("      picks: " + "; ".join(picks) + " (tier from the original team's projected finish)")
     if offer_player_ids:
         news_rev = review_players(offer_player_ids, meta, "trade")
-        render_news_review(news_rev, Console())
+        render_news_review(news_rev, cli.console)
         run_qa("news_review", review=news_rev)
     return 0
 

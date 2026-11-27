@@ -328,3 +328,99 @@ def test_offers_main_unpriced_2029_sell_pick_explains_dp_gap(
     assert rc == 2
     assert "on your roster in FantasyCalc, but unpriced in DynastyProcess (pass --fc-only or --market ktc)" in out
     assert "not on your roster" not in out
+
+
+def test_search_includes_give_assets_with_balancer():
+    sale = [Asset(id="1", name="Vet QB", position="QB", age=38, value=2500, secondary_value=3000)]
+    balancer = Asset(id="b1", name="Vet WR", position="WR", age=30, value=1000, secondary_value=2000)
+    theirs = [Asset(id="2", name="Young WR", position="WR", age=24, value=3000, secondary_value=5000)]
+    rows = find_offers.search(
+        sale,
+        theirs,
+        [balancer],
+        top=None,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+    )
+    assert len(rows) == 1
+    assert [a.id for a in rows[0]["give_assets"]] == ["1", "b1"]
+
+
+def test_offers_main_reviews_give_side_balancer_players_and_uses_cli_console(
+    monkeypatch, league, rosters_raw, users_raw, players_meta, traded_picks, trending, book,
+):
+    from datetime import datetime, timezone
+    from rich.console import Console
+    from ff import cli as ff_cli
+    from ff.contracts import FeedStatus, NewsItem, NewsReview, PlayerNewsBrief
+    from ff.values import ValueBook
+
+    assert not hasattr(find_offers, "Console")
+
+    fc_map = {"7564": 4000, "9221": 4000, "8138": 7800}
+    dp_map = {"7564": 4000, "9221": 4000, "8138": 8000}
+    assets = [
+        a.model_copy(
+            update={
+                "value": fc_map.get(a.id, a.value),
+                "secondary_value": dp_map.get(a.id),
+            }
+        )
+        for a in book.assets
+    ]
+    dp_book = ValueBook(
+        assets,
+        secondary_map=dp_map,
+        secondary_source="dp",
+        secondary_label="DynastyProcess",
+        secondary_top=None,
+    )
+    _stub_offers_env(
+        monkeypatch,
+        league,
+        rosters_raw,
+        users_raw,
+        players_meta,
+        traded_picks,
+        trending,
+        dp_book,
+    )
+
+    captured_ids = []
+
+    def _spy_review(player_ids, meta, decision, **kwargs):
+        captured_ids.extend(player_ids)
+        return NewsReview(
+            decision=decision,
+            as_of=datetime(2026, 11, 24, tzinfo=timezone.utc),
+            briefs=[
+                PlayerNewsBrief(
+                    player_id="9221",
+                    player_name="Jahmyr Gibbs",
+                    items=[
+                        NewsItem(
+                            provider="sleeper",
+                            source="RotoWire",
+                            title="Gibbs news headline",
+                            published=int(datetime(2026, 11, 24, 6, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                        )
+                    ],
+                    flags=[],
+                    feeds=[FeedStatus(provider="sleeper", ok=True, item_count=1)],
+                    warnings=[],
+                )
+            ],
+            degraded_feeds=[],
+            warnings=[],
+        )
+
+    rec_console = Console(record=True, width=120)
+    monkeypatch.setattr(ff_cli, "console", rec_console)
+    monkeypatch.setattr(find_offers, "review_players", _spy_review)
+
+    rc = find_offers.main(["--sell", "Ja'Marr Chase", "--with", "Jahmyr Gibbs", "--to", "Gridiron Kings"])
+    assert rc == 0
+    assert set(captured_ids) == {"7564", "9221", "8138"}
+    out = rec_console.export_text()
+    assert "Latest News Review" in out
+    assert "Gibbs news headline" in out
